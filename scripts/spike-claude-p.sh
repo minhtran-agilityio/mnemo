@@ -79,7 +79,7 @@ run_case "q4_strict_mcp" -p "Reply with the word ok." \
 SCRUBBED="$OUT.tmp"
 sed -E \
   -e 's/sk-ant[A-Za-z0-9_-]*/[REDACTED]/g' \
-  -e 's/[Bb]earer +[A-Za-z0-9._~+\/=-]+/[REDACTED]/g' \
+  -e 's/[Bb]earer( +[A-Za-z0-9._~+\/=-]+)?/[REDACTED]/g' \
   -e 's/[Oo][Aa]uth[A-Za-z0-9_-]*/[REDACTED]/g' \
   "$OUT" > "$SCRUBBED" && mv "$SCRUBBED" "$OUT"
 
