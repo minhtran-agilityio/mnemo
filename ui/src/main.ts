@@ -7,15 +7,13 @@ import { getVersion } from "@tauri-apps/api/app";
 import { renderEmptyState } from "./frame/empty-state";
 import { EVERYTHING_ID } from "./frame/nav";
 import { createRouter } from "./frame/router";
-import { createSidebarFromSaved } from "./frame/sidebar";
+import { createSidebarFromSaved, readCollapsed } from "./frame/sidebar";
 import { pingErrorText } from "./ping-text";
 import { errorMessage, getSetting, ping, setSetting } from "./shared/api";
 import { versionErrorText, versionText } from "./version-text";
 
 /** The settings key that keeps whether the sidebar is collapsed ("true" or "false"). */
 const COLLAPSED_KEY = "sidebar_collapsed";
-/** How long the start waits for the saved state before it shows the sidebar open. */
-const READ_TIMEOUT_MS = 2000;
 
 const status = document.querySelector<HTMLElement>("#ping-status");
 const versionEl = document.querySelector<HTMLElement>("#app-version");
@@ -33,22 +31,17 @@ function showNote(note: HTMLElement | null, text: string | null): void {
 }
 
 /** The saved collapsed state. A failed read gives an open sidebar and a visible line. */
-async function loadCollapsed(): Promise<boolean> {
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error("timeout")), READ_TIMEOUT_MS),
+function loadCollapsed(): Promise<boolean> {
+  return readCollapsed(
+    () => getSetting(COLLAPSED_KEY),
+    (error) => {
+      console.error("could not read the sidebar setting:", error);
+      showNote(
+        readNote,
+        `Mnemo could not read the saved sidebar setting, so the sidebar is open. ${errorMessage(error)}`,
+      );
+    },
   );
-  try {
-    return (
-      (await Promise.race([getSetting(COLLAPSED_KEY), timeout])) === "true"
-    );
-  } catch (error) {
-    console.error("could not read the sidebar setting:", error);
-    showNote(
-      readNote,
-      `Mnemo could not read the saved sidebar setting, so the sidebar is open. ${errorMessage(error)}`,
-    );
-    return false;
-  }
 }
 
 // One save at a time, in order, so the last click is the value that stays.

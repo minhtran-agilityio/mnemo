@@ -246,3 +246,20 @@ export async function createSidebarFromSaved(
 ): Promise<Sidebar> {
   return createSidebar(doc, { ...options, collapsed: await loadCollapsed() });
 }
+
+/**
+ * The saved collapsed state from a read of the setting. It waits for the read as long as
+ * it takes, so a slow read still gives the saved value. Only a failed read gives an open
+ * sidebar, and `onError` hears about it so the owner can see a line.
+ */
+export async function readCollapsed(
+  read: () => Promise<string | null>,
+  onError: (error: unknown) => void,
+): Promise<boolean> {
+  try {
+    return (await read()) === "true";
+  } catch (error) {
+    onError(error);
+    return false;
+  }
+}

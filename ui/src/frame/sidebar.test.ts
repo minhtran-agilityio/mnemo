@@ -1,7 +1,12 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, test, vi } from "vitest";
 import { ALL_ITEMS, APPS_ITEMS, GROUPS } from "./nav";
-import { createSidebar, createSidebarFromSaved, type Sidebar } from "./sidebar";
+import {
+  createSidebar,
+  createSidebarFromSaved,
+  readCollapsed,
+  type Sidebar,
+} from "./sidebar";
 
 let toggled: boolean[];
 let searched: string[];
@@ -180,4 +185,31 @@ test("a saved collapsed state is applied when the sidebar is built, never open f
   });
   expect(bar.element.dataset.collapsed).toBe("true");
   expect(bar.isCollapsed()).toBe(true);
+});
+
+test("a slow read still gives the saved value, with no false error", async () => {
+  vi.useFakeTimers();
+  try {
+    const errors: unknown[] = [];
+    const result = readCollapsed(
+      () => new Promise((resolve) => setTimeout(() => resolve("true"), 5000)),
+      (e) => errors.push(e),
+    );
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(await result).toBe(true);
+    expect(errors).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a failed read gives an open sidebar and reports the error", async () => {
+  const errors: unknown[] = [];
+  const failure = new Error("boom");
+  const result = await readCollapsed(
+    () => Promise.reject(failure),
+    (e) => errors.push(e),
+  );
+  expect(result).toBe(false);
+  expect(errors).toEqual([failure]);
 });
