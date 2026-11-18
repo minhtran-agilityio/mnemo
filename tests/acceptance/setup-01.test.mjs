@@ -50,8 +50,8 @@ test('AC2: a ping command exists in the Rust core and is called by the UI', () =
   const rust = rustFiles.map((f) => readFileSync(f, 'utf8')).join('\n');
   assert.match(rust, /#\[tauri::command\][\s\S]*?fn\s+ping\b/);
   assert.match(rust, /generate_handler!\s*\[[^\]]*\bping\b/);
-  const uiFiles = walk(p('src')).filter((f) => /\.(js|jsx|ts|tsx|vue|svelte|html)$/.test(f));
-  assert.ok(uiFiles.length > 0, 'no UI sources under src/');
+  const uiFiles = walk(p('ui')).filter((f) => /\.(js|jsx|ts|tsx|vue|svelte|html)$/.test(f));
+  assert.ok(uiFiles.length > 0, 'no UI sources under ui/');
   const ui = uiFiles.map((f) => readFileSync(f, 'utf8')).join('\n');
   assert.match(ui, /invoke\s*(<[^>]*>)?\s*\(\s*['"]ping['"]/);
 });
