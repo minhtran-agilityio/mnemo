@@ -104,6 +104,41 @@ A repository admin does this once. It cannot be done from a pull request.
 
 Status: **Unverified** that this is set on the repository; see the pull request for the result.
 
+## How to release
+
+The version number lives in one place: `version` in `package.json`. `src-tauri/tauri.conf.json` reads it from there. `src-tauri/Cargo.toml`, the `mnemo` entry in `src-tauri/Cargo.lock` and the root version in `package-lock.json` cannot read it, so tests (`tests/version-sync.test.mjs` and `tests/acceptance/setup-06.test.mjs`) fail if they differ.
+
+1. Bump the version: set the same number in `package.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` (run `cargo check --manifest-path src-tauri/Cargo.toml` to update it) and `package-lock.json` (run `npm install --package-lock-only`), then run `npm run check` and commit.
+2. Tag the commit with the same number: `git tag v0.2.0`.
+3. Push the tag: `git push origin v0.2.0`. The workflow `.github/workflows/release.yml` also runs by hand from the Actions tab (workflow_dispatch).
+4. Wait for both jobs to finish. They attach a macOS Apple Silicon `.dmg`, an Ubuntu `.deb` and an `.AppImage` to one draft release named after the version in `package.json`.
+5. Open the draft on GitHub, check the three files, then publish it.
+
+The bundles are not signed or notarized (no Apple developer account is assumed). There is no auto-update; install a new version by hand.
+
+## Install
+
+Download the files from the latest published release on the repository's Releases page.
+
+### macOS (Apple Silicon)
+
+1. Open the `.dmg` and drag Mnemo to Applications.
+2. Open Mnemo from Applications. macOS blocks the first launch because the app is unsigned. Allow it once: open System Settings > Privacy & Security, scroll down to the blocked Mnemo message and choose "Open Anyway". On macOS 15 and later, right-click then Open no longer works for unsigned apps. Advanced: remove the quarantine flag in Terminal with `xattr -dr com.apple.quarantine /Applications/Mnemo.app`.
+
+### Ubuntu 22.04
+
+- `.deb`: run `sudo apt install ./Mnemo_<version>_amd64.deb`. Mnemo then appears in the application launcher.
+- AppImage: run `chmod +x Mnemo_<version>_amd64.AppImage`, then start it with `./Mnemo_<version>_amd64.AppImage`.
+
+### Open manual checks
+
+Status: **Unverified**. These need the owner's own machines and are not done:
+
+- [ ] The `.dmg` installs on the Mac, and the app opens after the one-time allow step.
+- [ ] The `.deb` installs on Ubuntu 22.04 and Mnemo shows in the launcher.
+- [ ] The AppImage starts on Ubuntu 22.04.
+- [ ] An upgrade over an older install keeps the data (checkable after the storage issue #13).
+
 ## Environment variables
 
 None yet. New variables are listed here when they are added.
