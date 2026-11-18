@@ -22,10 +22,8 @@ const walk = (d) =>
         return statSync(f).isDirectory() ? walk(f) : [f];
       });
 const uiFiles = () => walk(p('ui', 'src'));
-const norm = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim();
-const SPIKE_CSS = p('spikes', 'spike-01-tauri', 'src', 'style.css');
-// The spike is deleted after DEC-01; the checks that compare against it then skip.
-const NO_SPIKE = existsSync(SPIKE_CSS) ? false : 'spike folder removed (after DEC-01)';
+// The checks that the spike CSS sat in ui/ unchanged were retired by #10: the kanban now takes
+// its colours from ui/src/tokens.css, and tests/raw-colour.test.mjs guards raw colours in ui/.
 const NESTED = process.env.MNEMO_NESTED ? 'nested run (inside npm test, which already runs vitest)' : false;
 const OLD_TESTS = ['ping-text.test.ts', 'version-text.test.ts'];
 const newUnitTests = () =>
@@ -95,20 +93,9 @@ test('AC4: a kanban screen exists under ui/src/ and the page loads it', () => {
   assert.match(html, /<script[^>]+src=/);
 });
 
-test('AC4: the spike CSS is reused unchanged', { skip: NO_SPIKE }, () => {
-  const spike = norm(readFileSync(SPIKE_CSS, 'utf8'));
-  const all = uiFiles().concat(p('ui', 'index.html')).filter((f) => /\.(css|html)$/.test(f));
-  const ui = all.map((f) => norm(readFileSync(f, 'utf8'))).join(' ');
-  assert.ok(ui.includes(spike), 'the spike CSS text is not found unchanged in ui/');
-});
-
 test('AC4: colours come from tokens only (no raw colour outside custom-property definitions)', () => {
   const css = uiFiles().filter((f) => f.endsWith('.css'));
   assert.ok(css.length > 0, 'no CSS under ui/src/');
-  if (!NO_SPIKE) {
-    const spike = norm(readFileSync(SPIKE_CSS, 'utf8'));
-    assert.ok(css.map((f) => norm(readFileSync(f, 'utf8'))).join(' ').includes(spike), 'the kanban CSS is not in ui/src/ yet');
-  }
   for (const f of css) {
     const lines = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').split('\n');
     for (const l of lines) {
