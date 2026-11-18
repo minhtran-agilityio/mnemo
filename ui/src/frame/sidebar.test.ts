@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, test, vi } from "vitest";
 import { ALL_ITEMS, APPS_ITEMS, GROUPS } from "./nav";
-import { createSidebar, type Sidebar } from "./sidebar";
+import { createSidebar, createSidebarFromSaved, type Sidebar } from "./sidebar";
 
 let toggled: boolean[];
 let searched: string[];
@@ -170,4 +170,14 @@ test("setCurrent marks one item as the current page and opens the list for an ap
   expect((document.querySelector("#sidebar-apps") as HTMLElement).hidden).toBe(
     false,
   );
+});
+
+test("a saved collapsed state is applied when the sidebar is built, never open first", async () => {
+  document.body.replaceChildren();
+  const bar = await createSidebarFromSaved(document, async () => true, {
+    onToggle: () => {},
+    onSearch: () => {},
+  });
+  expect(bar.element.dataset.collapsed).toBe("true");
+  expect(bar.isCollapsed()).toBe(true);
 });

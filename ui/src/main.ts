@@ -7,7 +7,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { renderEmptyState } from "./frame/empty-state";
 import { EVERYTHING_ID } from "./frame/nav";
 import { createRouter } from "./frame/router";
-import { createSidebar } from "./frame/sidebar";
+import { createSidebarFromSaved } from "./frame/sidebar";
 import { pingErrorText } from "./ping-text";
 import { errorMessage, getSetting, ping, setSetting } from "./shared/api";
 import { versionErrorText, versionText } from "./version-text";
@@ -89,26 +89,18 @@ async function showVersion(): Promise<void> {
 
 async function start(): Promise<void> {
   if (!screen || !content || !frame) return;
-  let touched = false;
   const router = createRouter(window, (route) => {
     sidebar.setCurrent(route.item.id);
     renderEmptyState(screen, route);
     document.title = `${route.item.label} - Mnemo`;
   });
-  const sidebar = createSidebar(document, {
-    collapsed: false,
-    onToggle: (value) => {
-      touched = true;
-      saveCollapsed(value);
-    },
+  // The saved state is read first, so the sidebar is built in its final state.
+  const sidebar = await createSidebarFromSaved(document, loadCollapsed, {
+    onToggle: saveCollapsed,
     onSearch: (text) => router.go(EVERYTHING_ID, text),
   });
   frame.insertBefore(sidebar.element, content);
   router.start();
-  // The frame shows at once; the saved state is applied when the read finishes. If the
-  // owner already clicked the toggle by then, their choice stays.
-  const saved = await loadCollapsed();
-  if (!touched) sidebar.setCollapsed(saved);
 }
 
 void start();

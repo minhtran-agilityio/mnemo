@@ -234,3 +234,15 @@ export function createSidebar(doc: Document, options: SidebarOptions): Sidebar {
     isCollapsed: () => collapsed,
   };
 }
+
+/**
+ * Builds the sidebar after the saved collapsed state is known, so a collapsed sidebar
+ * is collapsed from its first paint and never shows open first.
+ */
+export async function createSidebarFromSaved(
+  doc: Document,
+  loadCollapsed: () => Promise<boolean>,
+  options: Omit<SidebarOptions, "collapsed">,
+): Promise<Sidebar> {
+  return createSidebar(doc, { ...options, collapsed: await loadCollapsed() });
+}
