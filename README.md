@@ -52,6 +52,15 @@ npm run tauri dev
 
 The first run compiles the Rust core and takes several minutes. An empty window opens and shows the reply from the `ping` command.
 
+## Window and tray
+
+Mnemo opens one window and needs no sign-in or network at start. Closing the window keeps Mnemo running in the tray. The tray item has two entries: Open (shows the window again) and Quit (stops the app). A second start focuses the running window. Window size and position are kept across restarts.
+
+- Folders: the data folder is the Tauri `app_data_dir`; Mnemo's own config is in `~/.config/mnemo/`. Only `src-tauri/src/system/paths.rs` builds these paths.
+- Log: errors go to `mnemo.log` in the data folder. It holds no tokens and no private content.
+- Ubuntu without a tray area (GNOME without the AppIndicator extension): at start Mnemo asks D-Bus for a StatusNotifier watcher. If there is none, closing the window minimises it instead of hiding it, so the window is never lost.
+- macOS: **Unverified** until the owner checks the Mac. The tray, close-to-hide, single instance and saved window position are not yet run there.
+
 ## Other commands
 
 - `npm run build` type-checks the UI and builds it into `dist/`.

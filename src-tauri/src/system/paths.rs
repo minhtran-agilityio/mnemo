@@ -1,17 +1,33 @@
-//! Where Mnemo keeps its files on this machine.
+//! The one place that decides where Mnemo keeps its folders and files.
 
 use std::path::{Path, PathBuf};
-
 use tauri::{AppHandle, Manager};
 
 /// File name of the one SQLite database inside the data folder.
 const DB_FILE_NAME: &str = "mnemo.db";
 
-/// Returns the Tauri app data folder. The folder may not exist yet.
-pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_data_dir()
-        .map_err(|e| format!("Could not find the Mnemo data folder: {e}"))
+/// The two folders Mnemo owns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppPaths {
+    /// Data folder (Tauri `app_data_dir`): the database and the log. The window-state plugin
+    /// keeps its own small file in Tauri's `app_config_dir`, not here.
+    pub data_dir: PathBuf,
+    /// Config folder (`~/.config/mnemo/`): Mnemo's own Claude config.
+    pub config_dir: PathBuf,
+}
+
+/// Builds the paths from the data folder and the home folder.
+pub fn paths_from(data_dir: PathBuf, home_dir: &Path) -> AppPaths {
+    AppPaths {
+        data_dir,
+        config_dir: home_dir.join(".config").join("mnemo"),
+    }
+}
+
+/// Returns the data folder and the config folder for this app. The folders may not exist yet.
+pub fn app_paths(app: &AppHandle) -> tauri::Result<AppPaths> {
+    let resolver = app.path();
+    Ok(paths_from(resolver.app_data_dir()?, &resolver.home_dir()?))
 }
 
 /// Joins the data folder and the database file name.
@@ -22,6 +38,24 @@ pub fn db_path(data_dir: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_dir_is_dot_config_mnemo_under_home() {
+        let paths = paths_from(
+            PathBuf::from("/data/io.mnemo.desktop"),
+            Path::new("/home/ana"),
+        );
+        assert_eq!(paths.config_dir, PathBuf::from("/home/ana/.config/mnemo"));
+    }
+
+    #[test]
+    fn data_dir_is_kept_as_given() {
+        let paths = paths_from(
+            PathBuf::from("/data/io.mnemo.desktop"),
+            Path::new("/home/ana"),
+        );
+        assert_eq!(paths.data_dir, PathBuf::from("/data/io.mnemo.desktop"));
+    }
 
     #[test]
     fn db_path_is_inside_the_data_folder() {

@@ -6,6 +6,7 @@ mod storage;
 mod system;
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_window_state::StateFlags;
 
 use commands::{AppStorage, StartupError};
 use storage::StorageError;
@@ -33,12 +34,8 @@ fn start_url(error_code: Option<&str>, app_url: WebviewUrl) -> WebviewUrl {
 
 /// Opens the one database in the app data folder. The data file is never deleted or
 /// replaced when this fails.
-fn open_storage(app: &tauri::AppHandle) -> Result<storage::Storage, StartupError> {
-    let dir = system::paths::data_dir(app).map_err(|detail| StartupError {
-        code: "folder",
-        detail,
-    })?;
-    storage::Storage::open(&system::paths::db_path(&dir)).map_err(|e| StartupError {
+fn open_storage(data_dir: &std::path::Path) -> Result<storage::Storage, StartupError> {
+    storage::Storage::open(&system::paths::db_path(data_dir)).map_err(|e| StartupError {
         code: startup_code(&e),
         detail: e.to_string(),
     })
@@ -47,8 +44,32 @@ fn open_storage(app: &tauri::AppHandle) -> Result<storage::Storage, StartupError
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Single instance first: a second start focuses the running window and exits.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            system::window::show_main(app);
+        }))
+        // Keep size and position (not visibility, so a hidden window never starts hidden).
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
+                .build(),
+        )
         .setup(|app| {
-            let opened = open_storage(app.handle());
+            let paths = system::paths::app_paths(app.handle());
+            // The log is best effort: if it cannot be opened, say so on stderr and keep going.
+            if let Ok(paths) = &paths {
+                if let Err(err) = system::logging::init(&paths.data_dir) {
+                    eprintln!("mnemo: could not open the error log: {err}");
+                }
+            }
+
+            let opened = match &paths {
+                Ok(paths) => open_storage(&paths.data_dir),
+                Err(e) => Err(StartupError {
+                    code: "folder",
+                    detail: format!("Could not find the Mnemo data folder: {e}"),
+                }),
+            };
             if let Err(e) = &opened {
                 eprintln!(
                     "Mnemo could not open its data file ({}): {}",
@@ -57,6 +78,18 @@ pub fn run() {
             }
             let error_code = opened.as_ref().err().map(|e| e.code);
             app.manage(AppStorage::new(opened));
+
+            // Close hides the window only when a tray item really exists to bring it back.
+            let tray = system::tray::tray_available()
+                && match system::tray::build_tray(app) {
+                    Ok(()) => true,
+                    Err(err) => {
+                        log::error!("could not build the tray item: {err}");
+                        false
+                    }
+                };
+            app.manage(system::window::TrayAvailable(tray));
+            app.manage(system::window::HiddenAt::default());
 
             // The main window is built here (`create: false` in tauri.conf.json) so it can
             // start on the error page. If it cannot be built, Mnemo prints why and exits
@@ -81,9 +114,17 @@ pub fn run() {
             }
             Ok(())
         })
+        .on_window_event(system::window::on_window_event)
         .invoke_handler(tauri::generate_handler![commands::ping])
-        .run(tauri::generate_context!())
-        .expect("error while running Mnemo");
+        .build(tauri::generate_context!())
+        .expect("error while building Mnemo")
+        .run(|_app, _event| {
+            // macOS: a click on the Dock icon shows a window that was closed to hide.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                system::window::show_main(_app);
+            }
+        });
 }
 
 #[cfg(test)]

@@ -1,27 +1,5 @@
-:root {
-  color-scheme: light dark;
-  --space-4: 1rem;
-  --space-6: 2rem;
-  --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
-  --color-bg: #ffffff;
-  --color-text: #1a1a1a;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg: #1a1a1a;
-    --color-text: #f2f2f2;
-  }
-}
-
-body {
-  margin: 0;
-  font-family: var(--font-body);
-  background: var(--color-bg);
-  color: var(--color-text);
-}
-
+/* Page layout for the app shell. Colours, type and spacing come from tokens.css. */
 main {
-  padding: var(--space-6) var(--space-4);
-  max-width: 60ch;
+  max-width: 72ch;
+  padding: var(--space-5) var(--space-4);
 }
