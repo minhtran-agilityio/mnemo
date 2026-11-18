@@ -1,0 +1,40 @@
+# One-off helper: creates the issue labels and milestones listed in .github/tracker/.
+# Safe to run again: existing labels are updated, existing milestones are skipped.
+name: Setup labels and milestones
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/project-thread-upeeha]
+    paths: ['.github/tracker/**', '.github/workflows/setup-tracker.yml']
+permissions:
+  contents: read
+  issues: write
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Labels
+        run: |
+          while IFS=$'\t' read -r name color desc; do
+            [ -z "$name" ] && continue
+            gh label create "$name" --color "$color" --description "$desc" --force
+          done < .github/tracker/labels.tsv
+      - name: Milestones
+        run: |
+          existing=$(gh api "repos/$GH_REPO/milestones?state=all&per_page=100" --jq '.[].title')
+          while IFS=$'\t' read -r title desc; do
+            [ -z "$title" ] && continue
+            if printf '%s\n' "$existing" | grep -Fxq "$title"; then
+              echo "skip: $title"
+            else
+              gh api "repos/$GH_REPO/milestones" -f title="$title" -f description="$desc" --jq '"created #\(.number): \(.title)"'
+            fi
+          done < .github/tracker/milestones.tsv
+      - name: Result
+        run: |
+          gh api "repos/$GH_REPO/milestones?state=all&per_page=100" --jq '.[] | "MILESTONE \(.number)\t\(.title)"'
+          gh label list --limit 100

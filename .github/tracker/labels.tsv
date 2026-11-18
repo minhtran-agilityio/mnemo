@@ -1,0 +1,16 @@
+priority:critical	B60205	Blocks other work. Do first.
+priority:high	D93F0B	Needed for version 1 (P1 to P4).
+priority:medium	FBCA04	In version 1, but can wait inside its phase.
+priority:low	C5DEF5	After version 1 (P5 to P8).
+area:infra	5319E7	Repo structure, scripts, CI/CD, templates.
+area:app	1D76DB	Desktop shell, window, tray, navigation, settings.
+area:data	0E8A16	SQLite storage, migrations, export.
+area:ai	0052CC	The claude -p runner, usage, models.
+area:library	006B75	Bookmarks, Everything list, search, Ask Mnemo.
+area:workspace	BFD4F2	Notes, ideas, projects, tasks, calendar, Today.
+area:connectors	D4C5F9	Slack, Gmail, Calendar, GitHub, MCP, reports.
+area:agents	F9D0C4	Background runs, approvals, memory, digests.
+area:knowledge	C2E0C6	Research, About me, graph, trending, learning.
+area:life	FEF2C0	Workout, diary and other life features.
+spike	EDEDED	A short test that answers an open or Unverified point. Output is a written result.
+user-test	E99695	Needs a manual check by the owner on Mac and Ubuntu.
