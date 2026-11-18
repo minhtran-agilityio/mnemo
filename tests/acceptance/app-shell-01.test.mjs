@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, statSync, mkdtempSync, rmSync, mkdirSync, realpathSync, readlinkSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -17,7 +17,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const p = (...a) => join(ROOT, ...a);
 const NESTED = !!process.env.MNEMO_NESTED;
 const E2E = process.env.MNEMO_E2E === '1';
-const BIN = process.env.MNEMO_BIN ? join(ROOT, process.env.MNEMO_BIN) : p('src-tauri', 'target', 'debug', 'mnemo');
+const BIN = process.env.MNEMO_BIN ? resolve(ROOT, process.env.MNEMO_BIN) : p('src-tauri', 'target', 'debug', 'mnemo');
 const SKIP_E2E = E2E ? false : 'desktop test: set MNEMO_E2E=1 (needs built binary, X display, D-Bus tools)';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
