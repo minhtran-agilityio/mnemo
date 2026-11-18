@@ -57,6 +57,12 @@ The first run compiles the Rust core and takes several minutes. An empty window 
 - `npm run build` type-checks the UI and builds it into `dist/`.
 - `npm run tauri build` makes a release bundle for the current platform.
 
+## Data folder
+
+Mnemo keeps all its data in one SQLite file named `mnemo.db` inside the Tauri app data folder (`~/.local/share/io.mnemo.desktop/` on Ubuntu, `~/Library/Application Support/io.mnemo.desktop/` on macOS). The file is created on first start and updated by numbered migrations when the app opens. If the file cannot be opened, Mnemo shows a plain error screen in its window and leaves the file as it is (showing that screen in a real window is **Unverified**).
+
+Do not put this file in Dropbox, iCloud Drive or any other synced folder. Syncing a live SQLite file can corrupt it. There is no sync in version 1. To back up, copy the whole data folder while Mnemo is closed.
+
 ## Test
 
 Three commands cover everything. Run them from the repository root after `npm install`.
