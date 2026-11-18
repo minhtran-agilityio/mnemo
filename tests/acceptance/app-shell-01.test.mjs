@@ -126,7 +126,7 @@ async function makeSession({ watcher }) {
     },
     async menu() {
       const { dest, menuPath } = await s.trayItem();
-      const r = gdbus(dest, menuPath, 'com.canonical.dbusmenu.GetLayout', '0', '-1', '[]');
+      const r = gdbus(dest, menuPath, 'com.canonical.dbusmenu.GetLayout', '0', 'int32 -1', '[]');
       assert.equal(r.status, 0, r.stderr);
       const entries = [...r.stdout.matchAll(/\((\d+), \{([^{}]*)\}/g)]
         .map((m) => ({ id: m[1], label: (m[2].match(/'label': <'([^']*)'>/)?.[1] ?? '').replace(/_/g, '') }))
