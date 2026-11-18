@@ -208,10 +208,6 @@ test('AC6: the spike is outside the main app folders and root lint scope', { ski
   const includes = (files?.includes ?? []).join(' ');
   assert.ok(includes && !includes.includes('spikes') && !includes.includes('**/*'), 'biome.json must not include the spike');
 });
-  assert.equal(fmt.status, 0, fmt.stdout + fmt.stderr);
-  const lint = spawnSync('npx', ['biome', 'ci', '--formatter-enabled=false'], { cwd: ROOT, encoding: 'utf8' });
-  assert.equal(lint.status, 0, lint.stdout + lint.stderr);
-});
 
 test('AC7: nothing says it closes issue #5', (t) => {
   const d = doc();
