@@ -1,0 +1,16 @@
+{
+  "name": "mnemo-spike-01-tauri",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.5",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0"
+  }
+}

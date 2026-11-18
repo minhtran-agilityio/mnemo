@@ -1,0 +1,19 @@
+[package]
+name = "mnemo-spike-01"
+version = "0.0.0"
+description = "Throwaway spike for DEC-01: Tauri 2 kanban screen and tray"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "mnemo_spike_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+
+# The spike is its own project, not a member of any other workspace.
+[workspace]
