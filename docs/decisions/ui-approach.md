@@ -31,7 +31,7 @@ The library builds leave out drag, so the real gap is larger. Svelte was not mea
 ## Proof
 
 - `ui/src/shared/card.ts` builds a card. Its test (`card.test.ts`) checks that markup in a title stays text.
-- `spikes/ui-approach-07/` is a throwaway kanban port. Its HTML and CSS are the spike's; only the script path in `index.html` changed.
+- `ui/src/screens/kanban/` is the #5 kanban ported to plain TypeScript. Its CSS is the spike's, unchanged, and `ui/index.html` loads it until P1.2 replaces it.
 
 ## Folder layout (proposal)
 

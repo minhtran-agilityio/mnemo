@@ -1,6 +1,7 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { pingErrorText } from "./ping-text";
+import { mountKanban } from "./screens/kanban/kanban";
 import { versionErrorText, versionText } from "./version-text";
 import "./style.css";
 
@@ -29,3 +30,8 @@ async function showVersion(): Promise<void> {
 
 void showPing();
 void showVersion();
+
+// Proof screen for the UI approach (#7); P1.2 replaces it with the real app frame.
+const boardEl = document.querySelector<HTMLElement>("#board");
+const boardStatus = document.querySelector<HTMLElement>("#board-status");
+if (boardEl && boardStatus) mountKanban(boardEl, boardStatus);

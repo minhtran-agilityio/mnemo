@@ -1,6 +1,6 @@
-import { buildCard, type CardData } from "../../ui/src/shared/card";
-import { createStore } from "../../ui/src/shared/store";
-import "./style.css";
+import { buildCard, type CardData } from "../../shared/card";
+import { createStore } from "../../shared/store";
+import "./kanban.css";
 
 type Column = { id: string; title: string; cards: CardData[] };
 
@@ -10,7 +10,11 @@ const columns: Column[] = [
     id: "backlog",
     title: "Backlog",
     cards: [
-      { id: "c1", title: "Read the Rust book chapter on ownership", meta: "3 links" },
+      {
+        id: "c1",
+        title: "Read the Rust book chapter on ownership",
+        meta: "3 links",
+      },
       { id: "c2", title: "Compare note-taking apps", meta: "5 links" },
     ],
   },
@@ -19,7 +23,11 @@ const columns: Column[] = [
     title: "To do",
     cards: [
       { id: "c3", title: "Plan the offline sync talk", meta: "2 notes" },
-      { id: "c4", title: "Collect papers on spaced repetition", meta: "8 links" },
+      {
+        id: "c4",
+        title: "Collect papers on spaced repetition",
+        meta: "8 links",
+      },
     ],
   },
   {
@@ -27,14 +35,19 @@ const columns: Column[] = [
     title: "Doing",
     cards: [{ id: "c5", title: "Garden redesign", meta: "4 notes, 6 links" }],
   },
-  { id: "done", title: "Done", cards: [{ id: "c6", title: "Tax paperwork 2025", meta: "1 note" }] },
+  {
+    id: "done",
+    title: "Done",
+    cards: [{ id: "c6", title: "Tax paperwork 2025", meta: "1 note" }],
+  },
 ];
 
 type State = { columns: Column[]; message: string };
 const store = createStore<State>({ columns, message: "" });
 
-const board = document.getElementById("board") as HTMLElement;
-const status = document.getElementById("status") as HTMLElement;
+// Set by mountKanban before anything renders.
+let board: HTMLElement;
+let status: HTMLElement;
 
 function makeColumn(column: Column): HTMLElement {
   const el = document.createElement("section");
@@ -60,18 +73,22 @@ function makeColumn(column: Column): HTMLElement {
 function render(state: State, focusId?: string): void {
   board.replaceChildren(...state.columns.map(makeColumn));
   status.textContent = state.message;
-  if (focusId) board.querySelector<HTMLElement>(`[data-card-id="${focusId}"]`)?.focus();
+  if (focusId)
+    board.querySelector<HTMLElement>(`[data-card-id="${focusId}"]`)?.focus();
 }
 
 // The only writer of the columns: a pure move, then the store tells the screen.
 function moveCard(cardId: string, toColumnId: string): void {
   store.update((state) => {
-    const from = state.columns.find((c) => c.cards.some((card) => card.id === cardId));
+    const from = state.columns.find((c) =>
+      c.cards.some((card) => card.id === cardId),
+    );
     const to = state.columns.find((c) => c.id === toColumnId);
     const card = from?.cards.find((c) => c.id === cardId);
     if (!from || !to || !card || from === to) return state;
     const columns = state.columns.map((c) => {
-      if (c === from) return { ...c, cards: c.cards.filter((x) => x.id !== cardId) };
+      if (c === from)
+        return { ...c, cards: c.cards.filter((x) => x.id !== cardId) };
       if (c === to) return { ...c, cards: [...c.cards, card] };
       return c;
     });
@@ -80,13 +97,20 @@ function moveCard(cardId: string, toColumnId: string): void {
   render(store.get(), cardId);
 }
 
-function columnAt(x: number, y: number, dragged: HTMLElement): HTMLElement | null {
-  const hit = document.elementsFromPoint(x, y).find((el) => !dragged.contains(el));
+function columnAt(
+  x: number,
+  y: number,
+  dragged: HTMLElement,
+): HTMLElement | null {
+  const hit = document
+    .elementsFromPoint(x, y)
+    .find((el) => !dragged.contains(el));
   return hit ? hit.closest<HTMLElement>(".column") : null;
 }
 
 function clearHighlight(): void {
-  for (const col of board.querySelectorAll(".column")) col.classList.remove("is-over");
+  for (const col of board.querySelectorAll(".column"))
+    col.classList.remove("is-over");
 }
 
 // Drag with pointer events: the card follows the pointer, and the column under it takes the card on drop.
@@ -113,7 +137,8 @@ function enableDrag(): void {
       card.style.transform = "";
       card.classList.remove("is-dragging");
       clearHighlight();
-      if (target && target !== from) moveCard(card.dataset.cardId ?? "", target.dataset.columnId ?? "");
+      if (target && target !== from)
+        moveCard(card.dataset.cardId ?? "", target.dataset.columnId ?? "");
     };
     card.addEventListener("pointermove", onMove);
     card.addEventListener("pointerup", onUp);
@@ -125,12 +150,16 @@ function enableDrag(): void {
 function enableKeyboard(): void {
   board.addEventListener("keydown", (event) => {
     // Leave browser and OS shortcuts (Alt+Left, Cmd+Left, Shift+Arrow) alone.
-    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
+      return;
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     const card = (event.target as HTMLElement).closest<HTMLElement>(".card");
     const from = card?.closest<HTMLElement>(".column");
     if (!card || !from) return;
-    const next = event.key === "ArrowLeft" ? from.previousElementSibling : from.nextElementSibling;
+    const next =
+      event.key === "ArrowLeft"
+        ? from.previousElementSibling
+        : from.nextElementSibling;
     if (next instanceof HTMLElement && next.classList.contains("column")) {
       event.preventDefault();
       moveCard(card.dataset.cardId ?? "", next.dataset.columnId ?? "");
@@ -138,6 +167,11 @@ function enableKeyboard(): void {
   });
 }
 
-render(store.get());
-enableDrag();
-enableKeyboard();
+// Proof screen for the UI approach (#7): draws the sample board into the given elements.
+export function mountKanban(boardEl: HTMLElement, statusEl: HTMLElement): void {
+  board = boardEl;
+  status = statusEl;
+  render(store.get());
+  enableDrag();
+  enableKeyboard();
+}
