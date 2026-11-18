@@ -75,6 +75,14 @@ run_case "q2_stream_json" -p "Reply with the word ok." \
 run_case "q4_strict_mcp" -p "Reply with the word ok." \
   --output-format stream-json --verbose --no-session-persistence --strict-mcp-config
 
+# Q4 (call): under the flag, ask for one read-only call per connector (list channels, list
+# labels, list calendars). The flag removes the connector tools, so the model has nothing to call:
+# the answer shows they do not work under the flag. The prompt names metadata calls only and
+# the control run without the flag is NOT done here, because it would read the owner's data.
+run_case "q4_connector_calls" -p "If you have a tool for Slack, Gmail or Google Calendar, call one read-only tool for each (list channels, list labels, list calendars) and say which worked. If you have none, reply exactly: NO CONNECTOR TOOLS." \
+  --output-format stream-json --verbose --no-session-persistence --strict-mcp-config \
+  --allowedTools "mcp__claude_ai_Slack__*,mcp__claude_ai_Gmail__*,mcp__claude_ai_Google_Calendar__*"
+
 # Scrub anything that looks like a credential, then fail if any marker is left.
 SCRUBBED="$OUT.tmp"
 sed -E \

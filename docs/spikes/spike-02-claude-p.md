@@ -11,7 +11,7 @@ Source of the answers below: one run on **Ubuntu** (Linux 6.8.0-149-generic x86_
 | 1 | `--output-format json` with `--json-schema` returns valid JSON in `structured_output`? | **Yes** |
 | 2 | `-p` output carries the share of the subscription limit already used? | **Yes** (stream-json) |
 | 3 | `--setting-sources` stops the personal `CLAUDE.md` from loading? | **Still unverified** |
-| 4 | claude.ai connectors (Slack, Gmail, Calendar) still work under `--strict-mcp-config`? | **Still unverified** (none are loaded; no call was made) |
+| 4 | claude.ai connectors (Slack, Gmail, Calendar) still work under `--strict-mcp-config`? | **No** (not loaded, so no call is possible; the flag alone drops them) |
 | 5 | RAM and time of one `claude -p` process? | about 420 MB peak, 3 to 6 s |
 
 ## Answers and evidence
@@ -33,10 +33,13 @@ Not run. The test needs a temporary strange rule in the owner's personal `~/.cla
 3. If the first answer still ends with PINEAPPLE, the answer is No. Remove the line.
 If No, the fallback is a separate config folder (`CLAUDE_CONFIG_DIR`), which needs one more login per machine. The owner decides.
 
-### 4. Connectors under `--strict-mcp-config`: Still unverified
+### 4. Connectors under `--strict-mcp-config`: No
 Evidence line, case `q2_stream_json` (no flag): `init` event lists `"mcp_servers":[... {"name":"claude.ai Slack","status":"connected","source":"claudeai"}, {"name":"claude.ai Gmail","status":"connected","source":"claudeai"}, {"name":"claude.ai Google Calendar","status":"connected","source":"claudeai"} ...]`.
 Evidence line, case `q4_strict_mcp` (`--strict-mcp-config`, no `--mcp-config`): `init` event has `"mcp_servers":[]`.
-So with the flag alone, the account connectors are not loaded. That shows they are not loaded, not that they stop working: no read-only call to Slack, Gmail or Calendar was made, because it would read the owner's private data. The answer stays unverified until one read-only call per connector is run by the owner (for example list calendars, list labels, list channels), with and without `--mcp-config`. **Unverified:** whether Mnemo can name the connectors through `--mcp-config` and keep them working; that belongs to #20 and the connector issues.
+Evidence line, case `q4_connector_calls` (`--strict-mcp-config`, prompt asks for one read-only call each to Slack, Gmail and Calendar, with those tools allowed): the `init` event has `"mcp_servers":[]` and no `mcp__*` tool in `"tools"`, and the model answers `NO CONNECTOR TOOLS`. No call could be made, so none touched the owner's data.
+So with the flag alone the account connectors do not work: they are not loaded, and a read-only call is impossible.
+Limit: the control (the same calls without the flag) was not run, because it would read the owner's private data; case `q2_stream_json` already shows the connectors as `connected` without the flag.
+**Unverified:** whether Mnemo can name the connectors through `--mcp-config` and keep them working. The claude.ai connectors have no URL or token for Mnemo to pass (rule 4: no token), so this belongs to #20 and the connector issues.
 
 ### 5. RAM and time: about 420 MB, 3 to 6 s
 Evidence lines from `/usr/bin/time -v`: `Maximum resident set size (kbytes): 421848` and `Elapsed (wall clock) time: 0:05.51` (case `q1_q5_json_schema`); 428500 kB / 5.55 s (`q2_stream_json`); 391268 kB / 2.96 s with no connectors (`q4_strict_mcp`).
