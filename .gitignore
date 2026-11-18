@@ -13,3 +13,6 @@ src-tauri/gen/
 .idea/
 .vscode/
 *.log
+
+# Local planning notes from the harness workflows
+specs/
