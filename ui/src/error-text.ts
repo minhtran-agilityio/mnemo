@@ -3,11 +3,11 @@
 const REASONS: Record<string, string> = {
   folder:
     "Mnemo could not find or create its data folder. Nothing was deleted or changed.",
-  open: "Mnemo could not open its data file. The file was left as it is.",
+  open: "Mnemo could not open its data file. Nothing was deleted.",
   migration:
     "Mnemo could not update its data file. The update was undone and your data is unchanged.",
   too_new:
-    "The data file was made by a newer Mnemo. Update Mnemo to open it. The file was left as it is.",
+    "The data file was made by a newer Mnemo. Update Mnemo to open it. Nothing was deleted.",
   database: "Mnemo's data file gave an error. Nothing was deleted or changed.",
 };
 

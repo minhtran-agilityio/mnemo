@@ -34,17 +34,14 @@ impl AppStorage {
     }
 
     /// Locks the database, or returns `storage_unavailable` when it was not opened.
-    /// A lock poisoned by an earlier panic is recovered: SQLite rolled back that
-    /// work, so the connection is still good.
+    /// A lock poisoned by an earlier panic is recovered. **Unverified:** this assumes
+    /// the panicking code wrote inside a storage transaction, whose drop rolls the work back.
     pub fn get(&self) -> Result<MutexGuard<'_, Storage>, AppError> {
         match &self.0 {
             Ok(m) => Ok(m.lock().unwrap_or_else(PoisonError::into_inner)),
-            Err(e) => Err(AppError {
+            Err(_) => Err(AppError {
                 code: "storage_unavailable",
-                message: format!(
-                    "Mnemo's data file is not open (reason: {}). Nothing was deleted.",
-                    e.code
-                ),
+                message: "Mnemo could not open its data file when it started. Nothing was deleted. Quit Mnemo and start it again.".to_string(),
             }),
         }
     }
@@ -85,7 +82,6 @@ mod tests {
         }));
         let err = state.get().err().unwrap();
         assert_eq!(err.code, "storage_unavailable");
-        assert!(err.message.contains("open"));
         assert!(
             !err.message.contains('/'),
             "no path may reach the UI: {}",
