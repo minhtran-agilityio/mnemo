@@ -227,3 +227,8 @@ test('AC7: nothing says it closes issue #5', (t) => {
   const log = res.stdout;
   assert.doesNotMatch(log, /\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+(minhtran-agilityio\/mnemo)?#5\b/i);
 });
+
+test('docs: the README does not say npm run check ignores the spike', () => {
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
+  assert.doesNotMatch(readme, /npm run check`?\s+ignores/i, 'the acceptance test reads the spike under npm test');
+});
