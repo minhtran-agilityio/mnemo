@@ -15,10 +15,12 @@ pub use error::StorageError;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The open Mnemo database.
+#[allow(dead_code)] // `conn` is first read by the item functions in #14.
 pub struct Storage {
     conn: Connection,
 }
 
+#[allow(dead_code)] // Status readers; callers arrive with later tickets.
 impl Storage {
     /// Opens (or creates) the database at `path`, turns on WAL mode and the busy
     /// timeout, and runs pending migrations. A file that is not a database gives
