@@ -10,7 +10,7 @@ import {
   existsSync, readFileSync, cpSync, mkdtempSync, appendFileSync, writeFileSync, symlinkSync, mkdirSync,
 } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { join, dirname } from 'node:path';
+import { join, dirname, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -22,7 +22,8 @@ const NESTED = !!process.env.MNEMO_NESTED;
 const LONG = { timeout: 590000, skip: NESTED ? 'nested run (inside npm test)' : false };
 
 const SKIP = new Set(['node_modules', 'target', '.git', 'dist']);
-const filter = (src) => !src.split('/').some((s) => SKIP.has(s));
+// Judge only the path inside the project, so a parent folder named like a skipped one does not matter.
+const filter = (src) => !relative(ROOT, src).split(sep).some((s) => SKIP.has(s));
 
 let base; // a copy of the project with dependencies installed
 let targetDir; // shared cargo target dir so builds are reused between cases
@@ -32,6 +33,9 @@ function prepareBase() {
   base = join(tmp, 'base');
   targetDir = join(tmp, 'target');
   cpSync(ROOT, base, { recursive: true, filter });
+  // The #1 tests call git ls-files, so the copy needs its own repo.
+  spawnSync('git', ['init', '-q'], { cwd: base });
+  spawnSync('git', ['add', '-A'], { cwd: base });
   const r = spawnSync('npm', ['ci'], { cwd: base, encoding: 'utf8' });
   assert.equal(r.status, 0, `npm ci failed (exit ${r.status}):\n${r.stderr}`);
   return base;
@@ -39,15 +43,17 @@ function prepareBase() {
 function freshCopy() {
   const b = prepareBase();
   const dir = join(mkdtempSync(join(tmpdir(), 'mnemo-qa2-case-')), 'proj');
-  cpSync(b, dir, { recursive: true, filter });
+  cpSync(b, dir, { recursive: true, filter: (src) => !relative(b, src).split(sep).some((s) => s === 'node_modules') });
   symlinkSync(join(b, 'node_modules'), join(dir, 'node_modules'));
   return dir;
 }
 function npm(cwd, args) {
   const t0 = Date.now();
+  // Drop NODE_TEST_CONTEXT so the inner node --test really runs instead of skipping as a recursive call.
+  const { NODE_TEST_CONTEXT, ...env } = process.env;
   const r = spawnSync('npm', args, {
     cwd, encoding: 'utf8', maxBuffer: 1 << 28,
-    env: { ...process.env, MNEMO_NESTED: '1', CARGO_TARGET_DIR: targetDir, CI: '1', FORCE_COLOR: '0' },
+    env: { ...env, MNEMO_NESTED: '1', CARGO_TARGET_DIR: targetDir, CI: '1', FORCE_COLOR: '0' },
   });
   return { status: r.status, out: `${r.stdout}\n${r.stderr}`, secs: (Date.now() - t0) / 1000 };
 }
