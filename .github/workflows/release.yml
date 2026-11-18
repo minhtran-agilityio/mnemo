@@ -16,8 +16,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Runs once, before any build job. A failure here stops every build job.
+  guard:
+    name: Check the version and tag
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the version in package.json
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+              echo "Tag ${GITHUB_REF_NAME} does not match package.json version v${version}." >&2
+              exit 1
+            fi
+          elif git ls-remote --exit-code --tags origin "refs/tags/v${version}" >/dev/null 2>&1; then
+            echo "Tag v${version} already exists. Bump the version or use a tag push." >&2
+            exit 1
+          fi
+
   release:
     name: ${{ matrix.name }}
+    needs: guard
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -36,21 +59,6 @@ jobs:
             rust-target: ""
     steps:
       - uses: actions/checkout@v4
-
-      - name: Check the tag matches the version in package.json
-        shell: bash
-        run: |
-          version="$(node -p "require('./package.json').version")"
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
-              echo "Tag ${GITHUB_REF_NAME} does not match package.json version v${version}." >&2
-              exit 1
-            fi
-          elif git ls-remote --exit-code --tags origin "refs/tags/v${version}" >/dev/null 2>&1 \
-            && [ "${{ strategy.job-index }}" = "0" ]; then
-            echo "Tag v${version} already exists. Bump the version or use a tag push." >&2
-            exit 1
-          fi
 
       - name: Install Linux system packages
         if: runner.os == 'Linux'

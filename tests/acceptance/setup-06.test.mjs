@@ -179,3 +179,12 @@ test('F7: README leads with Open Anyway and does not recommend right-click Open'
   const r = read('README.md');
   assert.ok(r.indexOf('Open Anyway') < (r.indexOf('right-click') === -1 ? Infinity : r.indexOf('right-click')));
 });
+
+test('F1: the tag-exists guard is its own job that every build job needs', () => {
+  const y = release();
+  assert.doesNotMatch(y, /job-index/);
+  assert.match(y, /^ {2}guard:/m);
+  assert.match(y, /needs:\s*guard/);
+  assert.ok(y.indexOf('GITHUB_REF_NAME') < y.indexOf('  release:'), 'guard job must come first');
+  assert.ok(y.indexOf('git ls-remote') < y.indexOf('  release:'), 'tag check must be in the guard job');
+});
