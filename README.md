@@ -80,18 +80,26 @@ npm run check       # everything, stops at the first failure
 
 `npm test` also runs the acceptance tests in `tests/acceptance/` with the Node built-in runner. Those that install dependencies and inject faults into a copy of the project are skipped there; run `node --test "tests/acceptance/*.test.mjs"` to include them.
 
+## Spikes
+
+`spikes/spike-01-tauri/` is a throwaway Tauri test for DEC-01. It is not part of the app. `npm run check` does not format, lint or build it, but one acceptance test (`tests/acceptance/spike-01.test.mjs`) reads its files, so `npm test` includes it. Build steps and results: `docs/spikes/spike-01-tauri.md`.
+
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every pull request and on every push to `main`. It has one job, run twice in a matrix:
+`.github/workflows/ci.yml` runs on every pull request and on every push to `main`. It has three jobs:
 
-| Check name | Runner |
-| --- | --- |
-| `macos-latest` | macOS on Apple Silicon |
-| `ubuntu-22.04` | Ubuntu 22.04 |
+| Check name | Runner | What it does |
+| --- | --- | --- |
+| `Detect code changes` | Ubuntu 22.04 | Lists the changed files and decides whether the build and tests must run. |
+| `macos-latest` | macOS on Apple Silicon | Build and tests. Skipped for a docs-only change. |
+| `ubuntu-22.04` | Ubuntu 22.04 | Build and tests. Skipped for a docs-only change. |
+| `CI result` | Ubuntu 22.04 | Passes when the build and tests passed or were skipped; fails otherwise. |
 
-Each job installs the pinned Node and Rust toolchains, runs `npm run check`, then a debug build (`npx tauri build --debug --no-bundle`). The npm and Cargo dependencies are cached, so a run with no dependency change is shorter. A feature is done only when both checks are green.
+A docs-only change touches only `*.md`, `*.markdown` or `*.txt` files, `LICENSE*`, or files under `docs/`, `notes/`, `specs/` or `.claude/`. `CLAUDE.md`, `README.md` and everything under `.github/`, `tests/`, `src-tauri/` and `ui/` always count as code, because the tests read them or the app compiles them. If you add a test that reads another doc, add that path to the code list in `ci.yml`.
 
-### Make both checks required on `main`
+Each build job installs the pinned Node and Rust toolchains, runs `npm run check`, then a debug build (`npx tauri build --debug --no-bundle`). The npm and Cargo dependencies are cached, so a run with no dependency change is shorter. A feature is done only when both build checks are green.
+
+### Make the CI result required on `main`
 
 A repository admin does this once. It cannot be done from a pull request.
 
@@ -99,7 +107,7 @@ A repository admin does this once. It cannot be done from a pull request.
 2. Under "Branch protection rules" choose "Add branch protection rule" (or edit the rule for `main`). Set "Branch name pattern" to `main`.
 3. Tick "Require a pull request before merging".
 4. Tick "Require status checks to pass before merging", then "Require branches to be up to date before merging".
-5. In the status check search box add `macos-latest` and `ubuntu-22.04`. A check appears in the list only after it has run once in the last week.
+5. In the status check search box add `CI result`. Do not add `macos-latest` or `ubuntu-22.04`: they are skipped for a docs-only change and never report, so such a pull request could not merge. A check appears in the list only after it has run once in the last week.
 6. Click "Create" (or "Save changes").
 
 Status: **Unverified** that this is set on the repository; see the pull request for the result.

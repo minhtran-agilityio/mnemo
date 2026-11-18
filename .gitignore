@@ -13,3 +13,7 @@ src-tauri/gen/
 .idea/
 .vscode/
 *.log
+
+# Throwaway spike build output
+spikes/*/src-tauri/target/
+spikes/*/src-tauri/gen/
