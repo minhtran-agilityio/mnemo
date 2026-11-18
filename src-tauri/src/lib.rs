@@ -27,6 +27,7 @@ pub fn run() {
 
             let tray = system::tray::tray_available();
             app.manage(system::window::TrayAvailable(tray));
+            app.manage(system::window::HiddenAt::default());
             if tray {
                 if let Err(err) = system::tray::build_tray(app) {
                     log::error!("could not build the tray item: {err}");
