@@ -25,10 +25,8 @@ pub struct StartupError {
 
 /// The storage the commands use: the open database, or why it could not be opened.
 /// It is always registered, so a command gets an error back instead of a panic.
-#[allow(dead_code)] // `get` is first called by the item commands in #14.
 pub struct AppStorage(Result<Mutex<Storage>, StartupError>);
 
-#[allow(dead_code)]
 impl AppStorage {
     pub fn new(opened: Result<Storage, StartupError>) -> Self {
         AppStorage(opened.map(Mutex::new))

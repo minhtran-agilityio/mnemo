@@ -243,3 +243,11 @@ test('get_setting and set_setting are async commands', () => {
   assert.match(src, /pub async fn get_setting\(/);
   assert.match(src, /pub async fn set_setting\(/);
 });
+
+// Review fix (#11): code that is now used carries no allow(dead_code).
+test('used settings code has no stale allow(dead_code)', () => {
+  for (const f of ['commands.rs', join('storage', 'settings.rs')]) {
+    const src = readFileSync(join(ROOT, 'src-tauri', 'src', f), 'utf8');
+    assert.doesNotMatch(src, /allow\(dead_code\)/, f);
+  }
+});

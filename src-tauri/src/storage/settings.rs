@@ -5,7 +5,6 @@ use rusqlite::OptionalExtension;
 use super::error::StorageError;
 use super::Storage;
 
-#[allow(dead_code)] // Called by the settings commands; #12 reuses it for the theme.
 impl Storage {
     /// The value saved under `key`, or `None` when the key was never written.
     pub fn get_setting(&self, key: &str) -> Result<Option<String>, StorageError> {
