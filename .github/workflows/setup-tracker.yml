@@ -1,6 +1,6 @@
-# One-off helper: creates the issue labels and milestones listed in .github/tracker/.
-# Safe to run again: existing labels are updated, existing milestones are skipped.
-name: Setup labels and milestones
+# One-off helper: creates the issue labels, milestones and issues listed in .github/tracker/.
+# Safe to run again: existing labels are updated, existing milestones and issues are skipped.
+name: Setup labels, milestones and issues
 on:
   workflow_dispatch:
   push:
@@ -34,6 +34,8 @@ jobs:
               gh api "repos/$GH_REPO/milestones" -f title="$title" -f description="$desc" --jq '"created #\(.number): \(.title)"'
             fi
           done < .github/tracker/milestones.tsv
+      - name: Issues
+        run: python3 .github/tracker/create_issues.py
       - name: Result
         run: |
           gh api "repos/$GH_REPO/milestones?state=all&per_page=100" --jq '.[] | "MILESTONE \(.number)\t\(.title)"'
