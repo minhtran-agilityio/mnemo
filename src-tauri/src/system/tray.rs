@@ -25,6 +25,10 @@ pub fn build_tray(app: &App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// How long the start-up D-Bus check for a tray may take. It blocks the first window.
+#[cfg(target_os = "linux")]
+const TRAY_PROBE_TIMEOUT_MS: i32 = 500;
+
 /// Asks the session D-Bus whether a StatusNotifier watcher owns its name. Without one (GNOME
 /// without the AppIndicator extension) a tray item is never shown.
 #[cfg(target_os = "linux")]
@@ -46,7 +50,7 @@ pub fn tray_available() -> bool {
         Some(&("org.kde.StatusNotifierWatcher",).to_variant()),
         Some(VariantTy::new("(b)").expect("valid variant type")),
         gio::DBusCallFlags::NONE,
-        2000,
+        TRAY_PROBE_TIMEOUT_MS,
         gio::Cancellable::NONE,
     );
     match reply {

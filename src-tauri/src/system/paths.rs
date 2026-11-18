@@ -6,7 +6,8 @@ use tauri::{AppHandle, Manager};
 /// The two folders Mnemo owns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppPaths {
-    /// Data folder (Tauri `app_data_dir`): the database, the log and saved window state.
+    /// Data folder (Tauri `app_data_dir`): the database and the log. The window-state plugin
+    /// keeps its own small file in Tauri's `app_config_dir`, not here.
     pub data_dir: PathBuf,
     /// Config folder (`~/.config/mnemo/`): Mnemo's own Claude config.
     pub config_dir: PathBuf,

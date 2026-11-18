@@ -3,6 +3,7 @@
 use std::sync::Mutex;
 
 use tauri::{AppHandle, Manager, PhysicalPosition, Window, WindowEvent};
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
 
 /// Managed state: whether a tray item can be seen on this desktop.
 pub struct TrayAvailable(pub bool);
@@ -63,6 +64,14 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
         };
         if let Err(err) = result {
             log::error!("could not hide or minimise the window on close: {err}");
+        }
+        // Without a tray there is no Quit, so the app may end by signal and skip the save on
+        // exit. Save size and position now.
+        if let Err(err) = window
+            .app_handle()
+            .save_window_state(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
+        {
+            log::error!("could not save the window size and position: {err}");
         }
     }
 }
