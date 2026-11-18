@@ -53,14 +53,16 @@ jobs:
             range="$PUSH_BEFORE..$PUSH_AFTER"
           fi
 
-          files="$(git diff --name-only "$range")" || run_all "Could not diff $range."
+          # --no-renames lists both paths of a move, so code moved into docs/ still counts.
+          files="$(git diff --name-only --no-renames "$range")" || run_all "Could not diff $range."
           [ -n "$files" ] || run_all "The diff $range lists no files."
 
           code=false
           while IFS= read -r f; do
             case "$f" in
-              # The acceptance tests read these files, so they count as code.
-              CLAUDE.md | README.md | .github/* | tests/*) code=true ;;
+              # The acceptance tests read the top-level docs and .github/. Text files
+              # inside the app sources can be compiled in (for example prompts).
+              CLAUDE.md | README.md | .github/* | tests/* | src-tauri/* | ui/*) code=true ;;
               docs/* | notes/* | specs/* | .claude/* | LICENSE*) ;;
               *.md | *.markdown | *.txt) ;;
               *) code=true ;;
@@ -122,7 +124,8 @@ jobs:
   result:
     name: CI result
     needs: [changes, check]
-    if: always()
+    # Not always(): a run cancelled by a newer push should not report a failure.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
