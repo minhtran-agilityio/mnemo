@@ -127,7 +127,7 @@ Download the files from the latest published release on the repository's Release
 
 ### Ubuntu 22.04
 
-- `.deb`: run `sudo apt install ./mnemo_<version>_amd64.deb`. Mnemo then appears in the application launcher.
+- `.deb`: run `sudo apt install ./Mnemo_<version>_amd64.deb`. Mnemo then appears in the application launcher.
 - AppImage: run `chmod +x Mnemo_<version>_amd64.AppImage`, then start it with `./Mnemo_<version>_amd64.AppImage`.
 
 ### Open manual checks
