@@ -16,7 +16,7 @@ const mergeBase = () => {
   for (const ref of ['github/main', 'origin/main', 'main']) {
     const r = git('merge-base', 'HEAD', ref);
     const sha = r.stdout.trim();
-    if (sha) return sha;
+    if (r.status === 0 && sha) return sha;
   }
   return '';
 };
@@ -206,9 +206,13 @@ test('AC6: the spike is outside the main app folders and root lint scope', () =>
   assert.equal(lint.status, 0, lint.stdout + lint.stderr);
 });
 
-test('AC7: nothing says it closes issue #5', () => {
+test('AC7: nothing says it closes issue #5', (t) => {
   const d = doc();
   assert.doesNotMatch(d, /\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+(minhtran-agilityio\/mnemo)?#5\b/i);
-  const log = git('log', '--format=%B', `${mergeBase()}..HEAD`).stdout;
+  const base = mergeBase();
+  if (!base) return t.skip('no fork point from main in this checkout (shallow clone?); commit messages not checked');
+  const res = git('log', '--format=%B', `${base}..HEAD`);
+  assert.equal(res.status, 0, `git log failed: ${res.stderr}`);
+  const log = res.stdout;
   assert.doesNotMatch(log, /\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+(minhtran-agilityio\/mnemo)?#5\b/i);
 });
