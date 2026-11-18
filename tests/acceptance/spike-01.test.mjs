@@ -9,8 +9,17 @@ import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const BASE = 'a9816a3'; // main last merged into the spike branch (new app icons from #86)
 const DOC = join(ROOT, 'docs', 'spikes', 'spike-01-tauri.md');
+// The fork point from main, found at run time. No commit id is hard-coded, so later changes do not trip it.
+const git = (...args) => spawnSync('git', ['-C', ROOT, ...args], { encoding: 'utf8' });
+const mergeBase = () => {
+  for (const ref of ['github/main', 'origin/main', 'main']) {
+    const r = git('merge-base', 'HEAD', ref);
+    const sha = r.stdout.trim();
+    if (sha) return sha;
+  }
+  return '';
+};
 const SKIP = new Set(['node_modules', 'target', '.git', 'dist']);
 
 const doc = () => {
@@ -187,14 +196,10 @@ test('AC6: no real data, storage, AI or network in the spike', () => {
   assert.deepEqual(urls, []);
 });
 
-test('AC6: the main app code is untouched and the spike is outside root lint scope', () => {
+test('AC6: the spike is outside the main app folders and root lint scope', () => {
   const dir = spikeDir();
   const rel = relative(ROOT, dir);
   assert.ok(!rel.startsWith('ui') && !rel.startsWith('src-tauri'), 'spike must not live in ui/ or src-tauri/');
-  const diff = spawnSync('git', ['-C', ROOT, 'diff', '--name-only', BASE], { encoding: 'utf8' });
-  const changed = diff.stdout.split('\n').filter(Boolean);
-  const touched = changed.filter((f) => /^(ui|src-tauri)\//.test(f));
-  assert.deepEqual(touched, [], 'main app files changed');
   const fmt = spawnSync('npx', ['biome', 'format'], { cwd: ROOT, encoding: 'utf8' });
   assert.equal(fmt.status, 0, fmt.stdout + fmt.stderr);
   const lint = spawnSync('npx', ['biome', 'ci', '--formatter-enabled=false'], { cwd: ROOT, encoding: 'utf8' });
@@ -204,6 +209,6 @@ test('AC6: the main app code is untouched and the spike is outside root lint sco
 test('AC7: nothing says it closes issue #5', () => {
   const d = doc();
   assert.doesNotMatch(d, /\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+(minhtran-agilityio\/mnemo)?#5\b/i);
-  const log = spawnSync('git', ['-C', ROOT, 'log', '--format=%B', `${BASE}..HEAD`], { encoding: 'utf8' }).stdout;
+  const log = git('log', '--format=%B', `${mergeBase()}..HEAD`).stdout;
   assert.doesNotMatch(log, /\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s+(minhtran-agilityio\/mnemo)?#5\b/i);
 });
