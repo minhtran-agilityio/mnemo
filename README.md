@@ -80,6 +80,30 @@ npm run check       # everything, stops at the first failure
 
 `npm test` also runs the acceptance tests in `tests/acceptance/` with the Node built-in runner. Those that install dependencies and inject faults into a copy of the project are skipped there; run `node --test "tests/acceptance/*.test.mjs"` to include them.
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and on every push to `main`. It has one job, run twice in a matrix:
+
+| Check name | Runner |
+| --- | --- |
+| `macos-latest` | macOS on Apple Silicon |
+| `ubuntu-22.04` | Ubuntu 22.04 |
+
+Each job installs the pinned Node and Rust toolchains, runs `npm run check`, then a debug build (`npx tauri build --debug --no-bundle`). The npm and Cargo dependencies are cached, so a run with no dependency change is shorter. A feature is done only when both checks are green.
+
+### Make both checks required on `main`
+
+A repository admin does this once. It cannot be done from a pull request.
+
+1. Open the repository on GitHub, then Settings, Branches.
+2. Under "Branch protection rules" choose "Add branch protection rule" (or edit the rule for `main`). Set "Branch name pattern" to `main`.
+3. Tick "Require a pull request before merging".
+4. Tick "Require status checks to pass before merging", then "Require branches to be up to date before merging".
+5. In the status check search box add `macos-latest` and `ubuntu-22.04`. A check appears in the list only after it has run once in the last week.
+6. Click "Create" (or "Save changes").
+
+Status: **Unverified** that this is set on the repository; see the pull request for the result.
+
 ## Environment variables
 
 None yet. New variables are listed here when they are added.
