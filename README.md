@@ -57,6 +57,29 @@ The first run compiles the Rust core and takes several minutes. An empty window 
 - `npm run build` type-checks the UI and builds it into `dist/`.
 - `npm run tauri build` makes a release bundle for the current platform.
 
+## Test
+
+Three commands cover everything. Run them from the repository root after `npm install`.
+
+```sh
+npm test            # tests only
+npm run lint        # linters only
+npm run check       # everything, stops at the first failure
+```
+
+`npm run check` runs, in this order: format check, lint, type check, tests. The cheapest failures come first.
+
+| Job | Tool |
+| --- | --- |
+| Rust format | rustfmt (`cargo fmt --check`) |
+| Rust lint (warnings are errors) | clippy |
+| Rust tests | cargo test |
+| UI lint and format | Biome |
+| UI type check | tsc |
+| UI unit tests | Vitest |
+
+`npm test` also runs the acceptance tests in `tests/acceptance/` with the Node built-in runner. Those that install dependencies and inject faults into a copy of the project are skipped there; run `node --test "tests/acceptance/*.test.mjs"` to include them.
+
 ## Environment variables
 
 None yet. New variables are listed here when they are added.
