@@ -104,6 +104,18 @@ test("collapsed icons keep their name, and get it as a tooltip", () => {
   ).toBe(false);
 });
 
+test("a collapsed Later item keeps its Later status in the tooltip", () => {
+  build(true);
+  const videos = sidebar.element.querySelector<HTMLAnchorElement>(
+    "a[data-item=videos]",
+  );
+  expect(videos?.title).toBe("Videos (Later)");
+  expect(
+    sidebar.element.querySelector<HTMLAnchorElement>("a[data-item=today]")
+      ?.title,
+  ).toBe("Today");
+});
+
 test("setCollapsed changes the look without telling the caller", () => {
   sidebar.setCollapsed(true);
   expect(sidebar.isCollapsed()).toBe(true);

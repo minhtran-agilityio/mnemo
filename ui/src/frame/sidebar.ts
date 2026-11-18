@@ -78,7 +78,8 @@ function link(
   const a = make(doc, "a", className);
   a.href = hashItemPath(item.id);
   a.dataset.item = item.id;
-  a.dataset.label = item.label;
+  // The collapsed tooltip is this text, so a Later item keeps its Later status there.
+  a.dataset.label = item.later ? `${item.label} (Later)` : item.label;
   a.append(icon(doc, item.icon), make(doc, "span", "sb-text", item.label));
   if (item.later) {
     // A real space keeps the accessible name readable: "Videos Later".
