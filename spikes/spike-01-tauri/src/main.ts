@@ -36,6 +36,7 @@ function makeCard(card: Card): HTMLElement {
   const el = document.createElement("article");
   el.className = "card";
   el.dataset.cardId = card.id;
+  el.tabIndex = 0;
   const title = document.createElement("strong");
   title.textContent = card.title;
   const meta = document.createElement("span");
@@ -52,6 +53,7 @@ function makeColumn(column: Column): HTMLElement {
   const heading = document.createElement("h2");
   heading.className = "column-title";
   const name = document.createElement("span");
+  name.className = "column-name";
   name.textContent = column.title;
   const count = document.createElement("span");
   count.className = "column-count";
@@ -72,6 +74,15 @@ function updateCounts(): void {
 }
 
 // The dragged card sits under the pointer, so skip it when looking for the column below.
+function moveCard(card: HTMLElement, target: HTMLElement): void {
+  target.querySelector(".cards")?.append(card);
+  const title = card.querySelector("strong")?.textContent ?? "card";
+  const columnTitle = target.querySelector(".column-name")?.textContent ?? "another column";
+  status.textContent = `Moved "${title}" to ${columnTitle}.`;
+  updateCounts();
+  card.focus();
+}
+
 function columnAt(x: number, y: number, dragged: HTMLElement): HTMLElement | null {
   const hit = document.elementsFromPoint(x, y).find((el) => !dragged.contains(el));
   return hit ? hit.closest<HTMLElement>(".column") : null;
@@ -106,10 +117,7 @@ function enableDrag(): void {
       card.classList.remove("is-dragging");
       clearHighlight();
       if (target && target !== from) {
-        target.querySelector(".cards")?.append(card);
-        const title = card.querySelector("strong")?.textContent ?? "card";
-        status.textContent = `Moved "${title}" to ${target.dataset.columnId}.`;
-        updateCounts();
+        moveCard(card, target);
       }
     };
     card.addEventListener("pointermove", onMove);
@@ -118,6 +126,23 @@ function enableDrag(): void {
   });
 }
 
+// Keyboard alternative to drag: Left and Right move the focused card to the neighbouring column.
+function enableKeyboard(): void {
+  board.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    const card = (event.target as HTMLElement).closest<HTMLElement>(".card");
+    const from = card?.closest<HTMLElement>(".column");
+    if (!card || !from) return;
+    const next =
+      event.key === "ArrowLeft" ? from.previousElementSibling : from.nextElementSibling;
+    if (next instanceof HTMLElement && next.classList.contains("column")) {
+      event.preventDefault();
+      moveCard(card, next);
+    }
+  });
+}
+
 for (const column of columns) board.append(makeColumn(column));
 updateCounts();
 enableDrag();
+enableKeyboard();

@@ -106,6 +106,14 @@ test('AC2: the drop target lookup skips the dragged card itself', { skip: NO_SPI
   assert.match(all, /elementsFromPoint\([^)]*\)\s*\.find\(\s*\(el\)\s*=>\s*!\w+\.contains\(el\)/, 'the lookup must skip the dragged card');
 });
 
+test('AC2: the move message names the column title, and a card can move by keyboard', { skip: NO_SPIKE }, () => {
+  const all = spikeText(/\.ts$/).map(([, t]) => t).join('\n');
+  assert.doesNotMatch(all, /to \$\{[^}]*dataset\.columnId\}/, 'the status message must not print the column id');
+  assert.match(all, /ArrowLeft/);
+  assert.match(all, /ArrowRight/);
+  assert.match(all, /tabIndex\s*=\s*0/, 'cards must be focusable');
+});
+
 test('AC2: styling comes from CSS tokens only (no colour literals outside token definitions)', { skip: NO_SPIKE }, () => {
   const css = spikeText(/\.css$/);
   assert.ok(css.length > 0, 'no spike CSS found');
