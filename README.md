@@ -80,6 +80,10 @@ npm run check       # everything, stops at the first failure
 
 `npm test` also runs the acceptance tests in `tests/acceptance/` with the Node built-in runner. Those that install dependencies and inject faults into a copy of the project are skipped there; run `node --test "tests/acceptance/*.test.mjs"` to include them.
 
+## Spikes
+
+`spikes/spike-01-tauri/` is a throwaway Tauri test for DEC-01. It is not part of the app and `npm run check` ignores it. Build steps and results: `docs/spikes/spike-01-tauri.md`.
+
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs on every pull request and on every push to `main`. It has one job, run twice in a matrix:
