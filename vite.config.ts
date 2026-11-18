@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { defineConfig } from "vite";
 
 // Vite serves and builds the web UI that lives in ui/; Tauri loads the result.
@@ -11,5 +12,12 @@ export default defineConfig({
   build: {
     outDir: "../dist",
     emptyOutDir: true,
+    // Two pages: the app, and the startup error page the core opens when storage fails.
+    rollupOptions: {
+      input: {
+        main: resolve(import.meta.dirname, "ui/index.html"),
+        error: resolve(import.meta.dirname, "ui/error.html"),
+      },
+    },
   },
 });
