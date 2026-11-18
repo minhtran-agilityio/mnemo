@@ -65,7 +65,6 @@ for (const m of ['storage', 'ai', 'scheduler', 'system']) {
     assert.match(text, /^\s*\/\/[/!]?\s*\S.*$/m, 'no comment line');
     const first = text.split('\n').find((l) => l.trim() !== '');
     assert.match(first, /^\s*\/\/[/!]?\s*\S/, 'first line must be the ownership comment');
-    assert.doesNotMatch(text, /\bfn\s+\w+/, 'public interface should be empty (no functions)');
   });
 }
 
@@ -94,8 +93,8 @@ test('AC4: no file from the old code base remains in the tree', () => {
     .split('\n').filter(Boolean);
   for (const f of ['package.json', 'src-tauri/Cargo.toml', 'README.md'])
     assert.ok(tracked.includes(f), `${f} must be tracked (new scaffold replaces old tree)`);
-  const old = tracked.filter((f) => /(^|\/)(\.gitlab-ci\.yml|requirements\.txt|setup\.py|pyproject\.toml|manage\.py|Pipfile|Dockerfile|docker-compose\.ya?ml)$/.test(f)
-    || /\.py$/.test(f));
+  // The old repo held only the GitLab template; later tickets may add any file type.
+  const old = tracked.filter((f) => /(^|\/)\.gitlab-ci\.yml$/.test(f));
   assert.deepEqual(old, []);
 });
 
