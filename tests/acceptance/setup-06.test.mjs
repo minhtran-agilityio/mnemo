@@ -146,3 +146,23 @@ test('AC8: README lists the manual checks and does not claim them done', () => {
   assert.match(r, /upgrade/i);
   assert.match(r, /launcher/i);
 });
+
+test('F3: release.yml checks the tag against the package.json version', () => {
+  const y = release();
+  assert.match(y, /GITHUB_REF_NAME/);
+  assert.match(y, /package\.json/);
+  assert.ok(y.indexOf('GITHUB_REF_NAME') < y.indexOf('tauri-apps/tauri-action@'), 'check must run before the build');
+});
+
+test('F4: release jobs run one at a time and the workflow has a concurrency group', () => {
+  const y = release();
+  assert.match(y, /max-parallel:\s*1/);
+  assert.match(y, /^concurrency:/m);
+});
+
+test('F5: release.yml runs npm run check before the build', () => {
+  const y = release();
+  const i = y.indexOf('npm run check');
+  assert.ok(i > -1, 'npm run check missing');
+  assert.ok(i < y.indexOf('tauri-apps/tauri-action@'), 'check must run before the build');
+});

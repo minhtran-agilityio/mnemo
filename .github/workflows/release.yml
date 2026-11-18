@@ -10,6 +10,11 @@ on:
 permissions:
   contents: write
 
+# One release run per ref at a time.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     name: ${{ matrix.name }}
@@ -17,6 +22,8 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
+      # One job at a time, so the two jobs cannot both create the draft release.
+      max-parallel: 1
       matrix:
         include:
           - name: macOS (Apple Silicon) dmg
@@ -29,6 +36,21 @@ jobs:
             rust-target: ""
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check the tag matches the version in package.json
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+              echo "Tag ${GITHUB_REF_NAME} does not match package.json version v${version}." >&2
+              exit 1
+            fi
+          elif git ls-remote --exit-code --tags origin "refs/tags/v${version}" >/dev/null 2>&1 \
+            && [ "${{ strategy.job-index }}" = "0" ]; then
+            echo "Tag v${version} already exists. Bump the version or use a tag push." >&2
+            exit 1
+          fi
 
       - name: Install Linux system packages
         if: runner.os == 'Linux'
@@ -55,6 +77,9 @@ jobs:
 
       - name: Install Node dependencies
         run: npm ci
+
+      - name: Run npm run check
+        run: npm run check
 
       # The tag name comes from the app version in package.json, so a manual run
       # and a tag push produce the same release.
