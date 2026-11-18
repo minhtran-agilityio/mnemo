@@ -44,7 +44,9 @@ test('installs apt packages on Linux only', () => {
   const lines = ci().split('\n');
   const apt = lines.findIndex((l) => l.includes('apt-get install'));
   assert.ok(apt >= 0, 'apt install is missing');
-  const stepStart = lines.slice(0, apt).map((l, i) => [l, i]).reverse().find(([l]) => /^\s+- (name|uses):/.test(l))[1];
+  const found = lines.slice(0, apt).map((l, i) => [l, i]).reverse().find(([l]) => /^\s+- (name|uses|run):/.test(l));
+  assert.ok(found, 'no step found above the apt install line');
+  const stepStart = found[1];
   const step = lines.slice(stepStart, apt).join('\n');
   assert.match(step, /if:\s*runner\.os == 'Linux'/);
   assert.equal(ci().split('apt-get install').length - 1, 1, 'apt install appears more than once');
