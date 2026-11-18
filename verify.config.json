@@ -1,0 +1,5 @@
+{
+  "baseUrl": "http://127.0.0.1:${PORT}",
+  "startCommand": "npx vite --port ${PORT} --strictPort --host 127.0.0.1",
+  "loginEnv": ["VERIFY_USER", "VERIFY_PASSWORD"]
+}
