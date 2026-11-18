@@ -4,7 +4,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use serde::Serialize;
 
-use crate::storage::Storage;
+use crate::storage::{Storage, StorageError};
 
 /// The one error shape every command returns: a stable machine `code` and a plain
 /// `message`. It never carries file paths, stack traces or raw error text.
@@ -66,6 +66,76 @@ pub fn ping() -> String {
     "pong from the Rust core".to_string()
 }
 
+const MAX_KEY_LEN: usize = 100;
+const MAX_VALUE_LEN: usize = 1000;
+
+fn invalid_setting(message: &str) -> AppError {
+    AppError {
+        code: "invalid_setting",
+        message: message.to_string(),
+    }
+}
+
+/// A setting key is 1 to 100 characters of a-z, 0-9, underscore, dot or hyphen.
+fn check_setting_key(key: &str) -> Result<(), AppError> {
+    let ok = !key.is_empty()
+        && key.len() <= MAX_KEY_LEN
+        && key
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '.' | '-'));
+    if ok {
+        Ok(())
+    } else {
+        Err(invalid_setting(
+            "The setting name must be 1 to 100 characters: a-z, 0-9, underscore, dot or hyphen.",
+        ))
+    }
+}
+
+/// The error the UI sees for a storage failure. The reason stays out of the message.
+fn storage_failed(e: StorageError) -> AppError {
+    log::error!("settings storage call failed: {e}");
+    AppError {
+        code: "storage_error",
+        message: "Mnemo could not read or save its settings. Nothing was deleted.".to_string(),
+    }
+}
+
+fn read_setting(storage: &AppStorage, key: &str) -> Result<Option<String>, AppError> {
+    check_setting_key(key)?;
+    storage.get()?.get_setting(key).map_err(storage_failed)
+}
+
+fn write_setting(storage: &AppStorage, key: &str, value: &str) -> Result<(), AppError> {
+    check_setting_key(key)?;
+    if value.len() > MAX_VALUE_LEN {
+        return Err(invalid_setting("The setting value is too long."));
+    }
+    storage
+        .get()?
+        .set_setting(key, value)
+        .map_err(storage_failed)
+}
+
+/// The value saved under `key`, or null when it was never saved.
+#[tauri::command]
+pub fn get_setting(
+    storage: tauri::State<'_, AppStorage>,
+    key: String,
+) -> Result<Option<String>, AppError> {
+    read_setting(&storage, &key)
+}
+
+/// Saves `value` under `key`, replacing an earlier value.
+#[tauri::command]
+pub fn set_setting(
+    storage: tauri::State<'_, AppStorage>,
+    key: String,
+    value: String,
+) -> Result<(), AppError> {
+    write_setting(&storage, &key, &value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,6 +183,62 @@ mod tests {
         })
         .join();
         assert!(state.get().is_ok());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn setting_commands_write_then_read_through_app_storage() {
+        let (storage, dir) = temp_storage();
+        let state = AppStorage::new(Ok(storage));
+        assert_eq!(read_setting(&state, "sidebar_collapsed").unwrap(), None);
+        write_setting(&state, "sidebar_collapsed", "true").unwrap();
+        write_setting(&state, "sidebar_collapsed", "false").unwrap();
+        assert_eq!(
+            read_setting(&state, "sidebar_collapsed")
+                .unwrap()
+                .as_deref(),
+            Some("false")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn setting_commands_give_storage_unavailable_when_the_database_did_not_open() {
+        let state = AppStorage::new(Err(StartupError {
+            code: "open",
+            detail: "x".into(),
+        }));
+        assert_eq!(
+            read_setting(&state, "k").unwrap_err().code,
+            "storage_unavailable"
+        );
+        assert_eq!(
+            write_setting(&state, "k", "v").unwrap_err().code,
+            "storage_unavailable"
+        );
+    }
+
+    #[test]
+    fn setting_commands_refuse_a_bad_key_or_a_too_long_value() {
+        let (storage, dir) = temp_storage();
+        let state = AppStorage::new(Ok(storage));
+        for bad in ["", "Has Space", "a/b", &"k".repeat(101)] {
+            assert_eq!(
+                read_setting(&state, bad).unwrap_err().code,
+                "invalid_setting"
+            );
+            assert_eq!(
+                write_setting(&state, bad, "v").unwrap_err().code,
+                "invalid_setting"
+            );
+        }
+        assert_eq!(
+            write_setting(&state, "k", &"v".repeat(1001))
+                .unwrap_err()
+                .code,
+            "invalid_setting"
+        );
+        assert_eq!(read_setting(&state, "k").unwrap(), None);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

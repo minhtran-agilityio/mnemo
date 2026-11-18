@@ -135,7 +135,11 @@ pub fn run() {
                 system::window::on_window_event(window, event);
             }
         })
-        .invoke_handler(tauri::generate_handler![commands::ping])
+        .invoke_handler(tauri::generate_handler![
+            commands::ping,
+            commands::get_setting,
+            commands::set_setting
+        ])
         .build(tauri::generate_context!())
         .expect("error while building Mnemo")
         .run(|_app, _event| {
