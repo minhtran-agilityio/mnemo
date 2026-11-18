@@ -88,6 +88,12 @@ test('AC2: a card can be dragged to another column', () => {
   assert.match(all, /drop|pointerup|mouseup/i, 'no drop handling');
 });
 
+test('AC2: the drop target lookup skips the dragged card itself', () => {
+  const all = spikeText(/\.ts$/).map(([, t]) => t).join('\n');
+  assert.doesNotMatch(all, /elementFromPoint\(/, 'elementFromPoint returns the dragged card, not the column below it');
+  assert.match(all, /elementsFromPoint\([^)]*\)\s*\.find\(\s*\(el\)\s*=>\s*!\w+\.contains\(el\)/, 'the lookup must skip the dragged card');
+});
+
 test('AC2: styling comes from CSS tokens only (no colour literals outside token definitions)', () => {
   const css = spikeText(/\.css$/);
   assert.ok(css.length > 0, 'no spike CSS found');

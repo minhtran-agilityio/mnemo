@@ -71,8 +71,9 @@ function updateCounts(): void {
   }
 }
 
-function columnAt(x: number, y: number): HTMLElement | null {
-  const hit = document.elementFromPoint(x, y);
+// The dragged card sits under the pointer, so skip it when looking for the column below.
+function columnAt(x: number, y: number, dragged: HTMLElement): HTMLElement | null {
+  const hit = document.elementsFromPoint(x, y).find((el) => !dragged.contains(el));
   return hit ? hit.closest<HTMLElement>(".column") : null;
 }
 
@@ -94,13 +95,13 @@ function enableDrag(): void {
     const onMove = (move: PointerEvent): void => {
       card.style.transform = `translate(${move.clientX - startX}px, ${move.clientY - startY}px)`;
       clearHighlight();
-      columnAt(move.clientX, move.clientY)?.classList.add("is-over");
+      columnAt(move.clientX, move.clientY, card)?.classList.add("is-over");
     };
     const onUp = (up: PointerEvent): void => {
       card.removeEventListener("pointermove", onMove);
       card.removeEventListener("pointerup", onUp);
       card.removeEventListener("pointercancel", onUp);
-      const target = columnAt(up.clientX, up.clientY);
+      const target = columnAt(up.clientX, up.clientY, card);
       card.style.transform = "";
       card.classList.remove("is-dragging");
       clearHighlight();
