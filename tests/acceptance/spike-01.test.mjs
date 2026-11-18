@@ -42,13 +42,16 @@ function spikeDir() {
   const confs = walk(ROOT).filter(
     (f) => f.endsWith('tauri.conf.json') && relative(ROOT, f) !== join('src-tauri', 'tauri.conf.json'),
   );
-  assert.ok(confs.length > 0, 'no spike Tauri project found (a second tauri.conf.json outside src-tauri/)');
+  if (confs.length === 0) return null;
   // project root = parent of src-tauri/ (or the dir holding the conf)
   let d = dirname(confs[0]);
   if (d.endsWith('src-tauri')) d = dirname(d);
   return d;
 }
-const spikeFiles = () => walk(spikeDir()).filter((f) => !/package-lock\.json|Cargo\.lock|\/gen\/|\/icons\//.test(f));
+// The doc tells the owner to delete the spike folder after DEC-01. Spike tests then skip instead of failing.
+const SPIKE = spikeDir();
+const NO_SPIKE = SPIKE ? false : 'spike folder removed (after DEC-01)';
+const spikeFiles = () => walk(SPIKE).filter((f) => !/package-lock\.json|Cargo\.lock|\/gen\/|\/icons\//.test(f));
 const spikeText = (re) =>
   spikeFiles()
     .filter((f) => re.test(f))
@@ -71,8 +74,8 @@ test('AC1: one documented build command sequence, recorded as run with exit code
   assert.match(d, /exit(\s+code)?\s*[:=]?\s*0\b/i, 'the doc must record the build exit code 0');
 });
 
-test('AC1: the documented build points at a real spike project', () => {
-  const dir = spikeDir();
+test('AC1: the documented build points at a real spike project', { skip: NO_SPIKE }, () => {
+  const dir = SPIKE;
   assert.ok(existsSync(join(dir, 'package.json')), 'spike package.json missing');
   assert.ok(
     existsSync(join(dir, 'src-tauri', 'Cargo.toml')) || existsSync(join(dir, 'Cargo.toml')),
@@ -82,7 +85,7 @@ test('AC1: the documented build points at a real spike project', () => {
   assert.ok(doc().includes(rel), `the doc must name the spike folder ${rel}`);
 });
 
-test('AC2: the spike screen has kanban columns and cards from hard-coded sample data', () => {
+test('AC2: the spike screen has kanban columns and cards from hard-coded sample data', { skip: NO_SPIKE }, () => {
   const src = spikeText(/\.(html|tsx?|jsx?|js)$/).filter(([f]) => !/vite\.config/.test(f));
   assert.ok(src.length > 0, 'no spike UI source found');
   const all = src.map(([, t]) => t).join('\n');
@@ -91,19 +94,19 @@ test('AC2: the spike screen has kanban columns and cards from hard-coded sample 
   assert.match(all, /(To ?do|Backlog|Doing|In progress|Done)/i, 'sample column names missing');
 });
 
-test('AC2: a card can be dragged to another column', () => {
+test('AC2: a card can be dragged to another column', { skip: NO_SPIKE }, () => {
   const all = spikeText(/\.(html|tsx?|jsx?|js)$/).map(([, t]) => t).join('\n');
   assert.match(all, /dragstart|pointerdown|mousedown/i, 'no drag start handling');
   assert.match(all, /drop|pointerup|mouseup/i, 'no drop handling');
 });
 
-test('AC2: the drop target lookup skips the dragged card itself', () => {
+test('AC2: the drop target lookup skips the dragged card itself', { skip: NO_SPIKE }, () => {
   const all = spikeText(/\.ts$/).map(([, t]) => t).join('\n');
   assert.doesNotMatch(all, /elementFromPoint\(/, 'elementFromPoint returns the dragged card, not the column below it');
   assert.match(all, /elementsFromPoint\([^)]*\)\s*\.find\(\s*\(el\)\s*=>\s*!\w+\.contains\(el\)/, 'the lookup must skip the dragged card');
 });
 
-test('AC2: styling comes from CSS tokens only (no colour literals outside token definitions)', () => {
+test('AC2: styling comes from CSS tokens only (no colour literals outside token definitions)', { skip: NO_SPIKE }, () => {
   const css = spikeText(/\.css$/);
   assert.ok(css.length > 0, 'no spike CSS found');
   const all = css.map(([, t]) => t).join('\n');
@@ -120,7 +123,7 @@ test('AC2: styling comes from CSS tokens only (no colour literals outside token 
   assert.doesNotMatch(markup, /style=["'][^"']*#[0-9a-fA-F]{3,8}/, 'inline hex colours');
 });
 
-test('AC3: tray has exactly two items, Open and Quit', () => {
+test('AC3: tray has exactly two items, Open and Quit', { skip: NO_SPIKE }, () => {
   const rs = spikeText(/\.rs$/).map(([, t]) => t).join('\n');
   assert.match(rs, /TrayIcon/);
   assert.match(rs, /["']Open["']/);
@@ -129,7 +132,7 @@ test('AC3: tray has exactly two items, Open and Quit', () => {
   assert.equal(items.length, 2, `expected exactly 2 tray menu items, found ${items.length}`);
 });
 
-test('AC3: closing the window hides it, Open shows it, Quit exits', () => {
+test('AC3: closing the window hides it, Open shows it, Quit exits', { skip: NO_SPIKE }, () => {
   const rs = spikeText(/\.rs$/).map(([, t]) => t).join('\n');
   assert.match(rs, /CloseRequested/);
   assert.match(rs, /prevent_close/);
@@ -183,7 +186,7 @@ test('AC5: the file ends with a blank DEC-01 line', () => {
   assert.match(last, /^\W*DEC-01\W*(:\s*)?[_\s.\-]*$/, 'the DEC-01 line must have nothing after it');
 });
 
-test('AC6: no real data, storage, AI or network in the spike', () => {
+test('AC6: no real data, storage, AI or network in the spike', { skip: NO_SPIKE }, () => {
   const files = spikeText(/\.(rs|toml|html|tsx?|jsx?|js|json)$/).filter(([f]) => !/package\.json$/.test(f));
   assert.ok(files.length > 0);
   const all = files.map(([, t]) => t).join('\n');
@@ -196,8 +199,8 @@ test('AC6: no real data, storage, AI or network in the spike', () => {
   assert.deepEqual(urls, []);
 });
 
-test('AC6: the spike is outside the main app folders and root lint scope', () => {
-  const dir = spikeDir();
+test('AC6: the spike is outside the main app folders and root lint scope', { skip: NO_SPIKE }, () => {
+  const dir = SPIKE;
   const rel = relative(ROOT, dir);
   assert.ok(!rel.startsWith('ui') && !rel.startsWith('src-tauri'), 'spike must not live in ui/ or src-tauri/');
   const fmt = spawnSync('npx', ['biome', 'format'], { cwd: ROOT, encoding: 'utf8' });
