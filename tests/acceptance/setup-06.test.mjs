@@ -195,3 +195,9 @@ test('F2: the concurrency group does not depend on the ref', () => {
   assert.ok(g, 'concurrency group missing');
   assert.doesNotMatch(g[1], /github\.ref/);
 });
+
+test('F3: the tag check fails closed on ls-remote errors', () => {
+  const y = release();
+  assert.doesNotMatch(y, /ls-remote[^\n]*2>&1\s*;?\s*then/, 'ls-remote must not be used directly as an if condition');
+  assert.match(y, /!=\s*"2"/, 'only exit code 2 (no such tag) may pass');
+});

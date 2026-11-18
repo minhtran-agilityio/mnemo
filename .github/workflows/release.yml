@@ -34,9 +34,18 @@ jobs:
               echo "Tag ${GITHUB_REF_NAME} does not match package.json version v${version}." >&2
               exit 1
             fi
-          elif git ls-remote --exit-code --tags origin "refs/tags/v${version}" >/dev/null 2>&1; then
-            echo "Tag v${version} already exists. Bump the version or use a tag push." >&2
-            exit 1
+          else
+            # --exit-code: 0 = tag found, 2 = no such tag. Any other code
+            # (network, auth) is an error: fail instead of skipping the guard.
+            rc=0
+            git ls-remote --exit-code --tags origin "refs/tags/v${version}" >/dev/null || rc=$?
+            if [ "${rc}" = "0" ]; then
+              echo "Tag v${version} already exists. Bump the version or use a tag push." >&2
+              exit 1
+            elif [ "${rc}" != "2" ]; then
+              echo "Could not check for tag v${version} (git ls-remote exit ${rc})." >&2
+              exit 1
+            fi
           fi
 
   release:
