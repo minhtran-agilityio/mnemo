@@ -116,6 +116,18 @@ fn write_setting(storage: &AppStorage, key: &str, value: &str) -> Result<(), App
         .map_err(storage_failed)
 }
 
+/// The result of a blocking task. A task that failed to finish (it panicked or was
+/// cancelled) gives a coded error without the reason; the reason goes to the log.
+fn task_result<T>(joined: Result<Result<T, AppError>, tauri::Error>) -> Result<T, AppError> {
+    joined.map_err(|e| {
+        log::error!("storage task did not finish: {e}");
+        AppError {
+            code: "storage_error",
+            message: "Mnemo could not finish reading or saving. Nothing was deleted.".to_string(),
+        }
+    })?
+}
+
 /// Runs `work` on a blocking thread, so the storage lock and SQLite I/O never hold up
 /// the main thread. A thread that failed gives the same coded error as a storage failure.
 async fn off_main_thread<T, F>(app: tauri::AppHandle, work: F) -> Result<T, AppError>
@@ -123,18 +135,13 @@ where
     T: Send + 'static,
     F: FnOnce(&AppStorage) -> Result<T, AppError> + Send + 'static,
 {
-    tauri::async_runtime::spawn_blocking(move || {
-        let storage = app.state::<AppStorage>();
-        work(&storage)
-    })
-    .await
-    .map_err(|e| {
-        log::error!("settings task did not finish: {e}");
-        AppError {
-            code: "storage_error",
-            message: "Mnemo could not read or save its settings. Nothing was deleted.".to_string(),
-        }
-    })?
+    task_result(
+        tauri::async_runtime::spawn_blocking(move || {
+            let storage = app.state::<AppStorage>();
+            work(&storage)
+        })
+        .await,
+    )
 }
 
 /// The value saved under `key`, or null when it was never saved.
@@ -165,6 +172,33 @@ mod tests {
     fn temp_storage() -> (Storage, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("mnemo-appstorage-{}", uuid::Uuid::new_v4()));
         (Storage::open(&dir.join("mnemo.db")).unwrap(), dir)
+    }
+
+    #[test]
+    fn task_result_passes_the_value_and_the_work_error_through() {
+        assert_eq!(task_result(Ok(Ok(5))).unwrap(), 5);
+        let err = task_result::<()>(Ok(Err(AppError {
+            code: "invalid_setting",
+            message: "bad".into(),
+        })))
+        .err()
+        .unwrap();
+        assert_eq!(err.code, "invalid_setting");
+    }
+
+    #[test]
+    fn a_panicking_blocking_task_gives_a_coded_error_without_the_detail() {
+        let joined: Result<Result<(), AppError>, tauri::Error> =
+            tauri::async_runtime::block_on(tauri::async_runtime::spawn_blocking(|| {
+                panic!("secret detail at /home/someone/mnemo.db")
+            }));
+        let err = task_result(joined).err().unwrap();
+        assert_eq!(err.code, "storage_error");
+        assert!(
+            !err.message.contains('/') && !err.message.contains("secret"),
+            "no detail may reach the UI: {}",
+            err.message
+        );
     }
 
     #[test]
