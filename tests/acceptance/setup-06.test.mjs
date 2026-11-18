@@ -109,7 +109,8 @@ test('AC5: README has macOS install steps for the unsigned dmg', () => {
   const r = read('README.md');
   assert.match(r, /\.dmg/);
   assert.match(r, /Applications/);
-  assert.match(r, /right-click/i);
+  assert.match(r, /Open Anyway/);
+  assert.match(r, /xattr/);
   assert.match(r, /Privacy & Security/);
 });
 
@@ -165,4 +166,16 @@ test('F5: release.yml runs npm run check before the build', () => {
   const i = y.indexOf('npm run check');
   assert.ok(i > -1, 'npm run check missing');
   assert.ok(i < y.indexOf('tauri-apps/tauri-action@'), 'check must run before the build');
+});
+
+test('F6: package-lock.json root version matches package.json and README mentions it', () => {
+  const lock = JSON.parse(read('package-lock.json'));
+  assert.equal(lock.version, version());
+  assert.equal(lock.packages[''].version, version());
+  assert.match(read('README.md'), /package-lock\.json/);
+});
+
+test('F7: README leads with Open Anyway and does not recommend right-click Open', () => {
+  const r = read('README.md');
+  assert.ok(r.indexOf('Open Anyway') < (r.indexOf('right-click') === -1 ? Infinity : r.indexOf('right-click')));
 });
