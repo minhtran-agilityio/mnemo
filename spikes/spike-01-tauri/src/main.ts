@@ -129,6 +129,8 @@ function enableDrag(): void {
 // Keyboard alternative to drag: Left and Right move the focused card to the neighbouring column.
 function enableKeyboard(): void {
   board.addEventListener("keydown", (event) => {
+    // Leave browser and OS shortcuts (Alt+Left, Cmd+Left, Shift+Arrow) alone.
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     const card = (event.target as HTMLElement).closest<HTMLElement>(".card");
     const from = card?.closest<HTMLElement>(".column");
