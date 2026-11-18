@@ -45,9 +45,12 @@ const columns: Column[] = [
 type State = { columns: Column[]; message: string };
 const store = createStore<State>({ columns, message: "" });
 
-// Set by mountKanban before anything renders.
+// Set once by mountKanban before anything renders.
 let board: HTMLElement;
 let status: HTMLElement;
+let mounted = false;
+// The card to focus after the next redraw: set by a move, read by render.
+let focusAfterRender: string | undefined;
 
 function makeColumn(column: Column): HTMLElement {
   const el = document.createElement("section");
@@ -70,15 +73,21 @@ function makeColumn(column: Column): HTMLElement {
 }
 
 // The one place that changes the DOM: it redraws the board from the state.
-function render(state: State, focusId?: string): void {
+function render(state: State): void {
   board.replaceChildren(...state.columns.map(makeColumn));
   status.textContent = state.message;
-  if (focusId)
-    board.querySelector<HTMLElement>(`[data-card-id="${focusId}"]`)?.focus();
+  const focusId = focusAfterRender;
+  focusAfterRender = undefined;
+  if (!focusId) return;
+  // Compare ids directly instead of building a selector, so any id is safe.
+  const cards = board.querySelectorAll<HTMLElement>(".card");
+  for (const card of cards) if (card.dataset.cardId === focusId) card.focus();
 }
 
-// The only writer of the columns: a pure move, then the store tells the screen.
+// The only writer of the columns: a pure move, then the store tells the screen
+// (render subscribes to the store in mountKanban).
 function moveCard(cardId: string, toColumnId: string): void {
+  focusAfterRender = cardId;
   store.update((state) => {
     const from = state.columns.find((c) =>
       c.cards.some((card) => card.id === cardId),
@@ -94,7 +103,8 @@ function moveCard(cardId: string, toColumnId: string): void {
     });
     return { columns, message: `Moved "${card.title}" to ${to.title}.` };
   });
-  render(store.get(), cardId);
+  // A move that changed nothing does not redraw, so drop the pending focus.
+  focusAfterRender = undefined;
 }
 
 function columnAt(
@@ -129,20 +139,24 @@ function enableDrag(): void {
       clearHighlight();
       columnAt(move.clientX, move.clientY, card)?.classList.add("is-over");
     };
-    const onUp = (up: PointerEvent): void => {
+    const finish = (): void => {
       card.removeEventListener("pointermove", onMove);
       card.removeEventListener("pointerup", onUp);
-      card.removeEventListener("pointercancel", onUp);
-      const target = columnAt(up.clientX, up.clientY, card);
+      card.removeEventListener("pointercancel", finish);
       card.style.transform = "";
       card.classList.remove("is-dragging");
       clearHighlight();
+    };
+    const onUp = (up: PointerEvent): void => {
+      const target = columnAt(up.clientX, up.clientY, card);
+      finish();
       if (target && target !== from)
         moveCard(card.dataset.cardId ?? "", target.dataset.columnId ?? "");
     };
     card.addEventListener("pointermove", onMove);
     card.addEventListener("pointerup", onUp);
-    card.addEventListener("pointercancel", onUp);
+    // A cancelled gesture is not a drop: put the card back and move nothing.
+    card.addEventListener("pointercancel", finish);
   });
 }
 
@@ -168,9 +182,13 @@ function enableKeyboard(): void {
 }
 
 // Proof screen for the UI approach (#7): draws the sample board into the given elements.
+// It mounts once; a second call does nothing, so listeners are never added twice.
 export function mountKanban(boardEl: HTMLElement, statusEl: HTMLElement): void {
+  if (mounted) return;
+  mounted = true;
   board = boardEl;
   status = statusEl;
+  store.subscribe(render);
   render(store.get());
   enableDrag();
   enableKeyboard();
