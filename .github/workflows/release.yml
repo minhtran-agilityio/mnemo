@@ -6,9 +6,9 @@ on:
       - "v*"
   workflow_dispatch:
 
-# Only this workflow may write to the repository (it creates the draft release).
+# Read-only by default; only the release job, which creates the draft, may write.
 permissions:
-  contents: write
+  contents: read
 
 # One release run at a time, whatever the trigger: a tag push and a manual run
 # for the same version must not run together.
@@ -22,6 +22,8 @@ jobs:
     name: Check the version and tag
     runs-on: ubuntu-22.04
     timeout-minutes: 5
+    outputs:
+      build: ${{ steps.published.outputs.build }}
     steps:
       - uses: actions/checkout@v4
 
@@ -48,9 +50,36 @@ jobs:
             fi
           fi
 
+      # Publishing a draft made by a manual run creates its tag, and that tag
+      # push starts this workflow again. The release already exists then, so
+      # skip the builds instead of re-uploading to a published release.
+      - name: Skip if the release for this tag already exists
+        id: published
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Only "release not found" means build; any other error fails closed.
+          if out="$(gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json tagName 2>&1)"; then
+            echo "Release ${GITHUB_REF_NAME} already exists; nothing to build."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          elif printf '%s' "${out}" | grep -qi "release not found"; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Could not check for release ${GITHUB_REF_NAME}: ${out}" >&2
+            exit 1
+          fi
+
   release:
     name: ${{ matrix.name }}
     needs: guard
+    if: needs.guard.outputs.build == 'true'
+    permissions:
+      contents: write
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
