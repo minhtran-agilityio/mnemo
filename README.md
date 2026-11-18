@@ -1,93 +1,144 @@
-# mnemo
+# Mnemo
 
+## What is Mnemo
 
+Mnemo is a local-first desktop app built with Tauri 2. The Rust core lives in `src-tauri/` and the web UI (HTML, CSS, TypeScript) lives in `ui/`. The core has four modules, each with one job:
 
-## Getting started
+| Module | Owns |
+| --- | --- |
+| `storage` | Reading and writing local data |
+| `ai` | Calls to language models |
+| `scheduler` | When background work runs |
+| `system` | OS integration |
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+The UI talks to the core through named Tauri commands. Today there is one, `ping`, which proves the bridge works: the window shows the text the Rust core returns.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+## Prerequisites
 
-## Add your files
+Install these on a new machine before the first run.
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+### Both platforms
 
+- Rust, through [rustup](https://rustup.rs). The exact version is pinned in `rust-toolchain.toml`; rustup installs it on first build.
+- Node.js 24, pinned in `.nvmrc`. With nvm run `nvm install`, with fnm run `fnm use`.
+- npm (comes with Node).
+
+### Ubuntu 22.04
+
+Install the Tauri system packages:
+
+```sh
+sudo apt update
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 ```
-cd existing_repo
-git remote add origin https://gitlab.asoft-python.com/minh.tran/mnemo.git
-git branch -M main
-git push -uf origin main
+
+### macOS (Apple Silicon)
+
+Install the Xcode Command Line Tools:
+
+```sh
+xcode-select --install
 ```
 
-## Integrate with your tools
+Then install Rust (rustup) and Node as above. No other system packages are needed for desktop development.
 
-* [Set up project integrations](https://gitlab.asoft-python.com/minh.tran/mnemo/-/settings/integrations)
+## Run in dev mode
 
-## Collaborate with your team
+```sh
+npm install
+npm run tauri dev
+```
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+The first run compiles the Rust core and takes several minutes. An empty window opens and shows the reply from the `ping` command.
 
-## Test and Deploy
+## Other commands
 
-Use the built-in continuous integration in GitLab.
+- `npm run build` type-checks the UI and builds it into `dist/`.
+- `npm run tauri build` makes a release bundle for the current platform.
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+## Test
 
-***
+Three commands cover everything. Run them from the repository root after `npm install`.
 
-# Editing this README
+```sh
+npm test            # tests only
+npm run lint        # linters only
+npm run check       # everything, stops at the first failure
+```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+`npm run check` runs, in this order: format check, lint, type check, tests. The cheapest failures come first.
 
-## Suggestions for a good README
+| Job | Tool |
+| --- | --- |
+| Rust format | rustfmt (`cargo fmt --check`) |
+| Rust lint (warnings are errors) | clippy |
+| Rust tests | cargo test |
+| UI lint and format | Biome |
+| UI type check | tsc |
+| UI unit tests | Vitest |
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+`npm test` also runs the acceptance tests in `tests/acceptance/` with the Node built-in runner. Those that install dependencies and inject faults into a copy of the project are skipped there; run `node --test "tests/acceptance/*.test.mjs"` to include them.
 
-## Name
-Choose a self-explaining name for your project.
+## Continuous integration
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+`.github/workflows/ci.yml` runs on every pull request and on every push to `main`. It has one job, run twice in a matrix:
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+| Check name | Runner |
+| --- | --- |
+| `macos-latest` | macOS on Apple Silicon |
+| `ubuntu-22.04` | Ubuntu 22.04 |
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+Each job installs the pinned Node and Rust toolchains, runs `npm run check`, then a debug build (`npx tauri build --debug --no-bundle`). The npm and Cargo dependencies are cached, so a run with no dependency change is shorter. A feature is done only when both checks are green.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+### Make both checks required on `main`
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+A repository admin does this once. It cannot be done from a pull request.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+1. Open the repository on GitHub, then Settings, Branches.
+2. Under "Branch protection rules" choose "Add branch protection rule" (or edit the rule for `main`). Set "Branch name pattern" to `main`.
+3. Tick "Require a pull request before merging".
+4. Tick "Require status checks to pass before merging", then "Require branches to be up to date before merging".
+5. In the status check search box add `macos-latest` and `ubuntu-22.04`. A check appears in the list only after it has run once in the last week.
+6. Click "Create" (or "Save changes").
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+Status: **Unverified** that this is set on the repository; see the pull request for the result.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+## How to release
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+The version number lives in one place: `version` in `package.json`. `src-tauri/tauri.conf.json` reads it from there. `src-tauri/Cargo.toml`, the `mnemo` entry in `src-tauri/Cargo.lock` and the root version in `package-lock.json` cannot read it, so tests (`tests/version-sync.test.mjs` and `tests/acceptance/setup-06.test.mjs`) fail if they differ.
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+1. Bump the version: set the same number in `package.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` (run `cargo check --manifest-path src-tauri/Cargo.toml` to update it) and `package-lock.json` (run `npm install --package-lock-only`), then run `npm run check` and commit.
+2. Tag the commit with the same number: `git tag v0.2.0`.
+3. Push the tag: `git push origin v0.2.0`. The workflow `.github/workflows/release.yml` also runs by hand from the Actions tab (workflow_dispatch).
+4. Wait for both jobs to finish. They attach a macOS Apple Silicon `.dmg`, an Ubuntu `.deb` and an `.AppImage` to one draft release named after the version in `package.json`.
+5. Open the draft on GitHub, check the three files, then publish it.
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+The bundles are not signed or notarized (no Apple developer account is assumed). There is no auto-update; install a new version by hand.
 
-## License
-For open source projects, say how it is licensed.
+## Install
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Download the files from the latest published release on the repository's Releases page.
+
+### macOS (Apple Silicon)
+
+1. Open the `.dmg` and drag Mnemo to Applications.
+2. Open Mnemo from Applications. macOS blocks the first launch because the app is unsigned. Allow it once: open System Settings > Privacy & Security, scroll down to the blocked Mnemo message and choose "Open Anyway". On macOS 15 and later, right-click then Open no longer works for unsigned apps. Advanced: remove the quarantine flag in Terminal with `xattr -dr com.apple.quarantine /Applications/Mnemo.app`.
+
+### Ubuntu 22.04
+
+- `.deb`: run `sudo apt install ./Mnemo_<version>_amd64.deb`. Mnemo then appears in the application launcher.
+- AppImage: run `chmod +x Mnemo_<version>_amd64.AppImage`, then start it with `./Mnemo_<version>_amd64.AppImage`.
+
+### Open manual checks
+
+Status: **Unverified**. These need the owner's own machines and are not done:
+
+- [ ] The `.dmg` installs on the Mac, and the app opens after the one-time allow step.
+- [ ] The `.deb` installs on Ubuntu 22.04 and Mnemo shows in the launcher.
+- [ ] The AppImage starts on Ubuntu 22.04.
+- [ ] An upgrade over an older install keeps the data (checkable after the storage issue #13).
+
+## Environment variables
+
+None yet. New variables are listed here when they are added.

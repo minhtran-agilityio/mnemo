@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# Read-only by default; only the release job, which creates the draft, may write.
+permissions:
+  contents: read
+
+# One release run at a time, whatever the trigger: a tag push and a manual run
+# for the same version must not run together.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # Runs once, before any build job. A failure here stops every build job.
+  guard:
+    name: Check the version and tag
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.published.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the version in package.json
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+              echo "Tag ${GITHUB_REF_NAME} does not match package.json version v${version}." >&2
+              exit 1
+            fi
+          else
+            # --exit-code: 0 = tag found, 2 = no such tag. Any other code
+            # (network, auth) is an error: fail instead of skipping the guard.
+            rc=0
+            git ls-remote --exit-code --tags origin "refs/tags/v${version}" >/dev/null || rc=$?
+            if [ "${rc}" = "0" ]; then
+              echo "Tag v${version} already exists. Bump the version or use a tag push." >&2
+              exit 1
+            elif [ "${rc}" != "2" ]; then
+              echo "Could not check for tag v${version} (git ls-remote exit ${rc})." >&2
+              exit 1
+            fi
+          fi
+
+      # Publishing a draft made by a manual run creates its tag, and that tag
+      # push starts this workflow again. The release already exists then, so
+      # skip the builds instead of re-uploading to a published release.
+      - name: Skip if the release for this tag already exists
+        id: published
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Only "release not found" means build; any other error fails closed.
+          if out="$(gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json tagName 2>&1)"; then
+            echo "Release ${GITHUB_REF_NAME} already exists; nothing to build."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          elif printf '%s' "${out}" | grep -qi "release not found"; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Could not check for release ${GITHUB_REF_NAME}: ${out}" >&2
+            exit 1
+          fi
+
+  release:
+    name: ${{ matrix.name }}
+    needs: guard
+    if: needs.guard.outputs.build == 'true'
+    permissions:
+      contents: write
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      # One job at a time, so the two jobs cannot both create the draft release.
+      max-parallel: 1
+      matrix:
+        include:
+          - name: macOS (Apple Silicon) dmg
+            os: macos-latest
+            args: --target aarch64-apple-darwin --bundles dmg
+            rust-target: aarch64-apple-darwin
+          - name: Ubuntu 22.04 deb and AppImage
+            os: ubuntu-22.04
+            args: --bundles deb,appimage
+            rust-target: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+
+      - name: Add the Apple Silicon target
+        if: matrix.rust-target != ''
+        run: rustup target add ${{ matrix.rust-target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Run npm run check
+        run: npm run check
+
+      # The tag name comes from the app version in package.json, so a manual run
+      # and a tag push produce the same release.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: Mnemo v__VERSION__
+          releaseBody: See the README for install steps. Bundles are unsigned.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
