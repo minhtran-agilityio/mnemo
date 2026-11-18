@@ -32,7 +32,12 @@ impl Storage {
         let mut conn = Connection::open(path).map_err(|e| StorageError::Open(e.to_string()))?;
         conn.busy_timeout(BUSY_TIMEOUT)
             .map_err(|e| StorageError::Open(e.to_string()))?;
-        // The first read of the file fails here when it is not a database.
+        // Refuse a file from a newer Mnemo before anything is written to it: turning on
+        // WAL changes the file header and adds -wal/-shm files. The first read of the
+        // file also fails here when it is not a database.
+        let found =
+            migrate::current_version(&conn).map_err(|e| StorageError::Open(e.to_string()))?;
+        migrate::check_supported(found, migrate::MIGRATIONS)?;
         let mode: String = conn
             .query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))
             .map_err(|e| StorageError::Open(e.to_string()))?;
@@ -133,6 +138,29 @@ mod tests {
         assert_eq!(fs::read(&p).unwrap(), junk);
         let leftovers: Vec<_> = fs::read_dir(p.parent().unwrap()).unwrap().collect();
         assert_eq!(leftovers.len(), 1);
+    }
+
+    #[test]
+    fn a_file_from_a_newer_mnemo_is_refused_before_wal_is_turned_on() {
+        let (_dir, path) = temp_db();
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA user_version = 99").unwrap();
+        }
+        let before = fs::read(&path).unwrap();
+        let err = Storage::open(&path)
+            .err()
+            .expect("a newer file must be refused");
+        assert!(matches!(err, StorageError::SchemaTooNew { found: 99, .. }));
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            before,
+            "the file must be left as it is"
+        );
+        assert!(
+            !path.with_extension("db-wal").exists(),
+            "no -wal file may be created"
+        );
     }
 
     #[test]

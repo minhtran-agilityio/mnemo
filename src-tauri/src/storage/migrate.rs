@@ -22,13 +22,19 @@ pub fn current_version(conn: &Connection) -> Result<u32, StorageError> {
     Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
 }
 
-/// Applies every migration newer than the stored version.
-pub fn run(conn: &mut Connection, migrations: &[Migration]) -> Result<(), StorageError> {
-    let found = current_version(conn)?;
+/// Fails when the stored version is newer than the newest shipped migration.
+pub fn check_supported(found: u32, migrations: &[Migration]) -> Result<(), StorageError> {
     let supported = migrations.iter().map(|m| m.number).max().unwrap_or(0);
     if found > supported {
         return Err(StorageError::SchemaTooNew { found, supported });
     }
+    Ok(())
+}
+
+/// Applies every migration newer than the stored version.
+pub fn run(conn: &mut Connection, migrations: &[Migration]) -> Result<(), StorageError> {
+    let found = current_version(conn)?;
+    check_supported(found, migrations)?;
     for m in migrations.iter().filter(|m| m.number > found) {
         apply(conn, m).map_err(|e| StorageError::MigrationFailed {
             number: m.number,

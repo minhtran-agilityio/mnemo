@@ -41,6 +41,15 @@ fn open_storage(data_dir: &std::path::Path) -> Result<storage::Storage, StartupE
     })
 }
 
+/// Managed state: true when storage could not be opened and the window shows the error page.
+struct StartupFailed(bool);
+
+/// Whether Mnemo builds its tray item and hides to it on close. Not on the error page:
+/// the page asks the owner to quit, and a hidden broken app would only show it again.
+fn keeps_running_in_tray(storage_failed: bool, tray_available: bool) -> bool {
+    tray_available && !storage_failed
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -71,16 +80,20 @@ pub fn run() {
                 }),
             };
             if let Err(e) = &opened {
+                // stderr for a terminal start, the log for a start from the Dock or a launcher.
                 eprintln!(
                     "Mnemo could not open its data file ({}): {}",
                     e.code, e.detail
                 );
+                log::error!("could not open the data file ({}): {}", e.code, e.detail);
             }
             let error_code = opened.as_ref().err().map(|e| e.code);
             app.manage(AppStorage::new(opened));
+            app.manage(StartupFailed(error_code.is_some()));
 
             // Close hides the window only when a tray item really exists to bring it back.
-            let tray = system::tray::tray_available()
+            // On the error page there is no tray: closing the window quits Mnemo.
+            let tray = keeps_running_in_tray(error_code.is_some(), system::tray::tray_available())
                 && match system::tray::build_tray(app) {
                     Ok(()) => true,
                     Err(err) => {
@@ -114,7 +127,14 @@ pub fn run() {
             }
             Ok(())
         })
-        .on_window_event(system::window::on_window_event)
+        .on_window_event(|window, event| {
+            // The error page asks the owner to quit and start again, so a close there
+            // quits instead of hiding to the tray.
+            let failed = window.try_state::<StartupFailed>().is_some_and(|s| s.0);
+            if !failed {
+                system::window::on_window_event(window, event);
+            }
+        })
         .invoke_handler(tauri::generate_handler![commands::ping])
         .build(tauri::generate_context!())
         .expect("error while building Mnemo")
@@ -129,8 +149,15 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{start_url, startup_code, StorageError};
+    use super::{keeps_running_in_tray, start_url, startup_code, StorageError};
     use tauri::WebviewUrl;
+
+    #[test]
+    fn no_tray_on_the_error_page() {
+        assert!(keeps_running_in_tray(false, true));
+        assert!(!keeps_running_in_tray(true, true));
+        assert!(!keeps_running_in_tray(false, false));
+    }
 
     #[test]
     fn start_url_is_the_app_when_storage_opened() {
