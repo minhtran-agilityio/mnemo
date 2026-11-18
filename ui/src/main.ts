@@ -22,7 +22,8 @@ async function showVersion(): Promise<void> {
   try {
     versionEl.textContent = versionText(await getVersion());
   } catch (error) {
-    versionEl.textContent = versionErrorText(error);
+    console.error("getVersion failed:", error);
+    versionEl.textContent = versionErrorText();
   }
 }
 
