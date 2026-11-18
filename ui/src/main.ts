@@ -7,7 +7,11 @@ import { getVersion } from "@tauri-apps/api/app";
 import { renderEmptyState } from "./frame/empty-state";
 import { EVERYTHING_ID } from "./frame/nav";
 import { createRouter } from "./frame/router";
-import { createSidebarFromSaved, readCollapsed } from "./frame/sidebar";
+import {
+  createSidebarFromSaved,
+  ReadTimeoutError,
+  readCollapsed,
+} from "./frame/sidebar";
 import { pingErrorText } from "./ping-text";
 import { errorMessage, getSetting, ping, setSetting } from "./shared/api";
 import { versionErrorText, versionText } from "./version-text";
@@ -38,7 +42,7 @@ function loadCollapsed(): Promise<boolean> {
       console.error("could not read the sidebar setting:", error);
       showNote(
         readNote,
-        `Mnemo could not read the saved sidebar setting, so the sidebar is open. ${errorMessage(error)}`,
+        `Mnemo could not read the saved sidebar setting, so the sidebar is open. ${error instanceof ReadTimeoutError ? error.message : errorMessage(error)}`,
       );
     },
   );
@@ -96,6 +100,14 @@ async function start(): Promise<void> {
   router.start();
 }
 
-void start();
+/** Start-up must never end in a blank window: a failure shows a plain line instead. */
+function startFailedText(error: unknown): string {
+  return `Mnemo could not build its window. Quit Mnemo and start it again. ${errorMessage(error)}`;
+}
+
+start().catch((error: unknown) => {
+  console.error("start-up failed:", error);
+  if (screen) screen.textContent = startFailedText(error);
+});
 void showPing();
 void showVersion();

@@ -247,19 +247,38 @@ export async function createSidebarFromSaved(
   return createSidebar(doc, { ...options, collapsed: await loadCollapsed() });
 }
 
+/** How long start-up waits for the saved sidebar state before it shows the sidebar open. */
+export const READ_LIMIT_MS = 10_000;
+
+/** The error `readCollapsed` reports when the read takes longer than its limit. */
+export class ReadTimeoutError extends Error {
+  constructor(limitMs: number) {
+    super(`The saved setting did not load within ${limitMs / 1000} seconds.`);
+    this.name = "ReadTimeoutError";
+  }
+}
+
 /**
- * The saved collapsed state from a read of the setting. It waits for the read as long as
- * it takes, so a slow read still gives the saved value. Only a failed read gives an open
- * sidebar, and `onError` hears about it so the owner can see a line.
+ * The saved collapsed state from a read of the setting. A slow read still gives the saved
+ * value, up to `limitMs`. A failed read, or one that takes longer than `limitMs`, gives an
+ * open sidebar, and `onError` hears about it so the owner can see a line. Start-up never
+ * waits forever on a stuck read.
  */
 export async function readCollapsed(
   read: () => Promise<string | null>,
   onError: (error: unknown) => void,
+  limitMs: number = READ_LIMIT_MS,
 ): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new ReadTimeoutError(limitMs)), limitMs);
+  });
   try {
-    return (await read()) === "true";
+    return (await Promise.race([read(), limit])) === "true";
   } catch (error) {
     onError(error);
     return false;
+  } finally {
+    clearTimeout(timer);
   }
 }

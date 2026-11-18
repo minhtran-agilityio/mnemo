@@ -4,6 +4,7 @@ import { ALL_ITEMS, APPS_ITEMS, GROUPS } from "./nav";
 import {
   createSidebar,
   createSidebarFromSaved,
+  ReadTimeoutError,
   readCollapsed,
   type Sidebar,
 } from "./sidebar";
@@ -212,4 +213,22 @@ test("a failed read gives an open sidebar and reports the error", async () => {
   );
   expect(result).toBe(false);
   expect(errors).toEqual([failure]);
+});
+
+test("a read that never finishes gives an open sidebar after the limit and reports it", async () => {
+  vi.useFakeTimers();
+  try {
+    const errors: unknown[] = [];
+    const result = readCollapsed(
+      () => new Promise<string | null>(() => {}),
+      (e) => errors.push(e),
+      3000,
+    );
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(await result).toBe(false);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(ReadTimeoutError);
+  } finally {
+    vi.useRealTimers();
+  }
 });
