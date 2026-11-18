@@ -373,3 +373,8 @@ export const ALL_ITEMS: readonly NavItem[] = [
 export function findItem(id: string): NavItem | undefined {
   return ALL_ITEMS.find((item) => item.id === id);
 }
+
+/** The address that opens an item. The router reads it back. */
+export function hashItemPath(id: string): string {
+  return `#/${id}`;
+}

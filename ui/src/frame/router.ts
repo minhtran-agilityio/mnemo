@@ -1,6 +1,12 @@
 // A hash router: the address is `#/<item id>`, and `#/everything?q=<word>` carries a search.
 // An unknown address opens Today, so the window is never blank.
-import { EVERYTHING_ID, findItem, HOME_ID, type NavItem } from "./nav";
+import {
+  EVERYTHING_ID,
+  findItem,
+  HOME_ID,
+  hashItemPath,
+  type NavItem,
+} from "./nav";
 
 export interface Route {
   item: NavItem;
@@ -20,7 +26,7 @@ export function parseHash(hash: string): Route {
 }
 
 export function hashFor(id: string, query?: string | null): string {
-  const base = `#/${id}`;
+  const base = hashItemPath(id);
   if (id !== EVERYTHING_ID || !query?.trim()) return base;
   return `${base}?${new URLSearchParams({ q: query })}`;
 }

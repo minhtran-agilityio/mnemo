@@ -1,5 +1,51 @@
-/* Page layout for the app shell. Colours, type and spacing come from tokens.css. */
+/* Page layout for the app frame. Colours, type and spacing come from tokens.css. */
+.app-frame {
+  display: flex;
+  min-height: 100vh;
+}
+
+.app-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
 main {
+  flex: 1 1 auto;
   max-width: 72ch;
   padding: var(--space-5) var(--space-4);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.empty-title {
+  overflow-wrap: anywhere;
+}
+
+.empty-title:focus {
+  outline: none;
+}
+
+.empty-meta,
+.empty-text,
+.empty-query {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.empty-meta {
+  color: var(--muted);
+  font-size: var(--text-md);
+}
+
+.app-status {
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  color: var(--muted);
+  font-size: var(--text-sm);
 }
