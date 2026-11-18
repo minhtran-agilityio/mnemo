@@ -17,3 +17,6 @@ src-tauri/gen/
 # Throwaway spike build output
 spikes/*/src-tauri/target/
 spikes/*/src-tauri/gen/
+
+# Local planning notes from the harness workflows
+specs/
