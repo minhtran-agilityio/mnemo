@@ -27,10 +27,6 @@ main {
   overflow-wrap: anywhere;
 }
 
-.empty-title:focus {
-  outline: none;
-}
-
 .empty-meta,
 .empty-text,
 .empty-query {

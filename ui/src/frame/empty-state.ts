@@ -2,17 +2,13 @@
 // comes in. Everything shows the searched word. All text goes in as text, never as markup.
 import type { Route } from "./router";
 
-/** Fills `container` with the empty state for `route` and returns its heading. */
-export function renderEmptyState(
-  container: HTMLElement,
-  route: Route,
-): HTMLElement {
+/** Fills `container` with the empty state for `route`. */
+export function renderEmptyState(container: HTMLElement, route: Route): void {
   const doc = container.ownerDocument;
   const { item, query } = route;
 
   const heading = doc.createElement("h1");
   heading.className = "empty-title";
-  heading.tabIndex = -1;
   heading.textContent = item.label;
 
   const meta = doc.createElement("p");
@@ -50,5 +46,4 @@ export function renderEmptyState(
   }
 
   container.replaceChildren(section);
-  return heading;
 }
