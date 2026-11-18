@@ -7,7 +7,8 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs only; every main commit keeps its own result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -36,9 +37,10 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      # Reads rust-toolchain.toml, so the pinned version and components are installed.
+      # With no arguments it installs the toolchain pinned in rust-toolchain.toml
+      # (rustup show stopped installing it in rustup 1.28).
       - name: Install Rust toolchain
-        run: rustup show
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2
         with:
