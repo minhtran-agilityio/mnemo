@@ -11,6 +11,10 @@ TIMEOUT_S="${SPIKE_TIMEOUT_S:-180}"
 OUT_DIR="${1:-${TMPDIR:-/tmp}/mnemo-spike-02-$(date +%Y%m%d-%H%M%S)}"
 OUT="$OUT_DIR/spike-02-raw.txt"
 WORK="$(mktemp -d)"
+# Raw output stays in the private scratch dir until it is scrubbed, so an interrupted
+# run leaves no unscrubbed file behind (the trap removes $WORK).
+RAW="$WORK/raw.txt"
+umask 077
 mkdir -p "$OUT_DIR"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -35,12 +39,12 @@ run_case() {
   {
     echo "=== CASE $name ==="
     echo "--- stdout ---"
-  } >> "$OUT"
+  } >> "$RAW"
   start=$(date +%s)
   if [ -n "$METER" ]; then
-    ( cd "$WORK" && $TMO "$TIMEBIN" "$METER" -o "$WORK/meter.txt" claude "$@" ) >> "$OUT" 2> "$WORK/stderr.txt"
+    ( cd "$WORK" && "$TIMEBIN" "$METER" -o "$WORK/meter.txt" $TMO claude "$@" ) >> "$RAW" 2> "$WORK/stderr.txt"
   else
-    ( cd "$WORK" && $TMO claude "$@" ) >> "$OUT" 2> "$WORK/stderr.txt"
+    ( cd "$WORK" && $TMO claude "$@" ) >> "$RAW" 2> "$WORK/stderr.txt"
   fi
   code=$?
   end=$(date +%s)
@@ -49,7 +53,7 @@ run_case() {
     echo "--- stderr ---"; cat "$WORK/stderr.txt"
     echo "--- exit=$code wall_s=$((end - start)) ---"
     if [ -f "$WORK/meter.txt" ]; then echo "--- meter ($METER) ---"; cat "$WORK/meter.txt"; rm -f "$WORK/meter.txt"; fi
-  } >> "$OUT"
+  } >> "$RAW"
 }
 
 SCHEMA='{"type":"object","properties":{"greeting":{"type":"string"}},"required":["greeting"]}'
@@ -60,7 +64,7 @@ SCHEMA='{"type":"object","properties":{"greeting":{"type":"string"}},"required":
   echo "os=$(uname -s) $(uname -r) $(uname -m)"
   echo "claude_version=$(claude --version 2>&1)"
   echo "meter_flag=${METER:-none}"
-} > "$OUT"
+} > "$RAW"
 
 # Q1 and Q5: structured output, and RAM/time of one process.
 run_case "q1_q5_json_schema" -p "Reply with a short greeting." \
@@ -84,12 +88,12 @@ run_case "q4_connector_calls" -p "If you have a tool for Slack, Gmail or Google 
   --allowedTools "mcp__claude_ai_Slack__*,mcp__claude_ai_Gmail__*,mcp__claude_ai_Google_Calendar__*"
 
 # Scrub anything that looks like a credential, then fail if any marker is left.
-SCRUBBED="$OUT.tmp"
+SCRUBBED="$WORK/scrubbed.txt"
 sed -E \
-  -e 's/sk-ant[A-Za-z0-9_-]*/[REDACTED]/g' \
-  -e 's/[Bb]earer( +[A-Za-z0-9._~+\/=-]+)?/[REDACTED]/g' \
-  -e 's/[Oo][Aa]uth[A-Za-z0-9_-]*/[REDACTED]/g' \
-  "$OUT" > "$SCRUBBED" && mv "$SCRUBBED" "$OUT"
+  -e 's/[Ss][Kk]-[Aa][Nn][Tt][A-Za-z0-9_-]*/[REDACTED]/g' \
+  -e 's/[Bb][Ee][Aa][Rr][Ee][Rr]( +[A-Za-z0-9._~+\/=-]+)?/[REDACTED]/g' \
+  -e 's/[A-Za-z0-9_]*[Oo][Aa][Uu][Tt][Hh][A-Za-z0-9_-]*/[REDACTED]/g' \
+  "$RAW" > "$SCRUBBED" && mv "$SCRUBBED" "$OUT"
 
 if grep -Eqi 'sk-ant|bearer|oauth' "$OUT"; then
   echo "token marker left in $OUT; delete the file" >&2

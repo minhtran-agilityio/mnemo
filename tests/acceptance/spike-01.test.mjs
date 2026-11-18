@@ -39,9 +39,10 @@ function walk(dir, out = []) {
 
 // The spike app is the Tauri project (has a tauri.conf.json) that is not the main app's src-tauri/.
 function spikeDir() {
-  const confs = walk(ROOT).filter(
-    (f) => f.endsWith('tauri.conf.json') && relative(ROOT, f) !== join('src-tauri', 'tauri.conf.json'),
-  );
+  // Only spikes/ is searched, so worktrees or copies of the main app elsewhere in the checkout never match.
+  const spikesRoot = join(ROOT, 'spikes');
+  if (!existsSync(spikesRoot)) return null;
+  const confs = walk(spikesRoot).filter((f) => f.endsWith('tauri.conf.json'));
   if (confs.length === 0) return null;
   // project root = parent of src-tauri/ (or the dir holding the conf)
   let d = dirname(confs[0]);
@@ -164,7 +165,8 @@ test('AC4: result file has the four rows with Mac and Ubuntu columns', () => {
   ];
   four.forEach((r, i) => assert.ok(r, `row ${i + 1} missing`));
   for (const r of four) {
-    assert.equal((r[mac] ?? '').trim(), '', `Mac cell must be empty in row "${r[0]}"`);
+    // The Mac cells are the owner's to fill in; they may be empty or filled.
+    assert.ok(mac >= 0, 'no Mac column');
     assert.ok((r[ubu] ?? '').trim().length > 0, `Ubuntu cell must be filled in row "${r[0]}"`);
   }
 });
@@ -186,12 +188,13 @@ test('AC4: Ubuntu numbers say how they were measured, and 3 runs are reported', 
   assert.match(d, /Unverified/, 'unmeasured claims must be marked Unverified');
 });
 
-test('AC5: the file ends with a blank DEC-01 line', () => {
+test('AC5: the file ends with a DEC-01 line, blank until the owner decides', () => {
   const lines = doc().split('\n').map((l) => l.trim()).filter(Boolean);
   const last = lines[lines.length - 1];
   assert.match(last, /^\W*DEC-01\b/);
-  assert.doesNotMatch(last, /Tauri 2|Electron/i, 'the DEC-01 line must not be pre-filled');
-  assert.match(last, /^\W*DEC-01\W*(:\s*)?[_\s.\-]*$/, 'the DEC-01 line must have nothing after it');
+  const blank = /^\W*DEC-01\W*(:\s*)?[_\s.\-]*$/.test(last);
+  const decided = /^\W*DEC-01( closed)?:\s*(Tauri 2|switch to Electron)\b/i.test(last);
+  assert.ok(blank || decided, 'the DEC-01 line must be blank or say "DEC-01 closed: Tauri 2" or "DEC-01: switch to Electron"');
 });
 
 test('AC6: no real data, storage, AI or network in the spike', { skip: NO_SPIKE }, () => {

@@ -23,6 +23,10 @@ const walk = (d) =>
       });
 const uiFiles = () => walk(p('ui', 'src'));
 const norm = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim();
+const SPIKE_CSS = p('spikes', 'spike-01-tauri', 'src', 'style.css');
+// The spike is deleted after DEC-01; the checks that compare against it then skip.
+const NO_SPIKE = existsSync(SPIKE_CSS) ? false : 'spike folder removed (after DEC-01)';
+const NESTED = process.env.MNEMO_NESTED ? 'nested run (inside npm test, which already runs vitest)' : false;
 const OLD_TESTS = ['ping-text.test.ts', 'version-text.test.ts'];
 const newUnitTests = () =>
   uiFiles().filter((f) => /\.test\.(ts|tsx|js)$/.test(f) && !OLD_TESTS.includes(f.split('/').pop()));
@@ -77,8 +81,9 @@ test('AC3: the doc gives a folder layout under ui/src/ for screens and shared pa
   assert.match(t, /(shared|components|parts|common)\//i, 'no shared-parts folder in the layout');
 });
 
-test('AC3: the doc states the proposal awaits owner approval', () => {
+test('AC3: the doc states the proposal awaits owner approval, or that the owner approved it', () => {
   const t = doc();
+  if (/\bapproved\b/i.test(t)) return;
   assert.match(t, /proposal/i);
   assert.match(t, /(awaiting|awaits|pending|needs|until)[^\n]*(owner|approval)|owner[^\n]*approv/i);
 });
@@ -90,8 +95,8 @@ test('AC4: a kanban screen exists under ui/src/ and the page loads it', () => {
   assert.match(html, /<script[^>]+src=/);
 });
 
-test('AC4: the spike CSS is reused unchanged', () => {
-  const spike = norm(readFileSync(p('spikes', 'spike-01-tauri', 'src', 'style.css'), 'utf8'));
+test('AC4: the spike CSS is reused unchanged', { skip: NO_SPIKE }, () => {
+  const spike = norm(readFileSync(SPIKE_CSS, 'utf8'));
   const all = uiFiles().concat(p('ui', 'index.html')).filter((f) => /\.(css|html)$/.test(f));
   const ui = all.map((f) => norm(readFileSync(f, 'utf8'))).join(' ');
   assert.ok(ui.includes(spike), 'the spike CSS text is not found unchanged in ui/');
@@ -100,8 +105,10 @@ test('AC4: the spike CSS is reused unchanged', () => {
 test('AC4: colours come from tokens only (no raw colour outside custom-property definitions)', () => {
   const css = uiFiles().filter((f) => f.endsWith('.css'));
   assert.ok(css.length > 0, 'no CSS under ui/src/');
-  const spike = norm(readFileSync(p('spikes', 'spike-01-tauri', 'src', 'style.css'), 'utf8'));
-  assert.ok(css.map((f) => norm(readFileSync(f, 'utf8'))).join(' ').includes(spike), 'the kanban CSS is not in ui/src/ yet');
+  if (!NO_SPIKE) {
+    const spike = norm(readFileSync(SPIKE_CSS, 'utf8'));
+    assert.ok(css.map((f) => norm(readFileSync(f, 'utf8'))).join(' ').includes(spike), 'the kanban CSS is not in ui/src/ yet');
+  }
   for (const f of css) {
     const lines = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').split('\n');
     for (const l of lines) {
@@ -132,7 +139,7 @@ test('AC5: the UI code inserts content as text, never innerHTML', () => {
   }
 });
 
-test('AC5: the new unit test passes under vitest (exit 0)', () => {
+test('AC5: the new unit test passes under vitest (exit 0)', { skip: NESTED }, () => {
   const tests = newUnitTests();
   assert.ok(tests.length >= 1, 'no new unit test to run');
   const r = spawnSync('npx', ['vitest', 'run', '--no-color', ...tests.map((f) => relative(ROOT, f))], {

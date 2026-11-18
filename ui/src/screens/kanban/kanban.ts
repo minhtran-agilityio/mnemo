@@ -143,6 +143,7 @@ function enableDrag(): void {
       card.removeEventListener("pointermove", onMove);
       card.removeEventListener("pointerup", onUp);
       card.removeEventListener("pointercancel", finish);
+      card.removeEventListener("lostpointercapture", finish);
       card.style.transform = "";
       card.classList.remove("is-dragging");
       clearHighlight();
@@ -157,6 +158,8 @@ function enableDrag(): void {
     card.addEventListener("pointerup", onUp);
     // A cancelled gesture is not a drop: put the card back and move nothing.
     card.addEventListener("pointercancel", finish);
+    // Capture can be lost without pointerup (window switch); treat it like a cancel.
+    card.addEventListener("lostpointercapture", finish);
   });
 }
 
