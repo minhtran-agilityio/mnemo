@@ -4,10 +4,10 @@
 // Behavioural tests copy the project to a temp dir, inject one fault, and run the real npm
 // commands. They need network for `npm ci` and a Rust toolchain. They skip themselves when
 // MNEMO_NESTED is set, so `npm test` (which runs this file) cannot recurse into itself.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  existsSync, readFileSync, cpSync, mkdtempSync, appendFileSync, writeFileSync, symlinkSync, mkdirSync,
+  existsSync, readFileSync, cpSync, mkdtempSync, rmSync, appendFileSync, writeFileSync, symlinkSync, mkdirSync,
 } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, dirname, relative, sep } from 'node:path';
@@ -25,24 +25,36 @@ const SKIP = new Set(['node_modules', 'target', '.git', 'dist']);
 // Judge only the path inside the project, so a parent folder named like a skipped one does not matter.
 const filter = (src) => !relative(ROOT, src).split(sep).some((s) => SKIP.has(s));
 
-let base; // a copy of the project with dependencies installed
+const CHILD_TIMEOUT = 540000; // below the 590 s test timeout, which a blocking spawnSync cannot trigger
+const temps = []; // every temp dir, removed when the file is done
+const tempDir = (prefix) => {
+  const d = mkdtempSync(join(tmpdir(), prefix));
+  temps.push(d);
+  return d;
+};
+after(() => {
+  for (const d of temps) rmSync(d, { recursive: true, force: true });
+});
+
+let base; // a copy of the project with dependencies installed; set only after npm ci succeeds
 let targetDir; // shared cargo target dir so builds are reused between cases
 function prepareBase() {
   if (base) return base;
-  const tmp = mkdtempSync(join(tmpdir(), 'mnemo-qa2-'));
-  base = join(tmp, 'base');
+  const tmp = tempDir('mnemo-qa2-');
+  const dir = join(tmp, 'base');
   targetDir = join(tmp, 'target');
-  cpSync(ROOT, base, { recursive: true, filter });
+  cpSync(ROOT, dir, { recursive: true, filter });
   // The #1 tests call git ls-files, so the copy needs its own repo.
-  spawnSync('git', ['init', '-q'], { cwd: base });
-  spawnSync('git', ['add', '-A'], { cwd: base });
-  const r = spawnSync('npm', ['ci'], { cwd: base, encoding: 'utf8' });
-  assert.equal(r.status, 0, `npm ci failed (exit ${r.status}):\n${r.stderr}`);
+  spawnSync('git', ['init', '-q'], { cwd: dir });
+  spawnSync('git', ['add', '-A'], { cwd: dir });
+  const r = spawnSync('npm', ['ci'], { cwd: dir, encoding: 'utf8', timeout: CHILD_TIMEOUT });
+  assert.equal(r.status, 0, `npm ci failed (exit ${r.status}, signal ${r.signal}):\n${r.stderr}`);
+  base = dir;
   return base;
 }
 function freshCopy() {
   const b = prepareBase();
-  const dir = join(mkdtempSync(join(tmpdir(), 'mnemo-qa2-case-')), 'proj');
+  const dir = join(tempDir('mnemo-qa2-case-'), 'proj');
   cpSync(b, dir, { recursive: true, filter: (src) => !relative(b, src).split(sep).some((s) => s === 'node_modules') });
   symlinkSync(join(b, 'node_modules'), join(dir, 'node_modules'));
   return dir;
@@ -52,9 +64,10 @@ function npm(cwd, args) {
   // Drop NODE_TEST_CONTEXT so the inner node --test really runs instead of skipping as a recursive call.
   const { NODE_TEST_CONTEXT, ...env } = process.env;
   const r = spawnSync('npm', args, {
-    cwd, encoding: 'utf8', maxBuffer: 1 << 28,
+    cwd, encoding: 'utf8', maxBuffer: 1 << 28, timeout: CHILD_TIMEOUT,
     env: { ...env, MNEMO_NESTED: '1', CARGO_TARGET_DIR: targetDir, CI: '1', FORCE_COLOR: '0' },
   });
+  assert.ok(r.signal === null, `npm ${args.join(' ')} was killed (${r.signal}), likely a hang`);
   return { status: r.status, out: `${r.stdout}\n${r.stderr}`, secs: (Date.now() - t0) / 1000 };
 }
 const rustRoot = (dir) =>
