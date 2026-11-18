@@ -85,19 +85,26 @@ async function showVersion(): Promise<void> {
 
 async function start(): Promise<void> {
   if (!screen || !content || !frame) return;
-  const collapsed = await loadCollapsed();
+  let touched = false;
   const router = createRouter(window, (route) => {
     sidebar.setCurrent(route.item.id);
     renderEmptyState(screen, route);
     document.title = `${route.item.label} - Mnemo`;
   });
   const sidebar = createSidebar(document, {
-    collapsed,
-    onToggle: saveCollapsed,
+    collapsed: false,
+    onToggle: (value) => {
+      touched = true;
+      saveCollapsed(value);
+    },
     onSearch: (text) => router.go(EVERYTHING_ID, text),
   });
   frame.insertBefore(sidebar.element, content);
   router.start();
+  // The frame shows at once; the saved state is applied when the read finishes. If the
+  // owner already clicked the toggle by then, their choice stays.
+  const saved = await loadCollapsed();
+  if (!touched) sidebar.setCollapsed(saved);
 }
 
 void start();

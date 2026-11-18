@@ -533,3 +533,11 @@ test('AC10: npm run check passes', { timeout: 590000, skip: NESTED ? 'nested run
   const r = spawnSync('npm', ['run', 'check'], { cwd: ROOT, encoding: 'utf8', timeout: 580000 });
   assert.equal(r.status, 0, (r.stdout || '').slice(-2000) + (r.stderr || '').slice(-2000));
 });
+
+// Review fixes (#11): the frame must not wait for the saved sidebar state, and the read-failure
+// line and the save-failure line must be separate.
+test('start() shows the sidebar before the saved state is read', () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'ui', 'src', 'main.ts'), 'utf8');
+  const start = src.slice(src.indexOf('async function start()'));
+  assert.ok(start.indexOf('createSidebar(') < start.indexOf('await loadCollapsed()'), 'createSidebar must come before awaiting the read');
+});
