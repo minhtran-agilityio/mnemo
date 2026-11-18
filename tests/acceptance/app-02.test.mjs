@@ -104,7 +104,13 @@ const bridgeScript = (mode) => `(() => {
 async function openApp(mode = 'ok', { profile } = {}) {
   assert.equal(buildError, null, buildError ?? '');
   const dir = profile ?? mkdtempSync(join(tmpdir(), 'mnemo-app02-chrome-'));
+  // A reused profile still holds the last Chrome's DevToolsActivePort file. Remove it, or
+  // the next start reads the old port and connects to a Chrome that is gone.
+  rmSync(join(dir, 'DevToolsActivePort'), { force: true });
   const proc = spawn(CHROME, ['--headless=new', '--no-sandbox', '--disable-gpu', '--no-first-run', '--remote-debugging-port=0', `--user-data-dir=${dir}`, '--window-size=1100,720', 'about:blank'], { stdio: 'ignore' });
+  // If anything below fails, the test never gets `app` to close: kill Chrome here, or the
+  // orphan keeps node (and CI) waiting forever.
+  try {
   let wsUrl;
   for (let i = 0; i < 100 && !wsUrl; i++) {
     await sleep(100);
@@ -181,6 +187,11 @@ async function openApp(mode = 'ok', { profile } = {}) {
   app.mainText = () => evalJs(`(document.querySelector('main') || document.body).innerText`);
   app.navRect = () => evalJs(`(() => { const r = document.querySelector('nav').getBoundingClientRect(); return { w: r.width, h: r.height, x: r.x, y: r.y, bottom: r.bottom }; })()`);
   return app;
+  } catch (error) {
+    proc.kill('SIGKILL');
+    if (!profile) rmSync(dir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 async function withApp(mode, fn) {
