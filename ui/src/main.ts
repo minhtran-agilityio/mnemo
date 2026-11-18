@@ -19,12 +19,14 @@ const READ_TIMEOUT_MS = 2000;
 
 const status = document.querySelector<HTMLElement>("#ping-status");
 const versionEl = document.querySelector<HTMLElement>("#app-version");
-const note = document.querySelector<HTMLElement>("#setting-note");
+const readNote = document.querySelector<HTMLElement>("#setting-read-note");
+const saveNote = document.querySelector<HTMLElement>("#setting-save-note");
 const screen = document.querySelector<HTMLElement>("#screen");
 const content = document.querySelector<HTMLElement>("#app-content");
 const frame = document.querySelector<HTMLElement>("#app");
 
-function showNote(text: string | null): void {
+/** Each kind of failure has its own line, so a save that works never clears a read failure. */
+function showNote(note: HTMLElement | null, text: string | null): void {
   if (!note) return;
   note.textContent = text ?? "";
   note.hidden = text === null;
@@ -42,6 +44,7 @@ async function loadCollapsed(): Promise<boolean> {
   } catch (error) {
     console.error("could not read the sidebar setting:", error);
     showNote(
+      readNote,
       `Mnemo could not read the saved sidebar setting, so the sidebar is open. ${errorMessage(error)}`,
     );
     return false;
@@ -54,10 +57,11 @@ function saveCollapsed(collapsed: boolean): void {
   saving = saving.then(async () => {
     try {
       await setSetting(COLLAPSED_KEY, String(collapsed));
-      showNote(null);
+      showNote(saveNote, null);
     } catch (error) {
       console.error("could not save the sidebar setting:", error);
       showNote(
+        saveNote,
         `Mnemo could not save the sidebar setting, so it will be open again the next time Mnemo starts. ${errorMessage(error)}`,
       );
     }

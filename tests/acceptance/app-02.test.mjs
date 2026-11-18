@@ -541,3 +541,10 @@ test('start() shows the sidebar before the saved state is read', () => {
   const start = src.slice(src.indexOf('async function start()'));
   assert.ok(start.indexOf('createSidebar(') < start.indexOf('await loadCollapsed()'), 'createSidebar must come before awaiting the read');
 });
+
+test('a read failure and a save failure use separate note lines', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'ui');
+  const html = readFileSync(join(root, 'index.html'), 'utf8');
+  assert.match(html, /id="setting-read-note"/);
+  assert.match(html, /id="setting-save-note"/);
+});
