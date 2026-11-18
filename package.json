@@ -12,7 +12,7 @@
     "tauri": "tauri",
     "format:check": "cargo fmt --manifest-path src-tauri/Cargo.toml --check && biome format",
     "typecheck": "tsc --noEmit",
-    "test": "cargo test --manifest-path src-tauri/Cargo.toml && vitest run --no-color && MNEMO_NESTED=1 node --test \"tests/acceptance/*.test.mjs\"",
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml && vitest run --no-color && MNEMO_NESTED=1 node --test \"tests/*.test.mjs\" \"tests/acceptance/*.test.mjs\"",
     "lint": "biome ci --formatter-enabled=false && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run test"
   },
