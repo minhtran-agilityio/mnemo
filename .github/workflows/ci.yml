@@ -14,8 +14,72 @@ permissions:
   contents: read
 
 jobs:
+  # Decides whether the change can affect the build or the tests. Docs, notes
+  # and Claude config cannot, so the heavy jobs skip them to save CI minutes.
+  # The workflow itself always runs, so the "CI result" job below always
+  # reports and can be a required check.
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check the changed files
+        id: filter
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+        run: |
+          # Fail closed: any doubt about the diff means run the full CI.
+          run_all() { echo "$1 Running the full CI."; echo "code=true" >> "$GITHUB_OUTPUT"; exit 0; }
+
+          if [ "$EVENT" = "pull_request" ]; then
+            range="$PR_BASE...$PR_HEAD"
+          else
+            # A new branch or a force push has no usable "before" commit.
+            if [ -z "$PUSH_BEFORE" ] || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ] \
+              || ! git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
+              run_all "No previous commit to compare with."
+            fi
+            range="$PUSH_BEFORE..$PUSH_AFTER"
+          fi
+
+          # --no-renames lists both paths of a move, so code moved into docs/ still counts.
+          files="$(git diff --name-only --no-renames "$range")" || run_all "Could not diff $range."
+          [ -n "$files" ] || run_all "The diff $range lists no files."
+
+          code=false
+          while IFS= read -r f; do
+            case "$f" in
+              # The acceptance tests read the top-level docs and .github/. Text files
+              # inside the app sources can be compiled in (for example prompts).
+              CLAUDE.md | README.md | .github/* | tests/* | src-tauri/* | ui/*) code=true ;;
+              docs/* | notes/* | specs/* | .claude/* | LICENSE*) ;;
+              *.md | *.markdown | *.txt) ;;
+              *) code=true ;;
+            esac
+            if [ "$code" = true ]; then
+              echo "Code change: $f"
+              break
+            fi
+          done <<< "$files"
+
+          [ "$code" = true ] || { echo "Changed files:"; echo "$files"; echo "Only docs or notes changed. Skipping the build and tests."; }
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   check:
     name: ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -54,3 +118,29 @@ jobs:
 
       - name: Debug build
         run: npx tauri build --debug --no-bundle
+
+  # One stable check for branch protection. It passes when the checks passed
+  # or were skipped for a docs-only change, and fails otherwise.
+  result:
+    name: CI result
+    needs: [changes, check]
+    # Not always(): a run cancelled by a newer push should not report a failure.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Report the result
+        shell: bash
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CHECK: ${{ needs.check.result }}
+        run: |
+          echo "Detect code changes: $CHANGES. Build and tests: $CHECK."
+          if [ "$CHANGES" != "success" ]; then
+            echo "Detecting code changes did not succeed." >&2
+            exit 1
+          fi
+          if [ "$CHECK" != "success" ] && [ "$CHECK" != "skipped" ]; then
+            echo "The build and tests did not pass." >&2
+            exit 1
+          fi
