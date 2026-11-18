@@ -1,12 +1,5 @@
 /* Layout for the style sample only. Every look comes from base.css and tokens.css. */
-.sample {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  max-width: 72ch;
-  padding: var(--space-5) var(--space-4);
-}
-
+/* The page layout comes from .page in base.css. */
 .sample-group {
   display: flex;
   flex-wrap: wrap;

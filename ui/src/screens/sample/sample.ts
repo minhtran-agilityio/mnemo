@@ -20,7 +20,7 @@ function group(...children: HTMLElement[]): HTMLElement {
 // Shows every base style (page, card, button, input, pill, list row) in the current theme.
 // It follows the system light or dark setting. Remove it when the real app shell uses these styles.
 export function mountSample(root: HTMLElement): void {
-  root.classList.add("sample", "page");
+  root.classList.add("page");
   root.append(el("h2", undefined, "Style sample"));
 
   const card = el("article", "card");
