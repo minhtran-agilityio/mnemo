@@ -9,7 +9,7 @@ import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const BASE = '7068ce7'; // main at the time the spike branch was cut
+const BASE = 'a9816a3'; // main last merged into the spike branch (new app icons from #86)
 const DOC = join(ROOT, 'docs', 'spikes', 'spike-01-tauri.md');
 const SKIP = new Set(['node_modules', 'target', '.git', 'dist']);
 
