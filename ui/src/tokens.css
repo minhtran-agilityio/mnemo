@@ -35,13 +35,13 @@
   --good-soft: #ddf3e4;
   --hl: #ffe45c;
 
-  /* Colour: soft tints for pills and columns */
-  --o-blue: #e6eaff;
-  --o-violet: #efe6ff;
-  --o-amber: #fff1a6;
-  --o-green: #ddf3e4;
-  --o-rose: #ffe3df;
-  --o-gray: #eceae3;
+  /* Colour: soft tints for pills and columns (prototype --o-*) */
+  --tint-info: #e6eaff;
+  --tint-note: #efe6ff;
+  --tint-warn: #fff1a6;
+  --tint-good: #ddf3e4;
+  --tint-bad: #ffe3df;
+  --tint-neutral: #eceae3;
 
   /* Colour: connector brand colours (same in light and dark) */
   --app-telegram: #1d6fa5;
@@ -58,11 +58,13 @@
   /* Shadow and motion */
   --shadow: #14161b;
   --sh1: 0 1px 2px rgba(24, 28, 45, 0.05), 0 2px 8px rgba(24, 28, 45, 0.05);
-  --sh2: 0 2px 4px rgba(24, 28, 45, 0.05), 0 16px 34px -14px rgba(24, 28, 45, 0.24);
+  --sh2:
+    0 2px 4px rgba(24, 28, 45, 0.05), 0 16px 34px -14px rgba(24, 28, 45, 0.24);
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 
   /* Type */
-  --font-body: "Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-body:
+    "Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
   --text-xs: 11px;
   --text-sm: 12.5px;
@@ -122,12 +124,12 @@
     --good-soft: #183a27;
     --hl: #ffe45c;
 
-    --o-blue: #232a4d;
-    --o-violet: #33284a;
-    --o-amber: #3d3511;
-    --o-green: #183a27;
-    --o-rose: #45201b;
-    --o-gray: #2a2d35;
+    --tint-info: #232a4d;
+    --tint-note: #33284a;
+    --tint-warn: #3d3511;
+    --tint-good: #183a27;
+    --tint-bad: #45201b;
+    --tint-neutral: #2a2d35;
 
     --shadow: #a9abb3;
     --sh1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.25);
