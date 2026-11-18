@@ -203,7 +203,11 @@ test('AC6: the spike is outside the main app folders and root lint scope', { ski
   const dir = SPIKE;
   const rel = relative(ROOT, dir);
   assert.ok(!rel.startsWith('ui') && !rel.startsWith('src-tauri'), 'spike must not live in ui/ or src-tauri/');
-  const fmt = spawnSync('npx', ['biome', 'format'], { cwd: ROOT, encoding: 'utf8' });
+  // Root lint and format are `npm run check`'s job. Here: only that biome.json does not reach the spike.
+  const { files } = JSON.parse(readFileSync(join(ROOT, 'biome.json'), 'utf8'));
+  const includes = (files?.includes ?? []).join(' ');
+  assert.ok(includes && !includes.includes('spikes') && !includes.includes('**/*'), 'biome.json must not include the spike');
+});
   assert.equal(fmt.status, 0, fmt.stdout + fmt.stderr);
   const lint = spawnSync('npx', ['biome', 'ci', '--formatter-enabled=false'], { cwd: ROOT, encoding: 'utf8' });
   assert.equal(lint.status, 0, lint.stdout + lint.stderr);
