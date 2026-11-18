@@ -3,6 +3,7 @@
 use std::sync::{Mutex, MutexGuard};
 
 use serde::Serialize;
+use tauri::Manager;
 
 use crate::storage::{Storage, StorageError};
 
@@ -117,23 +118,41 @@ fn write_setting(storage: &AppStorage, key: &str, value: &str) -> Result<(), App
         .map_err(storage_failed)
 }
 
+/// Runs `work` on a blocking thread, so the storage lock and SQLite I/O never hold up
+/// the main thread. A thread that failed gives the same coded error as a storage failure.
+async fn off_main_thread<T, F>(app: tauri::AppHandle, work: F) -> Result<T, AppError>
+where
+    T: Send + 'static,
+    F: FnOnce(&AppStorage) -> Result<T, AppError> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(move || {
+        let storage = app.state::<AppStorage>();
+        work(&storage)
+    })
+    .await
+    .map_err(|e| {
+        log::error!("settings task did not finish: {e}");
+        AppError {
+            code: "storage_error",
+            message: "Mnemo could not read or save its settings. Nothing was deleted.".to_string(),
+        }
+    })?
+}
+
 /// The value saved under `key`, or null when it was never saved.
 #[tauri::command]
-pub fn get_setting(
-    storage: tauri::State<'_, AppStorage>,
-    key: String,
-) -> Result<Option<String>, AppError> {
-    read_setting(&storage, &key)
+pub async fn get_setting(app: tauri::AppHandle, key: String) -> Result<Option<String>, AppError> {
+    off_main_thread(app, move |storage| read_setting(storage, &key)).await
 }
 
 /// Saves `value` under `key`, replacing an earlier value.
 #[tauri::command]
-pub fn set_setting(
-    storage: tauri::State<'_, AppStorage>,
+pub async fn set_setting(
+    app: tauri::AppHandle,
     key: String,
     value: String,
 ) -> Result<(), AppError> {
-    write_setting(&storage, &key, &value)
+    off_main_thread(app, move |storage| write_setting(storage, &key, &value)).await
 }
 
 #[cfg(test)]

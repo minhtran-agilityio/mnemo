@@ -236,3 +236,10 @@ test('AC6: format, lint, typecheck and unit tests pass (npm run check parts, exi
     assert.equal(r.status, 0, `npm ${args.join(' ')} exit ${r.status}:\n${r.stdout}\n${r.stderr}`);
   }
 });
+
+// Review fix (#11): the setting commands must not run on the main thread.
+test('get_setting and set_setting are async commands', () => {
+  const src = readFileSync(join(ROOT, 'src-tauri', 'src', 'commands.rs'), 'utf8');
+  assert.match(src, /pub async fn get_setting\(/);
+  assert.match(src, /pub async fn set_setting\(/);
+});
