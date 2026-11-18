@@ -156,8 +156,13 @@ async function openApp(mode = 'ok', { profile } = {}) {
     space: () => key(' ', 'Space', ' ', 32),
     async typeText(t) { await S('Input.insertText', { text: t }); },
     async close() {
+      // Close Chrome the normal way first, so it writes localStorage (the fake settings
+      // store) to the profile like a real Quit. SIGKILL only when it does not exit.
+      const exited = new Promise((ok) => { if (proc.exitCode !== null) ok(); else proc.once('exit', ok); });
+      try { await Promise.race([send('Browser.close'), sleep(2000)]); } catch { /* already closing */ }
+      await Promise.race([exited, sleep(5000)]);
       try { ws.close(); } catch { /* closed */ }
-      proc.kill('SIGKILL');
+      if (proc.exitCode === null) proc.kill('SIGKILL');
       await sleep(200);
       if (!profile) rmSync(dir, { recursive: true, force: true });
     },
@@ -534,12 +539,17 @@ test('AC10: npm run check passes', { timeout: 590000, skip: NESTED ? 'nested run
   assert.equal(r.status, 0, (r.stdout || '').slice(-2000) + (r.stderr || '').slice(-2000));
 });
 
-// Review fixes (#11): the frame must not wait for the saved sidebar state, and the read-failure
-// line and the save-failure line must be separate.
-test('start() shows the sidebar before the saved state is read', () => {
-  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'ui', 'src', 'main.ts'), 'utf8');
-  const start = src.slice(src.indexOf('async function start()'));
-  assert.ok(start.indexOf('createSidebar(') < start.indexOf('await loadCollapsed()'), 'createSidebar must come before awaiting the read');
+// Review fixes (#11): the sidebar is built in its saved state, so a collapsed sidebar never
+// shows open first; the read is bounded, so a stuck read cannot leave a blank window; and a
+// start-up failure shows a line instead of a blank window. The read-failure line and the
+// save-failure line are separate.
+test('start() builds the sidebar from a bounded read and never leaves a blank window', () => {
+  const ui = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'ui', 'src');
+  const main = readFileSync(join(ui, 'main.ts'), 'utf8');
+  const sidebar = readFileSync(join(ui, 'frame', 'sidebar.ts'), 'utf8');
+  assert.match(main, /createSidebarFromSaved\(document, loadCollapsed/, 'start() must build the sidebar from the saved state');
+  assert.match(sidebar, /Promise\.race\(\[read\(\), limit\]\)/, 'the saved-state read must have a time limit');
+  assert.match(main, /start\(\)\.catch\(/, 'a start-up failure must be caught and shown');
 });
 
 test('a read failure and a save failure use separate note lines', () => {
