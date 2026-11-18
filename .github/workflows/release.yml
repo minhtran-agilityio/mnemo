@@ -10,9 +10,10 @@ on:
 permissions:
   contents: write
 
-# One release run per ref at a time.
+# One release run at a time, whatever the trigger: a tag push and a manual run
+# for the same version must not run together.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
