@@ -128,7 +128,7 @@
   padding-left: calc(var(--space-3) + var(--space-5) + var(--space-1));
 }
 
-.sbsearchbtn {
+.sidebar .sbsearchbtn {
   display: none;
 }
 
