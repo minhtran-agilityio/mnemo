@@ -24,10 +24,10 @@ fn startup_code(e: &StorageError) -> &'static str {
 /// The first page of the main window: the app, or the bundled error page with the
 /// error code when storage failed. The error page is the window's first load, so the
 /// app page cannot replace it.
-fn start_url(error: Option<&StartupError>, app_url: WebviewUrl) -> WebviewUrl {
-    match error {
+fn start_url(error_code: Option<&str>, app_url: WebviewUrl) -> WebviewUrl {
+    match error_code {
         None => app_url,
-        Some(e) => WebviewUrl::App(format!("error.html?code={}", e.code).into()),
+        Some(code) => WebviewUrl::App(format!("error.html?code={code}").into()),
     }
 }
 
@@ -49,13 +49,13 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let opened = open_storage(app.handle());
-            let error = opened.as_ref().err().cloned();
-            if let Some(e) = &error {
+            if let Err(e) = &opened {
                 eprintln!(
                     "Mnemo could not open its data file ({}): {}",
                     e.code, e.detail
                 );
             }
+            let error_code = opened.as_ref().err().map(|e| e.code);
             app.manage(AppStorage::new(opened));
 
             // The main window is built here (`create: false` in tauri.conf.json) so it can
@@ -70,7 +70,7 @@ pub fn run() {
                 .cloned()
                 .ok_or_else(|| "tauri.conf.json has no main window".to_string())
                 .and_then(|mut config| {
-                    config.url = start_url(error.as_ref(), config.url);
+                    config.url = start_url(error_code, config.url);
                     WebviewWindowBuilder::from_config(app.handle(), &config)
                         .and_then(|b| b.build())
                         .map_err(|e| e.to_string())
@@ -88,7 +88,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{start_url, startup_code, StartupError, StorageError};
+    use super::{start_url, startup_code, StorageError};
     use tauri::WebviewUrl;
 
     #[test]
@@ -99,11 +99,7 @@ mod tests {
 
     #[test]
     fn start_url_is_the_error_page_with_only_the_code() {
-        let e = StartupError {
-            code: "open",
-            detail: "unable to open /home/u/#work/100%/mnemo.db".into(),
-        };
-        let url = start_url(Some(&e), WebviewUrl::App("index.html".into()));
+        let url = start_url(Some("open"), WebviewUrl::App("index.html".into()));
         assert!(matches!(url, WebviewUrl::App(p) if p.to_str() == Some("error.html?code=open")));
     }
 

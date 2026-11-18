@@ -59,6 +59,15 @@ impl Storage {
             .query_row("PRAGMA busy_timeout", [], |r| r.get(0))?)
     }
 
+    /// Rolls back a transaction left open by code that panicked while holding the
+    /// storage lock, so the next caller starts from the last committed state.
+    pub fn recover_after_panic(&self) -> Result<(), StorageError> {
+        if !self.conn.is_autocommit() {
+            self.conn.execute_batch("ROLLBACK")?;
+        }
+        Ok(())
+    }
+
     /// The schema version stored in the database.
     pub fn schema_version(&self) -> Result<u32, StorageError> {
         migrate::current_version(&self.conn)
@@ -132,5 +141,30 @@ mod tests {
         let err = Storage::open(d.path()).err().unwrap();
         assert!(matches!(err, StorageError::Open(_)));
         assert!(d.path().exists());
+    }
+
+    #[test]
+    fn recover_after_panic_rolls_back_an_open_transaction() {
+        let (_d, p) = temp_db();
+        let s = Storage::open(&p).unwrap();
+        s.conn
+            .execute_batch(
+                "BEGIN; CREATE TABLE half_done (x INTEGER); INSERT INTO half_done VALUES (1);",
+            )
+            .unwrap();
+        assert!(!s.conn.is_autocommit());
+        s.recover_after_panic().unwrap();
+        assert!(s.conn.is_autocommit());
+        let left: i64 = s
+            .conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name = 'half_done'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0);
+        // With no open transaction it does nothing.
+        s.recover_after_panic().unwrap();
     }
 }

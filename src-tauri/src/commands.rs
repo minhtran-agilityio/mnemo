@@ -1,6 +1,6 @@
 // Commands the UI can call through Tauri's invoke bridge, and the state they share.
 
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard};
 
 use serde::Serialize;
 
@@ -34,11 +34,24 @@ impl AppStorage {
     }
 
     /// Locks the database, or returns `storage_unavailable` when it was not opened.
-    /// A lock poisoned by an earlier panic is recovered. **Unverified:** this assumes
-    /// the panicking code wrote inside a storage transaction, whose drop rolls the work back.
+    /// A lock poisoned by an earlier panic is recovered after rolling back any
+    /// transaction the panicking code left open.
     pub fn get(&self) -> Result<MutexGuard<'_, Storage>, AppError> {
         match &self.0 {
-            Ok(m) => Ok(m.lock().unwrap_or_else(PoisonError::into_inner)),
+            Ok(m) => match m.lock() {
+                Ok(guard) => Ok(guard),
+                Err(poisoned) => {
+                    // An earlier command panicked while holding the lock. Roll back what
+                    // it left open, then carry on with the last committed state.
+                    let guard = poisoned.into_inner();
+                    guard.recover_after_panic().map_err(|_| AppError {
+                        code: "storage_unavailable",
+                        message: "Mnemo could not recover its data file after an error. Nothing was deleted. Quit Mnemo and start it again.".to_string(),
+                    })?;
+                    m.clear_poison();
+                    Ok(guard)
+                }
+            },
             Err(_) => Err(AppError {
                 code: "storage_unavailable",
                 message: "Mnemo could not open its data file when it started. Nothing was deleted. Quit Mnemo and start it again.".to_string(),
