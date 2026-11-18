@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mnemo could not start</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <!-- Shown when the core could not open the data file. The static text is honest
+         without JS; the script only makes the reason more specific. -->
+    <main>
+      <h1>Mnemo could not start</h1>
+      <p id="startup-reason" role="alert">Mnemo could not open its data file. Nothing was deleted.</p>
+      <p>Quit Mnemo and start it again.</p>
+    </main>
+    <script type="module" src="/src/error-page.ts"></script>
+  </body>
+</html>

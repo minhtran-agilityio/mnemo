@@ -66,6 +66,12 @@ Mnemo opens one window and needs no sign-in or network at start. Closing the win
 - `npm run build` type-checks the UI and builds it into `dist/`.
 - `npm run tauri build` makes a release bundle for the current platform.
 
+## Data folder
+
+Mnemo keeps all its data in one SQLite file named `mnemo.db` inside the Tauri app data folder (`~/.local/share/io.mnemo.desktop/` on Ubuntu, `~/Library/Application Support/io.mnemo.desktop/` on macOS). The file is created on first start and updated by numbered migrations when the app opens. If the file cannot be opened, the Mnemo window opens on a plain error page instead of the app, and nothing is deleted. The page shows only a short reason; the full error, which can name file paths, is printed to the terminal. If even that window cannot be built, Mnemo prints the error and exits with code 1. The error page was checked in a real window on Ubuntu 22.04; on macOS it is **Unverified**.
+
+Do not put this file in Dropbox, iCloud Drive or any other synced folder. Syncing a live SQLite file can corrupt it. There is no sync in version 1. To back up, copy the whole data folder while Mnemo is closed.
+
 ## Test
 
 Three commands cover everything. Run them from the repository root after `npm install`.

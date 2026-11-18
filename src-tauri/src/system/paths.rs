@@ -1,7 +1,10 @@
-//! The one place that decides where Mnemo keeps its folders.
+//! The one place that decides where Mnemo keeps its folders and files.
 
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
+
+/// File name of the one SQLite database inside the data folder.
+const DB_FILE_NAME: &str = "mnemo.db";
 
 /// The two folders Mnemo owns.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,10 +24,15 @@ pub fn paths_from(data_dir: PathBuf, home_dir: &Path) -> AppPaths {
     }
 }
 
-/// Returns the data folder and the config folder for this app.
+/// Returns the data folder and the config folder for this app. The folders may not exist yet.
 pub fn app_paths(app: &AppHandle) -> tauri::Result<AppPaths> {
     let resolver = app.path();
     Ok(paths_from(resolver.app_data_dir()?, &resolver.home_dir()?))
+}
+
+/// Joins the data folder and the database file name.
+pub fn db_path(data_dir: &Path) -> PathBuf {
+    data_dir.join(DB_FILE_NAME)
 }
 
 #[cfg(test)]
@@ -47,5 +55,11 @@ mod tests {
             Path::new("/home/ana"),
         );
         assert_eq!(paths.data_dir, PathBuf::from("/data/io.mnemo.desktop"));
+    }
+
+    #[test]
+    fn db_path_is_inside_the_data_folder() {
+        let p = db_path(Path::new("/tmp/mnemo-data"));
+        assert_eq!(p, Path::new("/tmp/mnemo-data/mnemo.db"));
     }
 }
