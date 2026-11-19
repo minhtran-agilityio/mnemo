@@ -16,8 +16,8 @@ import {
 import {
   applyTheme,
   cacheTheme,
+  loadSavedTheme,
   readCachedTheme,
-  readTheme,
   THEME_KEY,
   type Theme,
   ThemeReadTimeoutError,
@@ -87,22 +87,21 @@ applyTheme(document.documentElement, currentTheme);
 function useTheme(theme: Theme): void {
   currentTheme = theme;
   applyTheme(document.documentElement, theme);
-  cacheTheme(localStorage, theme);
 }
 
 /** The saved theme, applied at once. A failed read gives the system theme and a visible line. */
 async function loadTheme(): Promise<void> {
-  useTheme(
-    await readTheme(
-      () => getSetting(THEME_KEY),
-      (error) => {
-        console.error("could not read the theme setting:", error);
-        showNote(
-          themeNote,
-          `Mnemo could not read the saved theme, so it uses the system theme. ${error instanceof ThemeReadTimeoutError ? error.message : errorMessage(error)}`,
-        );
-      },
-    ),
+  currentTheme = await loadSavedTheme(
+    document.documentElement,
+    localStorage,
+    () => getSetting(THEME_KEY),
+    (error) => {
+      console.error("could not read the theme setting:", error);
+      showNote(
+        themeNote,
+        `Mnemo could not read the saved theme, so it uses the system theme. ${error instanceof ThemeReadTimeoutError ? error.message : errorMessage(error)}`,
+      );
+    },
   );
 }
 

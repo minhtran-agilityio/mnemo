@@ -96,3 +96,28 @@ export function cacheTheme(
     // The copy is only a speed-up. Without it the next start shows System until the read ends.
   }
 }
+
+/**
+ * Reads the saved theme, shows it on `root` and keeps a copy for the next start. A failed read
+ * shows System but keeps the old copy, so one bad read does not replace a good last known theme.
+ */
+export async function loadSavedTheme(
+  root: HTMLElement,
+  storage: Pick<Storage, "setItem">,
+  read: () => Promise<string | null>,
+  onError: (error: unknown) => void,
+  limitMs: number = THEME_READ_LIMIT_MS,
+): Promise<Theme> {
+  let failed = false;
+  const theme = await readTheme(
+    read,
+    (error) => {
+      failed = true;
+      onError(error);
+    },
+    limitMs,
+  );
+  applyTheme(root, theme);
+  if (!failed) cacheTheme(storage, theme);
+  return theme;
+}

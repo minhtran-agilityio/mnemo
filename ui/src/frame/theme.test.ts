@@ -5,6 +5,7 @@ import { expect, test, vi } from "vitest";
 import {
   applyTheme,
   cacheTheme,
+  loadSavedTheme,
   parseTheme,
   readCachedTheme,
   readTheme,
@@ -120,4 +121,35 @@ test("blocked storage gives System and never throws", () => {
   };
   expect(readCachedTheme(blocked)).toBe("system");
   expect(() => cacheTheme(blocked, "dark")).not.toThrow();
+});
+
+test("a failed read shows System but keeps a good cached theme", async () => {
+  const root = document.createElement("html");
+  const store = new Map<string, string>([["mnemo.theme", "dark"]]);
+  const storage = { setItem: (k: string, v: string) => void store.set(k, v) };
+  const errors: unknown[] = [];
+  const theme = await loadSavedTheme(
+    root,
+    storage,
+    () => Promise.reject(new Error("db busy")),
+    (e) => errors.push(e),
+  );
+  expect(theme).toBe("system");
+  expect(errors).toHaveLength(1);
+  expect(store.get("mnemo.theme")).toBe("dark");
+});
+
+test("a good read is shown and cached", async () => {
+  const root = document.createElement("html");
+  const store = new Map<string, string>();
+  const storage = { setItem: (k: string, v: string) => void store.set(k, v) };
+  const theme = await loadSavedTheme(
+    root,
+    storage,
+    () => Promise.resolve("light"),
+    () => {},
+  );
+  expect(theme).toBe("light");
+  expect(root.getAttribute("data-theme")).toBe("light");
+  expect(store.get("mnemo.theme")).toBe("light");
 });
