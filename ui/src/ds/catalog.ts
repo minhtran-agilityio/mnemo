@@ -2,428 +2,62 @@
 // its states and where it comes from. A part that is not listed here does not exist.
 // Data only: no DOM and no CSS. Only the dev-only UI Catalog screen imports this file, and
 // ui/src/ds/index.ts never does, so the registry stays out of the release bundle.
+//
+// The entries live in one file per tab in ui/src/ds/catalog/. This file puts them together in tab
+// order and holds the helpers and the token groups. A tab's agent edits its own entry file only.
 
-/** The UI Catalog tabs, in the order DESIGN.md section 7 sets. */
-export const CATALOG_TABS = [
-  "Foundations",
-  "Controls",
-  "Feedback",
-  "Surfaces",
-  "Records",
-  "Lists",
-  "Tokens",
-  "Limits",
-] as const;
+import { CONTROLS, CONTROLS_INTRO } from "./catalog/controls";
+import { FEEDBACK, FEEDBACK_INTRO } from "./catalog/feedback";
+import { FOUNDATIONS, FOUNDATIONS_INTRO } from "./catalog/foundations";
+import { LIMITS, LIMITS_INTRO } from "./catalog/limits";
+import { LISTS, LISTS_INTRO } from "./catalog/lists";
+import { RECORDS, RECORDS_INTRO } from "./catalog/records";
+import { SURFACES, SURFACES_INTRO } from "./catalog/surfaces";
+import { TOKENS, TOKENS_INTRO } from "./catalog/tokens";
+import {
+  CATALOG_TABS,
+  type CatalogEntry,
+  type CatalogSource,
+  type CatalogTab,
+} from "./catalog/types";
 
-export type CatalogTab = (typeof CATALOG_TABS)[number];
+export type { CatalogEntry, CatalogSource, CatalogTab };
+export { CATALOG_TABS };
 
-/**
- * Where a part comes from: `ds` (built in ui/src/ds), `base.css` (a base style in the design
- * system's base style file) or `planned #N` (asked for in issue N, not built yet).
- */
-export type CatalogSource = "ds" | "base.css" | `planned #${number}`;
-
-export interface CatalogEntry {
-  /** The part's name, lowercase: "button", "list row". */
-  readonly name: string;
-  readonly tab: CatalogTab;
-  readonly variants: readonly string[];
-  /** The states from DESIGN.md section 5 (and the interactive states) the entry shows. */
-  readonly states: readonly string[];
-  readonly source: CatalogSource;
-  /** The base class of a base style entry, for example "btn". */
-  readonly className?: string;
-  /** One line, for example why a state does not apply. */
-  readonly notes?: string;
-}
-
-const NONE: readonly string[] = [];
-
-/**
- * The source tag of a part asked for in issue `issue`. Built from the number so the source has
- * no "#" followed by digits, which the raw-colour check would read as a hex colour.
- */
-function planned<N extends number>(issue: N): `planned #${N}` {
-  return `planned #${issue}`;
-}
-
+/** Every entry, in the order of the tabs. */
 export const CATALOG = [
-  // Foundations: the tokens and the icon helper (tokens.css and index.ts).
-  {
-    name: "type",
-    tab: "Foundations",
-    variants: ["body font", "mono font", "sizes", "weights"],
-    states: NONE,
-    source: "ds",
-    notes: "Not interactive, so no states apply.",
-  },
-  {
-    name: "colour",
-    tab: "Foundations",
-    variants: [
-      "surface and text",
-      "accent and state",
-      "tints",
-      "connector brands",
-    ],
-    states: NONE,
-    source: "ds",
-    notes: "Not interactive, so no states apply.",
-  },
-  {
-    name: "spacing",
-    tab: "Foundations",
-    variants: ["space-1 to space-6"],
-    states: NONE,
-    source: "ds",
-    notes: "Not interactive, so no states apply.",
-  },
-  {
-    name: "radius",
-    tab: "Foundations",
-    variants: ["sm", "md", "lg", "pill"],
-    states: NONE,
-    source: "ds",
-    notes: "Not interactive, so no states apply.",
-  },
-  {
-    name: "shadow",
-    tab: "Foundations",
-    variants: ["sh1", "sh2"],
-    states: NONE,
-    source: "ds",
-    notes: "Not interactive, so no states apply.",
-  },
-  {
-    name: "motion",
-    tab: "Foundations",
-    variants: ["dur-fast", "dur-base", "dur-slow", "ease"],
-    states: ["on", "off"],
-    source: "ds",
-    notes: "The Motion switch and prefers-reduced-motion stop the sample.",
-  },
-  {
-    name: "icons",
-    tab: "Foundations",
-    variants: ["sm", "md"],
-    states: NONE,
-    source: "ds",
-    notes:
-      "Lucide icons drawn by createIcon. Decorative, so hidden from screen readers.",
-  },
-
-  // Controls
-  {
-    name: "button",
-    tab: "Controls",
-    variants: ["default", "primary", "ghost"],
-    states: ["default", "hover", "active", "focus-visible", "disabled"],
-    source: "base.css",
-    className: "btn",
-    notes: "Hover and active show live: point at or press a button.",
-  },
-  {
-    name: "input",
-    tab: "Controls",
-    variants: ["with field label"],
-    states: ["default", "hover", "focus-visible", "invalid", "disabled"],
-    source: "base.css",
-    className: "input",
-    notes: "Invalid uses aria-invalid. Hover shows live.",
-  },
-  {
-    name: "select",
-    tab: "Controls",
-    variants: ["default"],
-    states: NONE,
-    source: planned(107),
-  },
-  {
-    name: "toggle",
-    tab: "Controls",
-    variants: ["default"],
-    states: NONE,
-    source: planned(107),
-  },
-  {
-    name: "link",
-    tab: "Controls",
-    variants: ["inline", "standalone"],
-    states: NONE,
-    source: planned(107),
-  },
-  {
-    name: "textarea",
-    tab: "Controls",
-    variants: ["default"],
-    states: NONE,
-    source: planned(107),
-  },
-  {
-    name: "search",
-    tab: "Controls",
-    variants: ["default"],
-    states: NONE,
-    source: planned(107),
-  },
-
-  // Feedback
-  {
-    name: "pill",
-    tab: "Feedback",
-    variants: ["default", "info", "good", "warn", "note", "bad"],
-    states: ["default"],
-    source: "base.css",
-    className: "pill",
-    notes: "A label, not a control: it has no interactive states.",
-  },
-  {
-    name: "banner",
-    tab: "Feedback",
-    variants: ["info", "warn", "bad"],
-    states: NONE,
-    source: planned(108),
-  },
-  {
-    name: "toast",
-    tab: "Feedback",
-    variants: ["default"],
-    states: NONE,
-    source: planned(108),
-  },
-  {
-    name: "progress",
-    tab: "Feedback",
-    variants: ["bar", "spinner"],
-    states: NONE,
-    source: planned(108),
-  },
-  {
-    name: "empty line",
-    tab: "Feedback",
-    variants: ["default"],
-    states: NONE,
-    source: planned(108),
-  },
-  {
-    name: "error line",
-    tab: "Feedback",
-    variants: ["default"],
-    states: NONE,
-    source: planned(108),
-  },
-  {
-    name: "AI-off line",
-    tab: "Feedback",
-    variants: ["off", "at limit"],
-    states: NONE,
-    source: planned(108),
-  },
-  {
-    name: "trust label",
-    tab: "Feedback",
-    variants: ["guess", "unverified"],
-    states: NONE,
-    source: planned(108),
-  },
-
-  // Surfaces
-  {
-    name: "card",
-    tab: "Surfaces",
-    variants: ["default"],
-    states: ["default"],
-    source: "base.css",
-    className: "card",
-    notes: "A container, not a control: it has no interactive states.",
-  },
-  {
-    name: "page",
-    tab: "Surfaces",
-    variants: ["default"],
-    states: ["default"],
-    source: "base.css",
-    className: "page",
-    notes: "The reading column. A container, so no interactive states.",
-  },
-  {
-    name: "nav rail",
-    tab: "Surfaces",
-    variants: ["open", "collapsed"],
-    states: NONE,
-    source: planned(109),
-  },
-  {
-    name: "status bar",
-    tab: "Surfaces",
-    variants: ["default"],
-    states: NONE,
-    source: planned(109),
-  },
-  {
-    name: "header",
-    tab: "Surfaces",
-    variants: ["default"],
-    states: NONE,
-    source: planned(109),
-  },
-  {
-    name: "panel",
-    tab: "Surfaces",
-    variants: ["default"],
-    states: NONE,
-    source: planned(109),
-  },
-  {
-    name: "dialog",
-    tab: "Surfaces",
-    variants: ["default", "confirm"],
-    states: NONE,
-    source: planned(109),
-  },
-  {
-    name: "overlay",
-    tab: "Surfaces",
-    variants: ["default"],
-    states: NONE,
-    source: planned(109),
-  },
-
-  // Records: one item in each shape.
-  {
-    name: "link card",
-    tab: "Records",
-    variants: ["List", "Cards", "Compact"],
-    states: NONE,
-    source: planned(110),
-  },
-  {
-    name: "note row",
-    tab: "Records",
-    variants: ["default"],
-    states: NONE,
-    source: planned(110),
-  },
-  {
-    name: "task row",
-    tab: "Records",
-    variants: ["default"],
-    states: NONE,
-    source: planned(110),
-  },
-  {
-    name: "kanban card",
-    tab: "Records",
-    variants: ["default"],
-    states: NONE,
-    source: planned(110),
-  },
-  {
-    name: "citation",
-    tab: "Records",
-    variants: ["default"],
-    states: NONE,
-    source: planned(110),
-  },
-  {
-    name: "tag list",
-    tab: "Records",
-    variants: ["default"],
-    states: NONE,
-    source: planned(110),
-  },
-  {
-    name: "metadata line",
-    tab: "Records",
-    variants: ["default"],
-    states: NONE,
-    source: planned(110),
-  },
-
-  // Lists: many items at once.
-  {
-    name: "list row",
-    tab: "Lists",
-    variants: ["title and meta"],
-    states: ["default", "hover", "overflow"],
-    source: "base.css",
-    className: "row",
-    notes:
-      "Overflow: a long title is cut off with an ellipsis. Hover shows live.",
-  },
-  {
-    name: "kanban column",
-    tab: "Lists",
-    variants: ["default"],
-    states: NONE,
-    source: planned(110),
-  },
-  {
-    name: "table",
-    tab: "Lists",
-    variants: ["default"],
-    states: NONE,
-    source: planned(110),
-  },
-  {
-    name: "tree",
-    tab: "Lists",
-    variants: ["default"],
-    states: NONE,
-    source: planned(110),
-  },
-
-  // Tokens: the rows come from tokens.css, not from this list.
-  {
-    name: "tokens",
-    tab: "Tokens",
-    variants: ["every token in tokens.css"],
-    states: ["current theme"],
-    source: "ds",
-    notes:
-      "Values are for the current theme. Use the Light or Dark switch to see the other.",
-  },
-
-  // Limits
-  {
-    name: "long titles",
-    tab: "Limits",
-    variants: NONE,
-    states: ["overflow"],
-    source: planned(113),
-  },
-  {
-    name: "long URLs",
-    tab: "Limits",
-    variants: NONE,
-    states: ["overflow"],
-    source: planned(113),
-  },
-  {
-    name: "many items",
-    tab: "Limits",
-    variants: NONE,
-    states: ["overflow"],
-    source: planned(113),
-  },
-  {
-    name: "smallest window",
-    tab: "Limits",
-    variants: ["800 by 560"],
-    states: NONE,
-    source: planned(113),
-  },
+  ...FOUNDATIONS,
+  ...CONTROLS,
+  ...FEEDBACK,
+  ...SURFACES,
+  ...RECORDS,
+  ...LISTS,
+  ...TOKENS,
+  ...LIMITS,
 ] as const satisfies readonly CatalogEntry[];
+
+/** The line under the title of each tab. */
+export const TAB_INTRO: Readonly<Record<CatalogTab, string>> = {
+  Foundations: FOUNDATIONS_INTRO,
+  Controls: CONTROLS_INTRO,
+  Feedback: FEEDBACK_INTRO,
+  Surfaces: SURFACES_INTRO,
+  Records: RECORDS_INTRO,
+  Lists: LISTS_INTRO,
+  Tokens: TOKENS_INTRO,
+  Limits: LIMITS_INTRO,
+};
 
 type Entry = (typeof CATALOG)[number];
 
 /**
- * The built entries outside Foundations and Tokens. The screen keeps one renderer for each in a
- * typed map, so a part that turns from `planned #N` into `ds` without a renderer is a type error.
+ * The names of the built entries of one tab (all tabs when none is given). A tab's screen file
+ * keeps one renderer for each in a typed map, so a part that turns from `planned #N` into `ds`
+ * without a renderer is a type error.
  */
-export type BuiltEntryName = Exclude<
-  Extract<Entry, { source: "ds" | "base.css" }>,
-  { tab: "Foundations" | "Tokens" }
+export type BuiltEntryName<T extends CatalogTab = CatalogTab> = Extract<
+  Entry,
+  { source: "ds" | "base.css"; tab: T }
 >["name"];
 
 /** The entries of one tab, in registry order. */
@@ -442,6 +76,20 @@ export function coverage(tab: CatalogTab): { built: number; total: number } {
   return {
     built: entries.filter(isBuilt).length,
     total: entries.length,
+  };
+}
+
+/** How many entries come from each source, for the coverage bar: ds, base.css and planned. */
+export function sourceCounts(tab?: CatalogTab): {
+  ds: number;
+  base: number;
+  plan: number;
+} {
+  const entries = tab ? entriesFor(tab) : [...CATALOG];
+  return {
+    ds: entries.filter((e) => e.source === "ds").length,
+    base: entries.filter((e) => e.source === "base.css").length,
+    plan: entries.filter((e) => !isBuilt(e)).length,
   };
 }
 
@@ -605,6 +253,89 @@ export const TOKEN_GROUPS: readonly TokenGroup[] = [
     group: "Sidebar",
     kind: "size",
     names: ["--sidebar-width", "--sidebar-width-collapsed"],
+  },
+  {
+    group: "Catalog sizes",
+    kind: "size",
+    names: [
+      "--size-page-max",
+      "--size-label-min",
+      "--size-label-max",
+      "--size-label-duo-min",
+      "--size-label-duo-max",
+      "--size-basis-example",
+      "--size-basis-banner",
+      "--size-basis-column",
+      "--size-basis-decisions",
+      "--size-basis-tabs",
+      "--size-decisions-max",
+      "--size-cov-bar",
+      "--measure-intro",
+      "--measure-sub",
+      "--measure-answer",
+      "--size-tap-min",
+      "--size-tap-sm",
+      "--size-row-menu",
+      "--size-row-compact",
+      "--size-tag-input",
+      "--size-field-max",
+      "--size-textarea-min",
+      "--size-tags-max",
+      "--size-tag-input-min",
+      "--size-menu-min",
+      "--size-menu-max",
+      "--size-toggle-width",
+      "--size-toggle-height",
+      "--size-toggle-knob",
+      "--size-toggle-travel",
+      "--size-kbd-min",
+      "--size-cite",
+      "--size-icon-lg",
+      "--size-swatch",
+      "--size-dot",
+      "--size-dot-sm",
+      "--size-meter-max",
+      "--size-meter-height",
+      "--size-meter-tick-overhang",
+      "--size-progress-max",
+      "--size-progress-height",
+      "--size-skeleton-width",
+      "--size-skeleton-line",
+      "--size-toast-max",
+      "--size-state-max",
+      "--size-dialog-width",
+      "--size-dialog-static-max",
+      "--size-kcard-width",
+      "--size-table-min",
+      "--size-tree-max",
+      "--leading-chip-sm",
+      "--leading-chip",
+      "--leading-tag",
+      "--leading-label",
+      "--size-mini-height",
+      "--size-list-height",
+      "--size-range",
+      "--size-specimen-width",
+      "--size-specimen-height",
+      "--size-titlebar",
+      "--size-specimen-meter",
+      "--size-inspect-width",
+      "--size-inspect-swatch",
+      "--size-palette-width",
+      "--size-palette-list-max",
+      "--size-typecap",
+      "--size-spacebar",
+      "--size-space-label",
+      "--size-radbox-width",
+      "--size-radbox-height",
+      "--size-shbox-width",
+      "--size-shbox-height",
+      "--size-swatch-role-width",
+      "--size-icon-cell",
+      "--size-token-bar-max",
+      "--tracking-caption",
+      "--tracking-caps",
+    ],
   },
   {
     group: "Layers",

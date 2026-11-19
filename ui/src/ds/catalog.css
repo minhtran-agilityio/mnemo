@@ -1,47 +1,13 @@
-/* UI Catalog chrome: tabs, entry meta, swatches, specimen boxes and the token table.
+/* UI Catalog chrome: page header, tab bar, switches, coverage, decisions and the row layout.
    Loaded only by the dev-only UI Catalog screen, so it is not in the release bundle.
-   Tokens only (see ds/tokens.css). Every rule is scoped to .ui-catalog, so it styles nothing else. */
+   Tokens only (see ds/tokens.css). Every rule is scoped to .ui-catalog, so it styles nothing else.
+   Rows of one tab are styled in ds/catalog/<tab>.css. */
 
-.ui-catalog .cat-tabs {
-  border-bottom: var(--border-1) solid var(--line);
-}
-
-.ui-catalog .cat-tab {
-  min-height: var(--control-height);
-  padding: 0 var(--space-3);
-  border: 0;
-  border-bottom: var(--border-2) solid transparent;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: var(--text-lg);
-  font-weight: var(--weight-semibold);
-  cursor: pointer;
-}
-
-.ui-catalog .cat-tab:hover {
-  color: var(--ink);
-}
-
-/* The selected tab: a bar under it and full-strength text, so colour is not the only signal. */
-.ui-catalog .cat-tab[aria-selected="true"] {
-  border-bottom-color: var(--accent);
-  color: var(--ink);
-}
-
-.ui-catalog .cat-switch[aria-checked="false"],
-.ui-catalog .btn[aria-pressed="false"] {
-  color: var(--muted);
-}
-
-.ui-catalog .btn[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--chip-ink);
-}
-
-.ui-catalog .cat-switch-state {
-  font-weight: var(--weight-regular);
+.ui-catalog h1,
+.ui-catalog h2,
+.ui-catalog h3,
+.ui-catalog h4 {
+  text-wrap: balance;
 }
 
 .ui-catalog .cat-note {
@@ -50,109 +16,375 @@
   font-size: var(--text-md);
 }
 
-.ui-catalog .cat-entry {
-  padding-top: var(--space-4);
-  border-top: var(--border-1) solid var(--line);
+.ui-catalog .cat-code {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
 }
 
-.ui-catalog .cat-meta {
+/* Page header */
+.ui-catalog .cat-head {
+  padding-block: var(--space-6) var(--space-4);
+}
+
+.ui-catalog .cat-sub {
+  max-width: var(--measure-sub);
   margin: 0;
-  font-size: var(--text-md);
-}
-
-.ui-catalog .cat-meta dt {
   color: var(--muted);
+  font-size: var(--text-lg);
 }
 
-.ui-catalog .cat-meta dd {
-  margin: 0;
-  color: var(--ink2);
+.ui-catalog .cat-devtag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border: var(--border-1) dashed var(--edge);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  vertical-align: middle;
 }
 
-.ui-catalog .cat-type {
-  margin: 0;
+.ui-catalog .cat-legend {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+/* Source tags */
+.ui-catalog .src {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-2);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-tag);
+  white-space: nowrap;
+}
+
+.ui-catalog .src-ds {
+  border-color: var(--good);
+  background: var(--good-soft);
   color: var(--ink);
 }
 
-.ui-catalog .cat-swatch {
-  display: inline-block;
-  width: var(--control-height);
-  height: var(--control-height);
-  border: var(--border-1) solid var(--control-edge);
-  border-radius: var(--radius-sm);
+.ui-catalog .src-base {
+  border-color: var(--accent);
+  background: var(--tint-info);
+  color: var(--chip-ink);
 }
 
-.ui-catalog .cat-swatch-small {
-  width: var(--icon-md);
-  height: var(--icon-md);
+.ui-catalog .src-plan {
+  border-style: dashed;
+  border-color: var(--muted);
+  background: var(--head);
+  color: var(--muted);
 }
 
-.ui-catalog .cat-bar {
-  height: var(--space-3);
-  border-radius: var(--radius-sm);
+.ui-catalog .src-cat {
+  background: var(--tint-note);
+  color: var(--ink);
+}
+
+/* Coverage and decisions */
+.ui-catalog .cat-status {
+  padding-block: 0 var(--space-5);
+}
+
+.ui-catalog .cov {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.ui-catalog .cov-bar {
+  display: inline-flex;
+  width: var(--size-cov-bar);
+  height: var(--space-2);
+  overflow: hidden;
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--head);
+}
+
+.ui-catalog .cov-bar i {
+  display: block;
+  height: 100%;
+}
+
+.ui-catalog .cov-ds {
+  background: var(--good);
+}
+
+.ui-catalog .cov-base {
   background: var(--accent);
 }
 
-.ui-catalog .cat-radius {
-  width: var(--control-height-primary);
-  height: var(--control-height-primary);
-  border: var(--border-2) solid var(--accent);
-  background: var(--accent-soft);
+.ui-catalog .cat-num {
+  font-variant-numeric: tabular-nums;
 }
 
-.ui-catalog .cat-shadow {
-  padding: var(--space-4);
-  border-radius: var(--radius-lg);
+.ui-catalog .cat-decisions {
+  max-width: var(--size-decisions-max);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-md);
   background: var(--card);
+}
+
+.ui-catalog .cat-decisions summary {
+  min-height: var(--control-height);
+  padding: 0 var(--space-3);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.ui-catalog .cat-decisions summary::-webkit-details-marker {
+  display: none;
+}
+
+.ui-catalog .cat-decisions summary svg {
+  color: var(--muted);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.ui-catalog .cat-decisions[open] summary svg {
+  transform: rotate(90deg);
+}
+
+.ui-catalog .cat-decisions ul {
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-3) var(--space-6);
   color: var(--ink2);
   font-size: var(--text-md);
 }
 
-.ui-catalog .cat-motion-track {
-  padding: var(--space-2);
-  border: var(--border-1) solid var(--line);
+.ui-catalog .cat-decisions code {
+  font-size: var(--text-xs);
+}
+
+/* Tab bar */
+.ui-catalog .cat-tabbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  padding-block: var(--space-2);
+  border-bottom: var(--border-1) solid var(--line);
+  background: var(--paper);
+}
+
+.ui-catalog .cat-tabs {
+  flex: 1 1 var(--size-basis-tabs);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.ui-catalog .cat-tab {
+  flex: none;
+  min-height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.ui-catalog .cat-tab:hover {
+  background: var(--head);
+  color: var(--ink);
+}
+
+.ui-catalog .cat-tab[aria-selected="true"] {
+  background: var(--accent-soft);
+  color: var(--chip-ink);
+}
+
+/* The count of rows: drawn from data-count so the tab's text stays its name. */
+.ui-catalog .cat-tab::after {
+  content: attr(data-count);
+  margin-left: var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Switches: Motion, and Light or Dark */
+.ui-catalog .cat-switch {
+  min-height: var(--size-tap-sm);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+
+.ui-catalog .cat-switch-track {
+  position: relative;
+  flex: none;
+  width: var(--size-toggle-width);
+  height: var(--size-toggle-height);
+  border: var(--border-1) solid var(--muted);
   border-radius: var(--radius-pill);
+  background: var(--head);
+  transition: background var(--dur-fast) var(--ease);
+}
+
+.ui-catalog .cat-switch-knob {
+  position: absolute;
+  top: var(--border-2);
+  left: var(--border-2);
+  width: var(--size-toggle-knob);
+  height: var(--size-toggle-knob);
+  border-radius: 50%;
+  background: var(--muted);
+  transition:
+    transform var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+
+.ui-catalog .cat-switch[aria-checked="true"] .cat-switch-track {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.ui-catalog .cat-switch[aria-checked="true"] .cat-switch-knob {
+  background: var(--on-accent);
+  transform: translateX(var(--size-toggle-travel));
+}
+
+.ui-catalog .cat-switch-state {
+  min-width: 2em;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+}
+
+.ui-catalog .cat-seg {
+  padding: var(--space-1);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--head);
+}
+
+.ui-catalog .cat-seg button {
+  min-height: var(--size-tap-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.ui-catalog .cat-seg button:hover {
+  color: var(--ink);
+}
+
+.ui-catalog .cat-seg button[aria-pressed="true"] {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: var(--sh1);
+}
+
+/* Panel intro and the rows: label, source tag and notes on the left, examples on the right */
+.ui-catalog .cat-intro {
+  padding-block: var(--space-5) var(--space-3);
+}
+
+.ui-catalog .cat-intro p {
+  max-width: var(--measure-intro);
+  margin: 0;
+  color: var(--muted);
+}
+
+.ui-catalog .cat-rows {
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-lg);
   background: var(--card);
 }
 
-.ui-catalog .cat-motion-dot {
-  width: var(--space-4);
-  height: var(--space-4);
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  animation: cat-slide var(--dur-slow) var(--ease) infinite alternate;
+.ui-catalog .cat-row {
+  gap: var(--space-4);
+  padding: var(--space-4);
 }
 
-@keyframes cat-slide {
-  from {
-    transform: translateX(0);
-  }
+.ui-catalog .cat-row + .cat-row {
+  border-top: var(--border-1) solid var(--line);
+}
 
-  to {
-    transform: translateX(calc(var(--space-6) * 6));
-  }
+.ui-catalog .cat-row:focus-visible {
+  outline-offset: calc(var(--space-1) * -1);
+}
+
+.ui-catalog .cat-meta h3 {
+  font-size: var(--text-lg);
+}
+
+.ui-catalog .cat-meta p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-md);
+}
+
+.ui-catalog .cat-meta .cat-states {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+/* One state of an example: the live part, and under it a caption in mono type */
+.ui-catalog .st > .cap {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-caption);
+}
+
+.ui-catalog .cat-table-wrap {
+  overflow-x: auto;
 }
 
 .ui-catalog .cat-table {
+  width: 100%;
+  min-width: var(--size-table-min);
   border-collapse: collapse;
   font-size: var(--text-md);
 }
 
 .ui-catalog .cat-table th,
 .ui-catalog .cat-table td {
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-bottom: var(--border-1) solid var(--line);
   text-align: left;
-  vertical-align: middle;
+  vertical-align: top;
 }
 
 .ui-catalog .cat-table th {
-  color: var(--muted);
+  background: var(--head);
+  color: var(--ink2);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+}
+
+.ui-catalog .cat-ok {
+  color: var(--good);
   font-weight: var(--weight-semibold);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .ui-catalog .cat-motion-dot {
-    animation: none;
-  }
+.ui-catalog .cat-fail {
+  color: var(--bad);
+  font-weight: var(--weight-semibold);
 }

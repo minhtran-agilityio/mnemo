@@ -1,71 +1,156 @@
-/* UI Catalog layout only: where parts go. Every look comes from ds/catalog.css, ds/base.css and
-   ds/tokens.css. The one other rule is the Motion switch, which stops all motion. */
+/* UI Catalog layout only: where parts go. Every look comes from ds/catalog.css, ds/catalog/<tab>.css,
+   ds/base.css and ds/tokens.css. The one other rule is the Motion switch, which stops all motion. */
 
-.cat-layout,
-.cat-panel,
-.cat-entry,
-.cat-stack {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
+/* The shipped page column is narrow; the UI Catalog uses the wide layout while it is open. */
+main.cat-screen {
+  max-width: none;
+  padding-block: 0 var(--space-6);
 }
 
 .cat-layout {
-  gap: var(--space-4);
+  width: 100%;
+  max-width: var(--size-page-max);
+  margin: 0 auto;
 }
 
-.cat-header,
+.cat-stack,
+.cat-meta,
+.cat-st {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.cat-head,
+.cat-legend,
+.cat-status,
+.cat-tabbar,
 .cat-switches,
-.cat-group,
-.cat-tabs {
+.cat-seg,
+.cat-intro,
+.cat-switch,
+.cat-ex,
+.cov {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
 }
 
-.cat-header {
+.cat-head {
+  align-items: flex-end;
   justify-content: space-between;
   gap: var(--space-4);
 }
 
+.cat-legend {
+  gap: var(--space-3);
+}
+
+.cat-status {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.cat-decisions {
+  flex: 1 1 var(--size-basis-decisions);
+}
+
+.cat-decisions summary,
+.cat-decisions ul {
+  display: flex;
+}
+
+.cat-decisions summary {
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.cat-decisions ul {
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.cat-tabbar {
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
 .cat-tabs {
-  gap: 0;
+  display: flex;
+  gap: var(--space-1);
+}
+
+.cat-switches {
+  gap: var(--space-3);
+}
+
+.cat-switch {
+  gap: var(--space-2);
+}
+
+.cat-seg {
+  display: inline-flex;
+  gap: var(--space-1);
+}
+
+.cat-intro {
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
 }
 
 .cat-panel[hidden] {
   display: none;
 }
 
-.cat-meta {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: var(--space-1) var(--space-3);
-}
-
-.cat-grid {
-  display: grid;
-  grid-template-columns: repeat(
-      auto-fill,
-      minmax(calc(var(--space-6) * 5), 1fr)
-    );
-  gap: var(--space-3);
-}
-
-.cat-specimen {
+.cat-rows {
   display: flex;
-  align-items: center;
-  gap: var(--space-2);
+  flex-direction: column;
+}
+
+.cat-row {
+  display: grid;
+  grid-template-columns:
+    minmax(var(--size-label-min), var(--size-label-max))
+    minmax(0, 1fr);
+}
+
+.cat-meta {
+  align-items: flex-start;
+  gap: var(--space-1);
   min-width: 0;
 }
 
-.cat-table-wrap {
-  max-width: 100%;
-  overflow-x: auto;
+.cat-ex {
+  align-items: flex-start;
+  gap: var(--space-4) var(--space-5);
+  min-width: 0;
 }
 
-.cat-table {
-  width: 100%;
+.cat-ex.col {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.st {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.st.grow {
+  flex: 1 1 var(--size-basis-example);
+  align-items: stretch;
+}
+
+@media (max-width: 720px) {
+  .cat-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* Motion off: the switch sets data-motion="off" on the root while the UI Catalog is open.

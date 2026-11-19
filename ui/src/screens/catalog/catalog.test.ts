@@ -80,8 +80,9 @@ test("the Tokens panel names every token in the token file", () => {
 test("a token with no computed value says so instead of a blank cell", () => {
   mount();
   const cells = [
-    ...(panelFor("Tokens")?.querySelectorAll("tbody tr") ?? []),
-  ].map((row) => row.children[2]?.textContent ?? "");
+    ...(panelFor("Tokens")?.querySelectorAll("table[data-tokens] tbody tr") ??
+      []),
+  ].map((row) => row.children[1]?.textContent ?? "");
   expect(cells.length).toBe(TOKENS.length);
   for (const c of cells) expect(c.length).toBeGreaterThan(0);
 });
@@ -92,13 +93,15 @@ test("Foundations has a section for each foundation", () => {
     ...(panelFor("Foundations")?.querySelectorAll("h3") ?? []),
   ].map((h) => h.textContent);
   expect(heads).toEqual([
-    "Type",
-    "Colour",
+    "Type scale",
+    "Colour roles",
     "Spacing",
     "Radius",
     "Shadow",
-    "Motion",
+    "Focus ring",
+    "Control border",
     "Icons",
+    "Motion",
   ]);
 });
 
@@ -117,8 +120,8 @@ test("each built part outside Foundations and Tokens shows a live example", () =
 
 test("each panel shows how many of its parts are built", () => {
   mount();
-  expect(panelFor("Foundations")?.textContent).toContain("7 of 7 parts built");
-  expect(panelFor("Records")?.textContent).toMatch(/0 of \d+ parts built/);
+  expect(panelFor("Foundations")?.textContent).toContain("9 of 9 parts in ds");
+  expect(panelFor("Records")?.textContent).toMatch(/0 of \d+ parts in ds/);
 });
 
 test("the eight tabs follow the registry order, and arrows, Home and End move focus", () => {

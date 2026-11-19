@@ -62,6 +62,90 @@ The owner approved these with the UI Catalog prototype v3 (https://claude.ai/art
 
 Proposed in the prototype and settled in #104 (values still **Unverified** in a real window): motion (`--dur-fast` 120ms, `--dur-base` 200ms, `--dur-slow` 1200ms), layers (`--z-sticky` 20, `--z-popover` 50, `--z-toast` 200), icon sizes (`--icon-sm` 16px, `--icon-md` 20px), border widths (`--border-1` 1px, `--border-2` 2px).
 
+### Catalog sizes added in #105
+
+The UI Catalog tabs need fixed lengths that no token covered (prototype v3 uses them in controls, feedback, surfaces, records, lists, limits, the specimen window, Inspect and Find). #105 added them to `ui/src/ds/tokens.css` in one group named "Catalog sizes", so the tabs built later add no token. Sizes are the same in light and dark. Values are **Unverified** in a real window. Media query breakpoints (720px, 1100px) cannot use a token and stay as numbers. A part that needs a length that is not here adds a token in its own pull request.
+
+| Token | Value |
+| --- | --- |
+| `--size-page-max` | 1240px |
+| `--size-label-min` | 180px |
+| `--size-label-max` | 220px |
+| `--size-label-duo-min` | 150px |
+| `--size-label-duo-max` | 190px |
+| `--size-basis-example` | 260px |
+| `--size-basis-banner` | 240px |
+| `--size-basis-column` | 220px |
+| `--size-basis-decisions` | 420px |
+| `--size-basis-tabs` | 520px |
+| `--size-decisions-max` | 640px |
+| `--size-cov-bar` | 160px |
+| `--measure-intro` | 72ch |
+| `--measure-sub` | 70ch |
+| `--measure-answer` | 62ch |
+| `--size-tap-min` | 24px |
+| `--size-tap-sm` | 32px |
+| `--size-row-menu` | 36px |
+| `--size-row-compact` | 28px |
+| `--size-tag-input` | 30px |
+| `--size-field-max` | 320px |
+| `--size-textarea-min` | 88px |
+| `--size-tags-max` | 360px |
+| `--size-tag-input-min` | 80px |
+| `--size-menu-min` | 220px |
+| `--size-menu-max` | 320px |
+| `--size-toggle-width` | 40px |
+| `--size-toggle-height` | 24px |
+| `--size-toggle-knob` | 18px |
+| `--size-toggle-travel` | 16px |
+| `--size-kbd-min` | 22px |
+| `--size-cite` | 22px |
+| `--size-icon-lg` | 24px |
+| `--size-swatch` | 28px |
+| `--size-dot` | 8px |
+| `--size-dot-sm` | 6px |
+| `--size-meter-max` | 320px |
+| `--size-meter-height` | 10px |
+| `--size-meter-tick-overhang` | 3px |
+| `--size-progress-max` | 280px |
+| `--size-progress-height` | 6px |
+| `--size-skeleton-width` | 260px |
+| `--size-skeleton-line` | 12px |
+| `--size-toast-max` | 420px |
+| `--size-state-max` | 380px |
+| `--size-dialog-width` | 480px |
+| `--size-dialog-static-max` | 440px |
+| `--size-kcard-width` | 240px |
+| `--size-table-min` | 560px |
+| `--size-tree-max` | 360px |
+| `--leading-chip-sm` | 16px |
+| `--leading-chip` | 18px |
+| `--leading-tag` | 20px |
+| `--leading-label` | 22px |
+| `--size-mini-height` | 340px |
+| `--size-list-height` | 280px |
+| `--size-range` | 220px |
+| `--size-specimen-width` | 1040px |
+| `--size-specimen-height` | 560px |
+| `--size-titlebar` | 30px |
+| `--size-specimen-meter` | 64px |
+| `--size-inspect-width` | 300px |
+| `--size-inspect-swatch` | 12px |
+| `--size-palette-width` | 560px |
+| `--size-palette-list-max` | 420px |
+| `--size-typecap` | 140px |
+| `--size-spacebar` | 12px |
+| `--size-space-label` | 90px |
+| `--size-radbox-width` | 64px |
+| `--size-radbox-height` | 48px |
+| `--size-shbox-width` | 120px |
+| `--size-shbox-height` | 64px |
+| `--size-swatch-role-width` | 56px |
+| `--size-icon-cell` | 64px |
+| `--size-token-bar-max` | 200px |
+| `--tracking-caption` | 0.02em |
+| `--tracking-caps` | 0.06em |
+
 Rules:
 
 - Add a token before using a new value. A token needs a name from the group above or a new group row in this file. Check: Review.

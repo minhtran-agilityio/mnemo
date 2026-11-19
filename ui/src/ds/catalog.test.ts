@@ -72,7 +72,7 @@ test("each tab after Foundations, except Tokens, has a planned entry with an iss
   }
 });
 
-test("Foundations lists type, colour, spacing, radius, shadow, motion and icons, built in ds", () => {
+test("Foundations lists type, colour, spacing, radius, shadow, focus ring, control border, icons and motion, built in ds", () => {
   const found = entriesFor("Foundations");
   expect(found.map((e) => e.name)).toEqual([
     "type",
@@ -80,8 +80,10 @@ test("Foundations lists type, colour, spacing, radius, shadow, motion and icons,
     "spacing",
     "radius",
     "shadow",
-    "motion",
+    "focus ring",
+    "control border",
     "icons",
+    "motion",
   ]);
   for (const e of found) expect(e.source).toBe("ds");
 });
@@ -93,7 +95,7 @@ test("entriesFor returns only that tab's entries, in registry order", () => {
 });
 
 test("coverage counts built entries against all entries of a tab", () => {
-  expect(coverage("Foundations")).toEqual({ built: 7, total: 7 });
+  expect(coverage("Foundations")).toEqual({ built: 9, total: 9 });
   const controls = entriesFor("Controls");
   expect(coverage("Controls")).toEqual({
     built: controls.filter((e) => !e.source.startsWith("planned")).length,

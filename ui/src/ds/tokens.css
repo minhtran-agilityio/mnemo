@@ -174,6 +174,96 @@
   /* Sidebar width, open and collapsed */
   --sidebar-width: 260px;
   --sidebar-width-collapsed: 72px;
+
+  /* Catalog sizes: fixed lengths the UI Catalog tabs and the parts they build need. One group so
+     parallel work never edits this file again. Values come from UI Catalog prototype v3 and are
+     Unverified in a real window. Media query breakpoints cannot use tokens: 720px and 1100px. */
+  /* Layout widths */
+  --size-page-max: 1240px;
+  --size-label-min: 180px;
+  --size-label-max: 220px;
+  --size-label-duo-min: 150px;
+  --size-label-duo-max: 190px;
+  --size-basis-example: 260px;
+  --size-basis-banner: 240px;
+  --size-basis-column: 220px;
+  --size-basis-decisions: 420px;
+  --size-basis-tabs: 520px;
+  --size-decisions-max: 640px;
+  --size-cov-bar: 160px;
+  --measure-intro: 72ch;
+  --measure-sub: 70ch;
+  --measure-answer: 62ch;
+  /* Controls */
+  --size-tap-min: 24px;
+  --size-tap-sm: 32px;
+  --size-row-menu: 36px;
+  --size-row-compact: 28px;
+  --size-tag-input: 30px;
+  --size-field-max: 320px;
+  --size-textarea-min: 88px;
+  --size-tags-max: 360px;
+  --size-tag-input-min: 80px;
+  --size-menu-min: 220px;
+  --size-menu-max: 320px;
+  --size-toggle-width: 40px;
+  --size-toggle-height: 24px;
+  --size-toggle-knob: 18px;
+  --size-toggle-travel: 16px;
+  --size-kbd-min: 22px;
+  --size-cite: 22px;
+  --size-icon-lg: 24px;
+  --size-swatch: 28px;
+  /* Feedback */
+  --size-dot: 8px;
+  --size-dot-sm: 6px;
+  --size-meter-max: 320px;
+  --size-meter-height: 10px;
+  --size-meter-tick-overhang: 3px;
+  --size-progress-max: 280px;
+  --size-progress-height: 6px;
+  --size-skeleton-width: 260px;
+  --size-skeleton-line: 12px;
+  --size-toast-max: 420px;
+  --size-state-max: 380px;
+  /* Surfaces */
+  --size-dialog-width: 480px;
+  --size-dialog-static-max: 440px;
+  /* Records and Lists */
+  --size-kcard-width: 240px;
+  --size-table-min: 560px;
+  --size-tree-max: 360px;
+  --leading-chip-sm: 16px;
+  --leading-chip: 18px;
+  --leading-tag: 20px;
+  --leading-label: 22px;
+  /* Limits */
+  --size-mini-height: 340px;
+  --size-list-height: 280px;
+  --size-range: 220px;
+  /* Specimen, Inspect and Find */
+  --size-specimen-width: 1040px;
+  --size-specimen-height: 560px;
+  --size-titlebar: 30px;
+  --size-specimen-meter: 64px;
+  --size-inspect-width: 300px;
+  --size-inspect-swatch: 12px;
+  --size-palette-width: 560px;
+  --size-palette-list-max: 420px;
+  /* Foundations */
+  --size-typecap: 140px;
+  --size-spacebar: 12px;
+  --size-space-label: 90px;
+  --size-radbox-width: 64px;
+  --size-radbox-height: 48px;
+  --size-shbox-width: 120px;
+  --size-shbox-height: 64px;
+  --size-swatch-role-width: 56px;
+  --size-icon-cell: 64px;
+  --size-token-bar-max: 200px;
+  /* Letter spacing */
+  --tracking-caption: 0.02em;
+  --tracking-caps: 0.06em;
 }
 
 :root[data-theme="light"] {

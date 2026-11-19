@@ -280,7 +280,7 @@ test('AC6: raw-colour test and every file under ui/ point to the new ds paths', 
     const t = s.replace(/ds\/tokens\.css/g, '').replace(/ds\/base\.css/g, '');
     if (/ui\/src\/tokens\.css|(^|[^\w-])\.{1,2}\/(\.\.\/)*tokens\.css|['"]\.\/tokens\.css|['"]src['"],\s*['"]tokens\.css/.test(t)) stale.push(rel(f));
     // #105: the UI Catalog registry and its tests name the source tag "base.css" as plain text. Only the bare tag is allowed there; a path-like reference is still stale.
-    const tagFile = /ui\/src\/ds\/catalog[.\w]*$|ui\/src\/screens\/catalog\/|tests\/acceptance\/ds-03-/.test(rel(f));
+    const tagFile = /ui\/src\/ds\/catalog([.\w]*$|\/)|ui\/src\/screens\/catalog\/|tests\/acceptance\/ds-03-/.test(rel(f));
     const baseRe = tagFile ? /(^|[^\w-])(\.\/|src\/|ui\/src\/)base\.css\b/ : /(^|[^\w-])(\.\/|src\/|ui\/src\/)?base\.css\b/;
     if (baseRe.test(t)) stale.push(`${rel(f)} (base.css)`);
   }
