@@ -1,0 +1,62 @@
+/* AI status light: one plain line with the fix. Never a blocking dialog, never a credentials form. */
+.ai-light {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3) var(--space-1) var(--space-2);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  color: var(--ink2);
+  font-size: var(--text-md);
+}
+
+.ai-light b {
+  color: var(--ink);
+  font-weight: var(--weight-semibold);
+}
+
+.ai-light-glyph {
+  display: inline-flex;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-light-glyph-off {
+  color: var(--muted);
+}
+
+.ai-light-glyph-bad {
+  color: var(--bad);
+}
+
+.ai-light-glyph-warn {
+  color: var(--warn-ink);
+}
+
+.ai-light code {
+  font-family: var(--font-mono);
+}
+
+.ai-light-action {
+  min-height: var(--size-tap-min);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: var(--space-1);
+  cursor: pointer;
+}
+
+.ai-light-action:hover {
+  color: var(--accent-hover);
+}
+
+.ai-light-action:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--border-1);
+}

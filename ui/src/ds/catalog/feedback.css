@@ -1,0 +1,24 @@
+/* UI Catalog styles of the feedback tab: only the rows of this tab (examples, captions, layout of the
+   samples). A real part's own styles live in ui/src/ds/components/<name>/<name>.css, not here.
+   Tokens only. Scope every rule to .ui-catalog. Only the feedback tab's agent edits this file. */
+.ui-catalog .fb-sentence {
+  max-width: var(--measure-answer);
+  margin: 0;
+  font-size: var(--text-md);
+}
+
+.ui-catalog .fb-force-hover .btn,
+.ui-catalog .fb-force-hover .toast-action {
+  background: var(--accent-soft);
+}
+
+.ui-catalog .fb-force-focus .btn,
+.ui-catalog .fb-force-focus .toast-action,
+.ui-catalog .fb-force-focus .ai-light-action {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--border-1);
+}
+
+.ui-catalog .fb-force-focus .toast-action {
+  outline-color: var(--paper);
+}

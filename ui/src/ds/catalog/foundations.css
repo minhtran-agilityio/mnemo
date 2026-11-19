@@ -1,0 +1,144 @@
+/* UI Catalog styles of the Foundations tab: type scale, colour roles, spacing, radius, shadow,
+   focus ring, control border, icons and motion samples. Tokens only. */
+
+.ui-catalog .typescale {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.ui-catalog .typescale > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-4);
+}
+
+.ui-catalog .typescale .cap {
+  flex: none;
+  width: var(--size-typecap);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.ui-catalog .cat-caps {
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.ui-catalog .sw {
+  display: inline-block;
+  width: var(--size-swatch);
+  height: var(--size-swatch);
+  border: var(--border-1) solid var(--edge);
+  border-radius: var(--radius-sm);
+  vertical-align: middle;
+}
+
+.ui-catalog .sw-role {
+  width: var(--size-swatch-role-width);
+  height: var(--control-height);
+}
+
+.ui-catalog .spacebar {
+  display: inline-block;
+  height: var(--size-spacebar);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+}
+
+.ui-catalog .space-label {
+  width: var(--size-space-label);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.ui-catalog .radbox {
+  display: inline-block;
+  width: var(--size-radbox-width);
+  height: var(--size-radbox-height);
+  border: var(--border-2) solid var(--accent);
+  background: var(--accent-soft);
+}
+
+.ui-catalog .shbox {
+  display: inline-block;
+  width: var(--size-shbox-width);
+  height: var(--size-shbox-height);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.ui-catalog .icon-cell {
+  width: var(--size-icon-cell);
+  align-items: center;
+}
+
+.ui-catalog .cat-spin {
+  display: inline-block;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  border: var(--border-2) solid var(--accent);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: cat-rot var(--dur-slow) linear infinite;
+}
+
+.ui-catalog .cat-pulse {
+  display: inline-block;
+  width: var(--size-dot);
+  height: var(--size-dot);
+  border-radius: 50%;
+  background: var(--accent);
+  animation: cat-pulse var(--dur-slow) var(--ease) infinite;
+}
+
+.ui-catalog .cat-indet {
+  height: var(--size-progress-height);
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--head);
+}
+
+.ui-catalog .cat-indet > span {
+  display: block;
+  width: 35%;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  animation: cat-slide var(--dur-slow) var(--ease) infinite;
+}
+
+@keyframes cat-rot {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes cat-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes cat-slide {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(300%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-catalog .cat-spin,
+  .ui-catalog .cat-pulse,
+  .ui-catalog .cat-indet > span {
+    animation: none;
+  }
+}

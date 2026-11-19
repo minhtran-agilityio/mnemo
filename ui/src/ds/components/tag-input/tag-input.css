@@ -1,0 +1,68 @@
+/* Tag input: tags inside a box with a text input. Tokens only. */
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: var(--size-tags-max);
+  min-height: var(--control-height);
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-1) solid var(--control-edge);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.tags:focus-within {
+  border-color: var(--accent);
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tags input {
+  flex: 1 1 var(--size-tag-input-min);
+  min-width: var(--size-tag-input-min);
+  min-height: var(--size-tag-input);
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-lg);
+}
+
+.tags input:focus,
+.tags input:focus-visible {
+  outline: none;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--border-2);
+  padding-left: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--tint-info);
+  color: var(--chip-ink);
+  font-size: var(--text-md);
+}
+
+.tag button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-tap-min);
+  height: var(--size-tap-min);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.tag button:hover {
+  background: var(--accent-soft);
+}
+
+.tag button:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: calc(var(--border-2) * -1);
+}

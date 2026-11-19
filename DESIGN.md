@@ -62,6 +62,90 @@ The owner approved these with the UI Catalog prototype v3 (https://claude.ai/art
 
 Proposed in the prototype and settled in #104 (values still **Unverified** in a real window): motion (`--dur-fast` 120ms, `--dur-base` 200ms, `--dur-slow` 1200ms), layers (`--z-sticky` 20, `--z-popover` 50, `--z-toast` 200), icon sizes (`--icon-sm` 16px, `--icon-md` 20px), border widths (`--border-1` 1px, `--border-2` 2px).
 
+### Catalog sizes added in #105
+
+The UI Catalog tabs need fixed lengths that no token covered (prototype v3 uses them in controls, feedback, surfaces, records, lists, limits, the specimen window, Inspect and Find). #105 added them to `ui/src/ds/tokens.css` in one group named "Catalog sizes", so the tabs built later add no token. Sizes are the same in light and dark. Values are **Unverified** in a real window. Media query breakpoints (720px, 1100px) cannot use a token and stay as numbers. A part that needs a length that is not here adds a token in its own pull request.
+
+| Token | Value |
+| --- | --- |
+| `--size-page-max` | 1240px |
+| `--size-label-min` | 180px |
+| `--size-label-max` | 220px |
+| `--size-label-duo-min` | 150px |
+| `--size-label-duo-max` | 190px |
+| `--size-basis-example` | 260px |
+| `--size-basis-banner` | 240px |
+| `--size-basis-column` | 220px |
+| `--size-basis-decisions` | 420px |
+| `--size-basis-tabs` | 520px |
+| `--size-decisions-max` | 640px |
+| `--size-cov-bar` | 160px |
+| `--measure-intro` | 72ch |
+| `--measure-sub` | 70ch |
+| `--measure-answer` | 62ch |
+| `--size-tap-min` | 24px |
+| `--size-tap-sm` | 32px |
+| `--size-row-menu` | 36px |
+| `--size-row-compact` | 28px |
+| `--size-tag-input` | 30px |
+| `--size-field-max` | 320px |
+| `--size-textarea-min` | 88px |
+| `--size-tags-max` | 360px |
+| `--size-tag-input-min` | 80px |
+| `--size-menu-min` | 220px |
+| `--size-menu-max` | 320px |
+| `--size-toggle-width` | 40px |
+| `--size-toggle-height` | 24px |
+| `--size-toggle-knob` | 18px |
+| `--size-toggle-travel` | 16px |
+| `--size-kbd-min` | 22px |
+| `--size-cite` | 22px |
+| `--size-icon-lg` | 24px |
+| `--size-swatch` | 28px |
+| `--size-dot` | 8px |
+| `--size-dot-sm` | 6px |
+| `--size-meter-max` | 320px |
+| `--size-meter-height` | 10px |
+| `--size-meter-tick-overhang` | 3px |
+| `--size-progress-max` | 280px |
+| `--size-progress-height` | 6px |
+| `--size-skeleton-width` | 260px |
+| `--size-skeleton-line` | 12px |
+| `--size-toast-max` | 420px |
+| `--size-state-max` | 380px |
+| `--size-dialog-width` | 480px |
+| `--size-dialog-static-max` | 440px |
+| `--size-kcard-width` | 240px |
+| `--size-table-min` | 560px |
+| `--size-tree-max` | 360px |
+| `--leading-chip-sm` | 16px |
+| `--leading-chip` | 18px |
+| `--leading-tag` | 20px |
+| `--leading-label` | 22px |
+| `--size-mini-height` | 340px |
+| `--size-list-height` | 280px |
+| `--size-range` | 220px |
+| `--size-specimen-width` | 1040px |
+| `--size-specimen-height` | 560px |
+| `--size-titlebar` | 30px |
+| `--size-specimen-meter` | 64px |
+| `--size-inspect-width` | 300px |
+| `--size-inspect-swatch` | 12px |
+| `--size-palette-width` | 560px |
+| `--size-palette-list-max` | 420px |
+| `--size-typecap` | 140px |
+| `--size-spacebar` | 12px |
+| `--size-space-label` | 90px |
+| `--size-radbox-width` | 64px |
+| `--size-radbox-height` | 48px |
+| `--size-shbox-width` | 120px |
+| `--size-shbox-height` | 64px |
+| `--size-swatch-role-width` | 56px |
+| `--size-icon-cell` | 64px |
+| `--size-token-bar-max` | 200px |
+| `--tracking-caption` | 0.02em |
+| `--tracking-caps` | 0.06em |
+
 Rules:
 
 - Add a token before using a new value. A token needs a name from the group above or a new group row in this file. Check: Review.
@@ -109,7 +193,9 @@ Also required for every interactive component: default, hover, focus-visible, ac
 | Path | Role |
 | --- | --- |
 | `ui/src/ds/tokens.css` | Token values. The only file with colour values |
-| `ui/src/ds/base.css` | Base styles |
+| `ui/src/ds/base.css` | Page-wide rules only (reset, body, headings, links, focus ring). No component rule |
+| `ui/src/ds/icon.ts` | The one icon helper, `createIcon`. Components import it; none keeps its own copy |
+| `ui/src/ds/components/<name>/` | One folder per component: `<name>.ts`, `<name>.css`, `<name>.test.ts`. The barrel of each catalog tab (`controls.ts`, `feedback.ts`, `surfaces.ts`, `records.ts`, `lists.ts`) exports them, and `ui/src/ds/index.ts` re-exports the barrels |
 | `ui/src/ds/` | The design system. **The only place that defines visual styles** (colour, font, size, spacing, radius, shadow, border) for a component |
 | `ui/src/screens/**` | Layout only: where parts go, grid, flex, gap, which part to show. No visual style of its own |
 | `ui/src/frame/`, `ui/src/screens/settings/`, `ui/src/screens/kanban/`, `ui/src/style.css` | Shipped before this contract and still hold their own CSS. They are known exceptions: #109 moves the sidebar into `ui/src/ds/`, #111 moves the rest and removes the exceptions |
@@ -122,13 +208,13 @@ Rules:
 4. `ui/src/ds/` changes only in a pull request that comes from a UI component request issue, and that updates the UI Catalog in the same pull request. Check: Review.
 5. Raw colour values stay out of `ui/src/ds/` and `ui/src/screens/**`. Check: Test (`tests/raw-colour.test.mjs`).
 
-The base styles live in `ui/src/ds/base.css` (moved in #104).
+Every component lives in `ui/src/ds/components/<name>/`; `ui/src/ds/base.css` holds page-wide rules only. A part that another part needs (the trust label, the spinner, the small button, the segmented choice, the tooltip) is imported, never copied. Check: Review; `grep -rn "function createIcon" ui/src/ds` shows one definition.
 
 ## 7. UI Catalog
 
 The UI Catalog is the dev-only screen that shows every part in `ui/src/ds/`, with every state from section 5, in light and dark. It is the place an agent looks first. The name is "UI Catalog". No other name is used. Check: Review; a search of the repo for any other name for this screen finds nothing.
 
-- **Dev-only.** It is not in the release bundle. Check: Test or Review of the built `dist/` (it holds no UI Catalog code). **Planned** in #105.
+- **Dev-only.** It is not in the release bundle. A dev build (`npm run dev`) opens it at `#/ui-catalog`. Check: Test (`tests/acceptance/ds-03-catalog.test.mjs` builds the release and finds no UI Catalog code). Built in #105.
 - **Tabs, in this order:** Foundations, Controls, Feedback, Surfaces, Records, Lists, Tokens, Limits. Check: Review against this list.
 
 | Tab | Holds |
@@ -142,7 +228,12 @@ The UI Catalog is the dev-only screen that shows every part in `ui/src/ds/`, wit
 | Tokens | Every token from section 3, light and dark side by side, with its value |
 | Limits | Messy content: very long titles, names and URLs, many items, smallest window size |
 
-- **Source tag on every row:** `ds` (in `ui/src/ds/`), `base.css` (exists today, moves into `ui/src/ds/` in #105) or `planned #N` (in an issue, not built yet). Check: Review.
+- **Parts per tab.** Controls: button, text input, textarea, search, checkbox, radio, toggle, segmented choice, filter chip, select, menu, popover, tag input, shortcut hint, link. Feedback: pill, dot, AI status light, usage meter, progress, spinner, skeleton, banner, toast, trust label, empty state, error state, AI-off state. Surfaces: nav rail, status bar, page header, card, panel, divider, tabs, page, dialog, confirm dialog, approval sheet, tooltip, context menu. Records: link card (three views), note row, task row, kanban card, citation, tag list, metadata line. Lists: list, list row, kanban column, table, tree. Limits: narrow width and 200% zoom, very long title, messy URLs, Vietnamese stacked marks, empty content, 1000 rows, reduced motion. The registry `ui/src/ds/catalog.ts` is the full list. Check: Test (`ui/src/ds/catalog.test.ts`); every built entry has a live row.
+- **Specimen window.** At the top, one Mnemo window built only from catalog parts and scaled to fit. A button over each part opens that part's row (Tab to it, Enter). "Show part names" labels them all. The window itself is inert. Check: Test (`ui/src/screens/catalog/catalog.test.ts`).
+- **Inspect.** Key I, or the Inspect button, then hover or focus an example: the card shows text and ground tokens, contrast ratio, border contrast, target size against 24 and 44 px, font and radius, in the theme on screen. Escape leaves it. Check: Test (`colour.test.ts`, `catalog.test.ts`); Review in the browser.
+- **Find a part.** Ctrl or Cmd K, or the Find a part button: a dialog that searches parts, tokens and actions, ignores Vietnamese marks, and opens the matching row. Arrows move, Enter opens, Escape closes, focus returns. Check: Test (`ui/src/screens/catalog/find.test.ts`).
+- **Left out on purpose.** The prototype's "Both themes" view and its animated theme reveal are not in the UI Catalog. Light and Dark switch at once.
+- **Source tag on every row:** `ds` (in `ui/src/ds/`), `base.css` (a base style in `ui/src/ds/base.css`) or `planned #N` (in an issue, not built yet). Check: Review.
 
 How to pick a part:
 

@@ -1,0 +1,35 @@
+.mtabs {
+  display: flex;
+  gap: var(--space-4);
+  width: 100%;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.mtabs button {
+  min-height: var(--control-height);
+  padding: 0 var(--space-1);
+  border: 0;
+  border-bottom: var(--border-2) solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mtabs button:hover {
+  color: var(--ink);
+}
+
+.mtabs button[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+}
+
+.mtabs button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

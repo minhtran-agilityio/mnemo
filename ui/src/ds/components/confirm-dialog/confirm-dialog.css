@@ -1,0 +1,7 @@
+.dlg .lose,
+.dlg-static .lose {
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--ink2);
+  font-size: var(--text-md);
+}

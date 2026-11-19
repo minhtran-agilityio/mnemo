@@ -1,0 +1,117 @@
+.lcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+}
+
+.lcard:hover {
+  border-color: var(--edge);
+  box-shadow: var(--sh1);
+}
+
+.lcard .title {
+  display: -webkit-box;
+  padding-top: var(--border-2);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.lcard .url {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lcard .sum {
+  color: var(--ink2);
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+
+.lcard .thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--head);
+  color: var(--muted);
+  aspect-ratio: 16 / 9;
+}
+
+.lcard .nosum,
+.rec-reading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--muted);
+  font-size: var(--text-md);
+}
+
+.lcard .nosum {
+  font-style: italic;
+}
+
+.lcard .trust {
+  align-self: flex-start;
+}
+
+.views {
+  display: grid;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.views.cards {
+  grid-template-columns: repeat(
+      auto-fill,
+      minmax(var(--size-basis-column), 1fr)
+    );
+}
+
+.compact-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--size-tap-sm);
+  padding: 0 var(--space-3);
+  background: var(--card);
+  font-size: var(--text-md);
+}
+
+.compact-row + .compact-row {
+  border-top: var(--border-1) solid var(--line);
+}
+
+.compact-row:hover {
+  background: var(--head);
+}
+
+.compact-row:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: calc(var(--focus-ring) * -1);
+}
+
+.compact-row .row-title {
+  font-weight: var(--weight-regular);
+}
+
+.compact-row .dom {
+  flex: none;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}

@@ -16,10 +16,16 @@ export interface Route {
 
 const HOME = findItem(HOME_ID) as NavItem;
 
-export function parseHash(hash: string): Route {
+/** The path of an address hash and its search part: no "#", no leading or trailing "/". */
+export function splitHash(hash: string): { path: string; search: string } {
   const text = hash.startsWith("#") ? hash.slice(1) : hash;
   const [path = "", search = ""] = splitOnce(text, "?");
-  const item = findItem(path.replace(/^\/+/, "")) ?? HOME;
+  return { path: path.replace(/^\/+/, "").replace(/\/+$/, ""), search };
+}
+
+export function parseHash(hash: string): Route {
+  const { path, search } = splitHash(hash);
+  const item = findItem(path) ?? HOME;
   if (item.id !== EVERYTHING_ID) return { item, query: null };
   const query = new URLSearchParams(search).get("q");
   return { item, query: query?.trim() ? query : null };

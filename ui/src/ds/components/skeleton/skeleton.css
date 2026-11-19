@@ -1,0 +1,28 @@
+/* Skeleton: grey lines where text will land. */
+.skel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: var(--size-basis-example);
+  max-width: 100%;
+}
+
+.skel span {
+  display: block;
+  height: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--head);
+  animation: skel-pulse var(--dur-slow) var(--ease) infinite;
+}
+
+@keyframes skel-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skel span {
+    animation: none;
+  }
+}

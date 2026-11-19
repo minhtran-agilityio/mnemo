@@ -1,0 +1,41 @@
+/* UI Catalog styles of the Tokens tab: one table for each token group and the contrast table.
+   Tokens only. */
+
+.ui-catalog .tok-group h3 {
+  display: flex;
+  align-items: baseline;
+}
+
+.ui-catalog .tok-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.ui-catalog .tok-sample-bar {
+  display: inline-block;
+  height: var(--size-spacebar);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+}
+
+.ui-catalog .tok-sample-shadow {
+  display: inline-block;
+  width: var(--size-specimen-meter);
+  height: var(--size-swatch);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.ui-catalog .tok-sample-radius {
+  display: inline-block;
+  width: var(--control-height);
+  height: var(--size-swatch);
+  border: var(--border-2) solid var(--accent);
+  background: var(--accent-soft);
+}
+
+.ui-catalog .tok-pair {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+}

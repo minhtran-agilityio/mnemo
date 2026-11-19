@@ -1,0 +1,90 @@
+.statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  width: 100%;
+  min-height: var(--size-tap-sm);
+  padding: var(--space-1) var(--space-3);
+  border-top: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.statusbar .sb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+
+.statusbar .push {
+  margin-left: auto;
+}
+
+.statusbar .mono {
+  font-family: var(--font-mono);
+}
+
+.statusbar .num {
+  font-variant-numeric: tabular-nums;
+}
+
+.statusbar .sb-warn {
+  color: var(--warn-ink);
+}
+
+.statusbar .sb-bad {
+  color: var(--bad);
+}
+
+.statusbar .sb-dot {
+  display: inline-block;
+  flex: none;
+  width: var(--size-dot);
+  height: var(--size-dot);
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.statusbar .sb-dot-good {
+  background: var(--good);
+}
+
+.statusbar .sb-dot-accent {
+  background: var(--accent);
+}
+
+.statusbar .sb-dot-off {
+  border: var(--border-1) solid var(--muted);
+  background: transparent;
+}
+
+.statusbar .pulse {
+  animation: sb-pulse var(--dur-slow) var(--ease) infinite;
+}
+
+@keyframes sb-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.statusbar button {
+  min-height: var(--size-tap-min);
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statusbar .pulse {
+    animation: none;
+  }
+}

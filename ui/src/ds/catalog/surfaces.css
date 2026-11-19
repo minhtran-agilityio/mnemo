@@ -1,0 +1,34 @@
+/* UI Catalog styles of the surfaces tab: only the samples around the parts (frame, result lines).
+   The parts' own styles live in ui/src/ds/components/<name>/<name>.css. Tokens only. */
+
+.ui-catalog .frame {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-lg);
+  background: var(--paper);
+}
+
+.ui-catalog .frame-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4);
+}
+
+.ui-catalog .srf-muted {
+  color: var(--muted);
+  font-size: var(--text-md);
+}
+
+.ui-catalog .card {
+  max-width: var(--size-state-max);
+}
+
+.ui-catalog .panel {
+  max-width: var(--size-field-max);
+}

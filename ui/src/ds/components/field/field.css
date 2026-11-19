@@ -1,0 +1,27 @@
+/* Field: label above, hint below, error replaces hint. Tokens only. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+  max-width: var(--size-field-max);
+  color: var(--ink2);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+}
+
+.err-text {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--bad);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}

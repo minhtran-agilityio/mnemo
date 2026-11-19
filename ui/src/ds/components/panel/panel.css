@@ -1,0 +1,14 @@
+/* Panel: grouping surface on the head colour. Tokens only. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--head);
+}
+
+.panel-title {
+  font-size: var(--text-md);
+}

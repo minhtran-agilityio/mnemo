@@ -1,0 +1,52 @@
+/* Select (one, native) and the button of a many select. Tokens only. */
+.select {
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 0 calc(var(--space-3) * 2 + var(--icon-sm)) 0 var(--space-3);
+  border: var(--border-1) solid var(--control-edge);
+  border-radius: var(--radius-md);
+  appearance: none;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-regular);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+.select:hover {
+  border-color: var(--muted);
+}
+
+.select:focus-visible {
+  border-color: var(--accent);
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: 2px;
+}
+
+.select:disabled {
+  background: var(--head);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.selwrap {
+  position: relative;
+  display: flex;
+}
+
+.selwrap .ic {
+  position: absolute;
+  top: 50%;
+  right: var(--space-3);
+  color: var(--muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .select {
+    transition: none;
+  }
+}

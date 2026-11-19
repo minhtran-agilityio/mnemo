@@ -1,0 +1,37 @@
+/* Pill: a small label with a tint and a text colour that reads on that tint. Not a control. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--border-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--tint-neutral);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.pill-warn {
+  background: var(--tint-warn);
+  color: var(--warn-ink);
+}
+
+.pill-good {
+  background: var(--tint-good);
+  color: var(--ink);
+}
+
+.pill-info {
+  background: var(--tint-info);
+  color: var(--chip-ink);
+}
+
+.pill-note {
+  background: var(--tint-note);
+  color: var(--ink);
+}
+
+.pill-bad {
+  background: var(--tint-bad);
+  color: var(--guess-ink);
+}

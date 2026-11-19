@@ -1,0 +1,135 @@
+/* UI Catalog styles of the limits tab: only the rows of this tab (the controls of the narrow
+   preview, the full-value box, the counter-example). A real part's own styles live in
+   ui/src/ds/components/<name>/<name>.css, not here. Tokens only. Scope every rule to .ui-catalog. */
+
+.ui-catalog .lim-ctl,
+.ui-catalog .lim-marks,
+.ui-catalog .lim-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.ui-catalog .lim-bar {
+  gap: var(--space-2);
+}
+
+.ui-catalog .lim-ctl {
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.ui-catalog .lim-ctl input[type="range"] {
+  width: var(--size-range);
+  max-width: 100%;
+  min-height: var(--size-tap-min);
+  accent-color: var(--accent);
+}
+
+.ui-catalog .lim-label {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.ui-catalog .lim-marks {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.ui-catalog .lim-scroll {
+  width: 100%;
+  padding-bottom: var(--space-1);
+  overflow-x: auto;
+}
+
+/* The window: its width is set by the slider; zoom doubles each child. */
+.ui-catalog .lim-preview {
+  display: flex;
+  max-width: none;
+  flex-direction: column;
+  border: var(--border-2) dashed var(--edge);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+  overflow: hidden;
+}
+
+.ui-catalog .lim-preview.lim-below {
+  border-color: var(--bad);
+}
+
+.ui-catalog .lim-preview.lim-zoom > * {
+  zoom: 2;
+}
+
+.ui-catalog .lim-mini {
+  display: flex;
+  min-height: var(--size-mini-height);
+}
+
+.ui-catalog .lim-mini .frame-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+}
+
+.ui-catalog .lim-full {
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--head);
+  color: var(--ink2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.ui-catalog .lim-self-start {
+  align-self: flex-start;
+}
+
+.ui-catalog .lim-stack {
+  display: flex;
+  max-width: var(--size-page-max);
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ui-catalog .lim-narrow {
+  max-width: var(--size-field-max);
+}
+
+.ui-catalog .lim-wide {
+  max-width: var(--size-palette-width);
+}
+
+.ui-catalog .lim-tight {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.ui-catalog .lim-rows {
+  height: var(--size-list-height);
+  overflow-y: auto;
+}
+
+.ui-catalog .lim-time {
+  color: var(--muted);
+  font-size: var(--text-md);
+}
+
+.ui-catalog .lim-spin {
+  color: var(--accent);
+}
+
+.ui-catalog .lim-progress {
+  width: var(--size-progress-max);
+}

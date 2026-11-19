@@ -1,0 +1,23 @@
+.task-row .task-check {
+  flex: none;
+  width: var(--icon-md);
+  height: var(--icon-md);
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.task-row .row-body {
+  cursor: pointer;
+}
+
+.task-row.done .row-title {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.task-row .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+}

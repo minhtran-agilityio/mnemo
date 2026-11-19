@@ -1,0 +1,51 @@
+.kcard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: var(--size-kcard-width);
+  max-width: 100%;
+  padding: var(--space-3);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  cursor: grab;
+  transition: box-shadow var(--dur-fast) var(--ease);
+}
+
+.kcard:hover,
+.kcard.is-hover {
+  border-color: var(--edge);
+  box-shadow: var(--sh1);
+}
+
+.kcard:focus-visible,
+.kcard.is-focus {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--border-2);
+}
+
+.kcard.is-dragging {
+  border-color: var(--accent);
+  box-shadow: var(--sh2);
+  cursor: grabbing;
+  transform: rotate(-1.5deg);
+}
+
+.kcard .k-title {
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.kcard .k-working {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kcard {
+    transition: none;
+  }
+}

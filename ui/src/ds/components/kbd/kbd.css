@@ -1,0 +1,25 @@
+/* Shortcut hint. Tokens only. */
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--size-kbd-min);
+  padding: 0 var(--space-1);
+  border: var(--border-1) solid var(--edge);
+  border-bottom-width: var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--head);
+  color: var(--ink2);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chip);
+}
+
+.shortcut {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.shortcut > span {
+  margin-right: var(--space-1);
+}

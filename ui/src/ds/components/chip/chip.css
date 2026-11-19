@@ -1,0 +1,32 @@
+/* Filter chip: a toggle button that shows on or off. Tokens only. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--size-tap-sm);
+  padding: 0 var(--space-3);
+  border: var(--border-1) solid var(--control-edge);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  color: var(--ink2);
+  font: inherit;
+  font-size: var(--text-md);
+  cursor: pointer;
+}
+
+.chip:hover,
+.chip.is-hover {
+  border-color: var(--muted);
+}
+
+.chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--chip-ink);
+  font-weight: var(--weight-semibold);
+}
+
+.chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

@@ -1,0 +1,35 @@
+.pagehead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.pagehead .t {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pagehead .crumb {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.pagehead .context {
+  color: var(--muted);
+  font-size: var(--text-md);
+}
+
+.pagehead-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}

@@ -1,0 +1,20 @@
+/* UI Catalog styles of the controls tab: only the rows of this tab (examples, captions, layout of the
+   samples). A real part's own styles live in ui/src/ds/components/<name>/<name>.css, not here.
+   Tokens only. Scope every rule to .ui-catalog. Only the controls tab's agent edits this file. */
+
+.ui-catalog .cat-hstack {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.ui-catalog .cat-hint {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.ui-catalog .cat-small {
+  margin: 0;
+  font-size: var(--text-md);
+}

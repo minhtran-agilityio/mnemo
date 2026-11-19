@@ -1,0 +1,26 @@
+/* UI Catalog styles of the records tab: only the rows of this tab (examples, captions, layout of the
+   samples). A real part's own styles live in ui/src/ds/components/<name>/<name>.css, not here.
+   Tokens only. Scope every rule to .ui-catalog. Only the records tab's agent edits this file. */
+
+.ui-catalog .rec-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.ui-catalog .rec-wrap > .st {
+  flex: 1 1 var(--size-basis-example);
+  max-width: var(--size-tags-max);
+}
+
+.ui-catalog .rec-hstack {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ui-catalog .cat-ex.col > .seg {
+  align-self: flex-start;
+}

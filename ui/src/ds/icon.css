@@ -1,0 +1,8 @@
+/* Icons never shrink in a flex row. */
+.ic {
+  flex: none;
+}
+
+.ic-muted {
+  color: var(--muted);
+}

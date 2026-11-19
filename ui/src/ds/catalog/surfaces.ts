@@ -1,0 +1,130 @@
+// UI Catalog registry entries of the Surfaces tab. Page, card, header, panel, dialog and overlay.
+// The tab's own agent edits this file only. Data only: no DOM and no CSS.
+import { type CatalogEntry, NONE, ref } from "./types";
+
+/** The line under the tab's title. */
+export const SURFACES_INTRO = `Containers and overlays. Nav rail, status bar and page header come first, for the app frame (${ref(11)}). Built in DS-07 (${ref(109)}).`;
+
+export const SURFACES = [
+  {
+    name: "nav rail",
+    tab: "Surfaces",
+    className: "rail",
+    variants: ["open", "collapsed"],
+    states: ["default", "current", "hover", "focus-visible", "Later"],
+    source: "ds",
+    notes:
+      "260 px open, 72 px collapsed. It folds only when the owner presses the panel button. No counts or badges.",
+  },
+  {
+    name: "status bar",
+    tab: "Surfaces",
+    className: "statusbar",
+    variants: ["ready", "busy and warning", "AI off", "at usage limit"],
+    states: NONE,
+    source: "ds",
+    notes: "Bottom of the window. AI line, usage and save state.",
+  },
+  {
+    name: "page header",
+    tab: "Surfaces",
+    className: "pagehead",
+    variants: ["with crumb and actions"],
+    states: NONE,
+    source: "ds",
+    notes: "Title, one line of context, one primary action.",
+  },
+  {
+    name: "card",
+    tab: "Surfaces",
+    className: "card",
+    variants: ["default"],
+    states: ["default"],
+    source: "ds",
+    notes: "A container, not a control: it has no interactive states.",
+  },
+  {
+    name: "panel",
+    tab: "Surfaces",
+    className: "panel",
+    variants: ["default"],
+    states: NONE,
+    source: "ds",
+    notes: "A quiet group on the head colour. Not interactive.",
+  },
+  {
+    name: "divider",
+    tab: "Surfaces",
+    className: "divider",
+    variants: ["default"],
+    states: NONE,
+    source: "ds",
+    notes: "A thin line between two groups in one surface.",
+  },
+  {
+    name: "tabs",
+    tab: "Surfaces",
+    className: "mtabs",
+    variants: ["default"],
+    states: ["selected", "hover", "focus-visible", "disabled"],
+    source: "ds",
+    notes: "Arrow keys move between tabs. A disabled tab is skipped.",
+  },
+  {
+    name: "page",
+    tab: "Surfaces",
+    className: "page",
+    variants: ["default"],
+    states: ["default"],
+    source: "ds",
+    notes: "The reading column. A container, so no interactive states.",
+  },
+  {
+    name: "dialog",
+    tab: "Surfaces",
+    className: "dlg-static",
+    variants: ["form"],
+    states: ["open", "focus trapped", "closed"],
+    source: "ds",
+    notes:
+      "Focus is trapped, Escape closes, focus returns to the opener. The backdrop is the scrim token.",
+  },
+  {
+    name: "confirm dialog",
+    tab: "Surfaces",
+    className: "lose",
+    variants: ["default"],
+    states: ["open", "closed"],
+    source: "ds",
+    notes:
+      "Names what will be lost. The safe button has the focus when it opens.",
+  },
+  {
+    name: "approval sheet",
+    tab: "Surfaces",
+    className: "plan",
+    variants: ["default"],
+    states: ["waiting", "approved", "declined"],
+    source: "ds",
+    notes:
+      "Any write outside Mnemo shows exactly what will happen and waits for the owner.",
+  },
+  {
+    name: "tooltip",
+    tab: "Surfaces",
+    className: "tip",
+    variants: ["default"],
+    states: ["hidden", "shown"],
+    source: "ds",
+    notes: "Shows on hover and on focus. Escape hides it.",
+  },
+  {
+    name: "context menu",
+    tab: "Surfaces",
+    className: "ctx-menu",
+    variants: ["default"],
+    states: ["closed", "open"],
+    source: "ds",
+    notes: "Right-click the row, or focus it and press Shift+F10.",
+  },
+] as const satisfies readonly CatalogEntry[];

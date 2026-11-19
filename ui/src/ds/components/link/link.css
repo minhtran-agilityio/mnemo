@@ -1,0 +1,74 @@
+/* Link. Accent, underline, hover, focus ring, external icon, unavailable text. Tokens only. */
+.lnk {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: var(--border-1);
+  text-underline-offset: var(--border-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.lnk:hover,
+.lnk.is-hover {
+  color: var(--accent-hover);
+  text-decoration-thickness: var(--border-2);
+}
+
+.lnk:focus-visible,
+.lnk.is-focus {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--border-2);
+}
+
+.lnk-standalone {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--size-tap-min);
+  font-weight: var(--weight-semibold);
+}
+
+.lnk.is-external {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* The words for screen readers beside the external icon. */
+.lnk-note {
+  position: absolute;
+  width: var(--border-1);
+  height: var(--border-1);
+  margin: calc(-1 * var(--border-1));
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.lnk-wrap {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+}
+
+.lnk.is-unavailable {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-thickness: var(--border-1);
+  cursor: not-allowed;
+}
+
+.lnk-reason {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lnk {
+    transition: none;
+  }
+}

@@ -1,0 +1,44 @@
+.plan {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  list-style: none;
+}
+
+.plan li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-md);
+}
+
+.plan li + li {
+  border-top: 1px solid var(--line);
+}
+
+.plan code {
+  overflow-wrap: anywhere;
+}
+
+.sheet-where {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.dlg .note,
+.dlg-static .note {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
