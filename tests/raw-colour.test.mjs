@@ -1,4 +1,4 @@
-// Raw-colour check for #10 [APP-03]: colours live only in ui/src/tokens.css.
+// Raw-colour check for #10 [APP-03]: colours live only in ui/src/ds/tokens.css.
 // Fails on hex, rgb/rgba/hsl/hsla/hwb/lab/lch/oklab/oklch/color() or named colours in ui/**/*.{css,ts,html}.
 // Run: node --test tests/raw-colour.test.mjs   (runs under npm test and npm run check)
 import assert from "node:assert/strict";
@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const UI = join(ROOT, "ui");
-const TOKENS = join(UI, "src", "tokens.css");
+const TOKENS = join(UI, "src", "ds", "tokens.css");
 
 const NAMED = (
   "aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown " +
@@ -71,7 +71,7 @@ process.on("exit", () => {
   if (failed) process.exitCode = 1;
 });
 
-test("no raw colour in ui/**/*.{css,ts,html} outside ui/src/tokens.css", () => {
+test("no raw colour in ui/**/*.{css,ts,html} outside ui/src/ds/tokens.css", () => {
   const offenders = [];
   for (const f of walk(UI)) {
     const kind = (f.match(/\.(css|ts|html)$/) ?? [])[1];
@@ -82,7 +82,7 @@ test("no raw colour in ui/**/*.{css,ts,html} outside ui/src/tokens.css", () => {
   // A nested `node --test` that inherits NODE_TEST_CONTEXT ignores test failures in its exit code,
   // so also set the exit code ourselves. A caller that spawns this file then still sees a failure.
   if (offenders.length) failed = true;
-  assert.deepEqual(offenders, [], `raw colours found outside ui/src/tokens.css:\n${offenders.join("\n")}`);
+  assert.deepEqual(offenders, [], `raw colours found outside ui/src/ds/tokens.css:\n${offenders.join("\n")}`);
 });
 
 test("self-test: the detector flags raw colours and allows tokens", () => {
