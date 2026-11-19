@@ -1,4 +1,4 @@
-/* AI status light: one plain line with the fix. Never a blocking dialog, never a sign-in. */
+/* AI status light: one plain line with the fix. Never a blocking dialog, never a credentials form. */
 .ai-light {
   display: inline-flex;
   align-items: center;

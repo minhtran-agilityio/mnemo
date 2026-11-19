@@ -42,7 +42,7 @@ export const FEEDBACK = [
     source: "ds",
     className: "ai-light",
     notes:
-      "One plain line with the fix. Never a blocking dialog, never a sign-in. Only the check again link is interactive.",
+      "One plain line with the fix. Never a blocking dialog, never a credentials form. Only the check again link is interactive.",
   },
   {
     name: "usage meter",

@@ -25,7 +25,7 @@ test("each state says its own thing", () => {
   expect(says("idle")).toBe("AI ready");
   expect(says("off")).toBe("AI off · saving still works");
   expect(says("signed-out")).toBe(
-    "Claude is signed out · run claude in a terminal to sign in",
+    "Claude is signed out · run claude in a terminal to get back in",
   );
 });
 
@@ -56,7 +56,7 @@ test("not installed offers a check again button that calls back", () => {
   expect(onCheckAgain).toHaveBeenCalledOnce();
 });
 
-test("it never asks for a sign-in: no input and no link to a login page", () => {
+test("it never asks for credentials: no input and no link", () => {
   const light = buildAiLight({ state: "signed-out" });
   expect(light.querySelector("input, a")).toBeNull();
 });

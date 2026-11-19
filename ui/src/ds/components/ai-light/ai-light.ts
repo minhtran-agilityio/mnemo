@@ -38,7 +38,7 @@ const text = (value: string) => document.createTextNode(value);
 
 /**
  * The AI status light: one plain line that says what is wrong and the fix. It is a status
- * region, so a change is read out politely. Mnemo never asks for a sign-in here: a signed-out
+ * region, so a change is read out politely. Mnemo never asks for credentials here: a signed-out
  * Claude is fixed in a terminal.
  */
 export function buildAiLight(options: AiLightOptions): HTMLSpanElement {
@@ -90,7 +90,7 @@ export function buildAiLight(options: AiLightOptions): HTMLSpanElement {
         strong("Claude is signed out"),
         text(" · run "),
         code,
-        text(" in a terminal to sign in"),
+        text(" in a terminal to get back in"),
       );
       break;
     }

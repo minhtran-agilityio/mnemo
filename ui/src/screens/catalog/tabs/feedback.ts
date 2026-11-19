@@ -255,7 +255,9 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
           buildTrustLabel("guess"),
           doc.createTextNode(" Filed in "),
           where,
-          doc.createTextNode(" because the page mentions Tauri and SQLite."),
+          doc.createTextNode(
+            " because the page mentions Tauri and a local database.",
+          ),
         );
         const labels = el(doc, "div", "cat-ex");
         labels.append(
