@@ -10,6 +10,7 @@ import {
   readCachedTheme,
   readTheme,
   saveAndCacheTheme,
+  THEME_CACHE_KEY,
   THEME_LABELS,
   THEMES,
   ThemeReadTimeoutError,
@@ -191,4 +192,34 @@ test("System needs no copy: choosing it removes the cached theme", () => {
   };
   cacheTheme(storage, "system");
   expect(store.has("mnemo.theme")).toBe(false);
+});
+
+test("the boot script in <head> shows the cached theme the same way applyTheme does", () => {
+  const boot = readFileSync(
+    resolve(import.meta.dirname, "../../public/theme-boot.js"),
+    "utf8",
+  );
+  const html = readFileSync(
+    resolve(import.meta.dirname, "../../index.html"),
+    "utf8",
+  );
+  // A classic script in <head>, so it runs before the first paint.
+  const head = html.slice(0, html.indexOf("</head>"));
+  expect(head).toContain('<script src="/theme-boot.js"></script>');
+  const run = new Function(boot);
+  for (const cached of ["light", "dark", null, "purple"] as const) {
+    const root = document.documentElement;
+    applyTheme(root, "system");
+    localStorage.clear();
+    if (cached !== null) localStorage.setItem(THEME_CACHE_KEY, cached);
+    run();
+    const expected = document.createElement("html");
+    applyTheme(expected, readCachedTheme(localStorage));
+    expect(root.getAttribute("data-theme")).toBe(
+      expected.getAttribute("data-theme"),
+    );
+    expect(root.style.colorScheme).toBe(expected.style.colorScheme);
+  }
+  localStorage.clear();
+  applyTheme(document.documentElement, "system");
 });

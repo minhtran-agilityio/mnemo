@@ -112,12 +112,16 @@ async function openApp(mode = 'ok', { profile } = {}) {
   // orphan keeps node (and CI) waiting forever.
   try {
   let wsUrl;
-  for (let i = 0; i < 100 && !wsUrl; i++) {
+  // A cold first start on a CI runner can take more than 10 s, so wait up to 30 s, but stop
+  // at once if Chrome has already exited.
+  let exited = null;
+  proc.once('exit', (code, signal) => { exited = signal ?? code; });
+  for (let i = 0; i < 300 && !wsUrl && exited === null; i++) {
     await sleep(100);
     const f = join(dir, 'DevToolsActivePort');
     if (existsSync(f)) { const [pt, path] = readFileSync(f, 'utf8').trim().split('\n'); if (path) wsUrl = `ws://127.0.0.1:${pt}${path}`; }
   }
-  assert.ok(wsUrl, 'Chrome did not start');
+  assert.ok(wsUrl, exited === null ? 'Chrome did not start within 30 s' : `Chrome exited before it started (${exited})`);
   const ws = new WebSocket(wsUrl);
   await new Promise((ok, bad) => { ws.onopen = ok; ws.onerror = bad; });
   let id = 0;
