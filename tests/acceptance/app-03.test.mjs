@@ -111,15 +111,15 @@ test('AC2: base styles for page, card, button, input, pill and list row exist an
     assert.ok(defined.has(m[1]) || new RegExp(`${m[1]}\\s*:`).test(css), `${m[1]} is used but not defined`);
 });
 
-test('AC2: a sample page shows every base style', () => {
+test('AC2: a catalog page shows every base style', () => {
   const files = uiAll().filter((f) => /\.(html|ts)$/.test(f) && !/\.test\./.test(f));
-  const sample = files.filter((f) => /sample|styleguide|style-guide|showcase|gallery|kit/i.test(relative(p('ui'), f)));
-  assert.ok(sample.length > 0, 'no sample page under ui/ (name with sample/styleguide/showcase/gallery)');
+  const sample = files.filter((f) => /catalog|styleguide|style-guide|showcase|gallery|kit/i.test(relative(p('ui'), f)));
+  assert.ok(sample.length > 0, 'no catalog page under ui/ (name with catalog/styleguide/showcase/gallery)');
   const text = sample.map((f) => readFileSync(f, 'utf8')).join('\n');
   for (const [name, re] of [
     ['card', /card/i], ['button', /button|btn/i], ['input', /input/i],
     ['pill', /pill|chip|badge|tag/i], ['list row', /row|list/i],
-  ]) assert.match(text, re, `sample page does not show ${name}`);
+  ]) assert.match(text, re, `catalog page does not show ${name}`);
 });
 
 test('AC2: the build succeeds and ships both light and dark colours', () => {

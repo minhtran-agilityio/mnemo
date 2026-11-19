@@ -509,8 +509,8 @@ test('AC8: the page renders the frame and not the proof (built page, no kanban o
     assert.deepEqual(r, { board: false, sample: false, proof: false });
   }));
 
-test('AC8: the kanban and sample source files and their tests stay', () => {
-  for (const f of [['screens', 'kanban', 'kanban.ts'], ['screens', 'kanban', 'kanban.css'], ['screens', 'sample', 'sample.ts'], ['screens', 'sample', 'sample.css'], ['shared', 'card.ts'], ['shared', 'card.test.ts'], ['shared', 'store.ts'], ['shared', 'store.test.ts']])
+test('AC8: the kanban and catalog source files and their tests stay', () => {
+  for (const f of [['screens', 'kanban', 'kanban.ts'], ['screens', 'kanban', 'kanban.css'], ['screens', 'catalog', 'catalog.ts'], ['screens', 'catalog', 'catalog.css'], ['shared', 'card.ts'], ['shared', 'card.test.ts'], ['shared', 'store.ts'], ['shared', 'store.test.ts']])
     assert.ok(existsSync(p('ui', 'src', ...f)), `ui/src/${f.join('/')} is gone`);
 });
 
