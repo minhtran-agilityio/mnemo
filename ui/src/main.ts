@@ -124,10 +124,37 @@ async function showVersion(): Promise<void> {
   }
 }
 
+/** Undoes what the open screen changed outside itself, before the next screen opens. */
+let leaveScreen: (() => void) | null = null;
+/** Counts route changes, so a screen that finishes loading after the owner left is not shown. */
+let routeCount = 0;
+
 async function start(): Promise<void> {
   if (!screen || !content || !frame) return;
   const router = createRouter(window, (route) => {
+    const visit = ++routeCount;
+    leaveScreen?.();
+    leaveScreen = null;
+    // An unknown address opens Today in the router, so the sidebar marks Today here too.
     sidebar.setCurrent(route.item.id);
+    // The UI Catalog is dev only: a release build drops this branch and the catalog code with it.
+    if (import.meta.env.DEV && window.location.hash === "#/ui-catalog") {
+      document.title = "UI Catalog - Mnemo";
+      import("./screens/catalog/catalog").then(
+        ({ renderCatalog }) => {
+          if (visit !== routeCount) return;
+          leaveScreen = renderCatalog(screen, {
+            getTheme: () => currentTheme,
+          });
+        },
+        (error: unknown) => {
+          console.error("could not load the UI Catalog:", error);
+          if (visit === routeCount)
+            screen.textContent = `The UI Catalog could not load. ${errorMessage(error)}`;
+        },
+      );
+      return;
+    }
     if (route.item.id === SETTINGS_ID) {
       renderSettings(screen, {
         getTheme: () => currentTheme,
