@@ -1,8 +1,15 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { expect, test } from "vitest";
-import { applyTheme, parseTheme, THEME_LABELS, THEMES } from "./theme";
+import { expect, test, vi } from "vitest";
+import {
+  applyTheme,
+  parseTheme,
+  readTheme,
+  THEME_LABELS,
+  THEMES,
+  ThemeReadTimeoutError,
+} from "./theme";
 
 test("a missing or unknown saved value means System", () => {
   for (const value of [null, undefined, "", "purple", "DARK", " dark", "beige"])
@@ -60,4 +67,31 @@ test("the dark palette is the same for the attribute and for the OS rule", () =>
   expect(bySystem).toEqual(byAttribute);
   expect(css).toContain("prefers-color-scheme: dark");
   expect(css).toContain(':root[data-theme="light"]');
+});
+
+test("a saved theme is read as it is", async () => {
+  const onError = vi.fn();
+  expect(await readTheme(async () => "dark", onError)).toBe("dark");
+  expect(await readTheme(async () => null, onError)).toBe("system");
+  expect(onError).not.toHaveBeenCalled();
+});
+
+test("a failed read gives System and reports the error", async () => {
+  const onError = vi.fn();
+  const failure = { code: "storage", message: "nope" };
+  expect(await readTheme(() => Promise.reject(failure), onError)).toBe(
+    "system",
+  );
+  expect(onError).toHaveBeenCalledWith(failure);
+});
+
+test("a read that never finishes gives System after the limit", async () => {
+  const onError = vi.fn();
+  const theme = await readTheme(
+    () => new Promise<string | null>(() => {}),
+    onError,
+    5,
+  );
+  expect(theme).toBe("system");
+  expect(onError.mock.calls[0]?.[0]).toBeInstanceOf(ThemeReadTimeoutError);
 });
