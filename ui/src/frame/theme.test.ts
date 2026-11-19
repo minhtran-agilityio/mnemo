@@ -9,6 +9,7 @@ import {
   parseTheme,
   readCachedTheme,
   readTheme,
+  saveAndCacheTheme,
   THEME_LABELS,
   THEMES,
   ThemeReadTimeoutError,
@@ -152,4 +153,19 @@ test("a good read is shown and cached", async () => {
   expect(theme).toBe("light");
   expect(root.getAttribute("data-theme")).toBe("light");
   expect(store.get("mnemo.theme")).toBe("light");
+});
+
+test("a failed save leaves the cached theme alone, a good save updates it", async () => {
+  const store = new Map<string, string>([["mnemo.theme", "light"]]);
+  const storage = { setItem: (k: string, v: string) => void store.set(k, v) };
+  await expect(
+    saveAndCacheTheme(
+      () => Promise.reject(new Error("disk full")),
+      storage,
+      "dark",
+    ),
+  ).rejects.toThrow("disk full");
+  expect(store.get("mnemo.theme")).toBe("light");
+  await saveAndCacheTheme(() => Promise.resolve(), storage, "dark");
+  expect(store.get("mnemo.theme")).toBe("dark");
 });

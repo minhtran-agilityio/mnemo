@@ -15,9 +15,9 @@ import {
 } from "./frame/sidebar";
 import {
   applyTheme,
-  cacheTheme,
   loadSavedTheme,
   readCachedTheme,
+  saveAndCacheTheme,
   THEME_KEY,
   type Theme,
   ThemeReadTimeoutError,
@@ -132,7 +132,12 @@ async function start(): Promise<void> {
       renderSettings(screen, {
         getTheme: () => currentTheme,
         applyTheme: useTheme,
-        saveTheme: (theme) => setSetting(THEME_KEY, theme),
+        saveTheme: (theme) =>
+          saveAndCacheTheme(
+            (value) => setSetting(THEME_KEY, value),
+            localStorage,
+            theme,
+          ),
         onDetachedSave: (failure) => showNote(saveNote, failure),
       });
     } else {

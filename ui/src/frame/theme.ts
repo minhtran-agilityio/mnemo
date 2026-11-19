@@ -121,3 +121,13 @@ export async function loadSavedTheme(
   if (!failed) cacheTheme(storage, theme);
   return theme;
 }
+
+/** Saves `theme` and only then keeps a copy for the next start, so a failed save leaves no copy. */
+export async function saveAndCacheTheme(
+  save: (theme: Theme) => Promise<void>,
+  storage: Pick<Storage, "setItem">,
+  theme: Theme,
+): Promise<void> {
+  await save(theme);
+  cacheTheme(storage, theme);
+}
