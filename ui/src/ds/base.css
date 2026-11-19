@@ -1,4 +1,4 @@
-/* Base styles: page, card, button, input, pill and list row. Tokens only (see ds/tokens.css). */
+/* Base styles: page, card, button, input and pill. Tokens only (see ds/tokens.css). */
 * {
   box-sizing: border-box;
 }
@@ -176,46 +176,6 @@ a {
 
 .pill-bad {
   background: var(--tint-bad);
-}
-
-.list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--card);
-  overflow: hidden;
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-height: var(--control-height);
-  padding: var(--space-2) var(--space-4);
-  color: var(--ink);
-}
-
-.row + .row {
-  border-top: 1px solid var(--line);
-}
-
-.row:hover {
-  background: var(--head);
-}
-
-.row-title {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.row-meta {
-  color: var(--muted);
-  font-size: var(--text-md);
 }
 
 @media (prefers-reduced-motion: reduce) {

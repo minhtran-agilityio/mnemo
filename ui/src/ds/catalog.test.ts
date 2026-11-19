@@ -47,7 +47,7 @@ test("entry names are unique", () => {
 });
 
 test("the base styles are entries tagged base.css and their classes exist in the base style file", () => {
-  for (const name of ["button", "input", "pill", "card", "list row"]) {
+  for (const name of ["button", "input", "pill", "card"]) {
     const entry = CATALOG.find((e) => e.name === name);
     expect(entry?.source, name).toBe("base.css");
   }
@@ -63,8 +63,6 @@ test("each tab after Foundations, except Tokens, has a planned entry with an iss
     Controls: `planned #${107}`,
     Feedback: `planned #${108}`,
     Surfaces: `planned #${109}`,
-    Records: `planned #${110}`,
-    Lists: `planned #${110}`,
     Limits: `planned #${113}`,
   };
   for (const [tab, tag] of Object.entries(want)) {
@@ -101,7 +99,8 @@ test("coverage counts built entries against all entries of a tab", () => {
     built: controls.filter((e) => !e.source.startsWith("planned")).length,
     total: controls.length,
   });
-  expect(coverage("Records").built).toBe(0);
+  expect(coverage("Records").built).toBe(entriesFor("Records").length);
+  expect(coverage("Lists").built).toBe(entriesFor("Lists").length);
 });
 
 test("tokenNames lists each name once, in first-seen order, and ignores comments", () => {

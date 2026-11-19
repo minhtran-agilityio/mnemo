@@ -1,0 +1,76 @@
+.board-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.board {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  padding-bottom: var(--space-1);
+  overflow-x: auto;
+}
+
+.kcol {
+  display: flex;
+  flex: 1 0 var(--size-basis-column);
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--head);
+}
+
+.kcol.is-over {
+  border-color: var(--accent);
+  border-style: dashed;
+  background: var(--accent-soft);
+}
+
+.kcol h4 {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--text-md);
+}
+
+.kcol .kcol-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.kcol .kcol-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.kcol .kcard {
+  width: auto;
+}
+
+.kcol .empty {
+  padding: var(--space-3);
+  border: var(--border-1) dashed var(--edge);
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  font-size: var(--text-md);
+  text-align: center;
+}
+
+.kcol .empty[hidden] {
+  display: none;
+}
+
+/* Read by screen readers only. */
+.board-live {
+  position: absolute;
+  width: var(--border-1);
+  height: var(--border-1);
+  margin: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
