@@ -1,0 +1,158 @@
+/* UI Catalog chrome: tabs, entry meta, swatches, specimen boxes and the token table.
+   Loaded only by the dev-only UI Catalog screen, so it is not in the release bundle.
+   Tokens only (see ds/tokens.css). Every rule is scoped to .ui-catalog, so it styles nothing else. */
+
+.ui-catalog .cat-tabs {
+  border-bottom: var(--border-1) solid var(--line);
+}
+
+.ui-catalog .cat-tab {
+  min-height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-bottom: var(--border-2) solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.ui-catalog .cat-tab:hover {
+  color: var(--ink);
+}
+
+/* The selected tab: a bar under it and full-strength text, so colour is not the only signal. */
+.ui-catalog .cat-tab[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+}
+
+.ui-catalog .cat-switch[aria-checked="false"],
+.ui-catalog .btn[aria-pressed="false"] {
+  color: var(--muted);
+}
+
+.ui-catalog .btn[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--chip-ink);
+}
+
+.ui-catalog .cat-switch-state {
+  font-weight: var(--weight-regular);
+}
+
+.ui-catalog .cat-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-md);
+}
+
+.ui-catalog .cat-entry {
+  padding-top: var(--space-4);
+  border-top: var(--border-1) solid var(--line);
+}
+
+.ui-catalog .cat-meta {
+  margin: 0;
+  font-size: var(--text-md);
+}
+
+.ui-catalog .cat-meta dt {
+  color: var(--muted);
+}
+
+.ui-catalog .cat-meta dd {
+  margin: 0;
+  color: var(--ink2);
+}
+
+.ui-catalog .cat-type {
+  margin: 0;
+  color: var(--ink);
+}
+
+.ui-catalog .cat-swatch {
+  display: inline-block;
+  width: var(--control-height);
+  height: var(--control-height);
+  border: var(--border-1) solid var(--control-edge);
+  border-radius: var(--radius-sm);
+}
+
+.ui-catalog .cat-swatch-small {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+
+.ui-catalog .cat-bar {
+  height: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+}
+
+.ui-catalog .cat-radius {
+  width: var(--control-height-primary);
+  height: var(--control-height-primary);
+  border: var(--border-2) solid var(--accent);
+  background: var(--accent-soft);
+}
+
+.ui-catalog .cat-shadow {
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  color: var(--ink2);
+  font-size: var(--text-md);
+}
+
+.ui-catalog .cat-motion-track {
+  padding: var(--space-2);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+}
+
+.ui-catalog .cat-motion-dot {
+  width: var(--space-4);
+  height: var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  animation: cat-slide var(--dur-slow) var(--ease) infinite alternate;
+}
+
+@keyframes cat-slide {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(calc(var(--space-6) * 6));
+  }
+}
+
+.ui-catalog .cat-table {
+  border-collapse: collapse;
+  font-size: var(--text-md);
+}
+
+.ui-catalog .cat-table th,
+.ui-catalog .cat-table td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: var(--border-1) solid var(--line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.ui-catalog .cat-table th {
+  color: var(--muted);
+  font-weight: var(--weight-semibold);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-catalog .cat-motion-dot {
+    animation: none;
+  }
+}
