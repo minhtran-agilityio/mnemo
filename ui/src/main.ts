@@ -3,6 +3,7 @@ import "./tokens.css";
 import "./base.css";
 import "./style.css";
 import "./frame/sidebar.css";
+import "./screens/settings/settings.css";
 import { getVersion } from "@tauri-apps/api/app";
 import { renderEmptyState } from "./frame/empty-state";
 import { EVERYTHING_ID } from "./frame/nav";
@@ -12,17 +13,31 @@ import {
   ReadTimeoutError,
   readCollapsed,
 } from "./frame/sidebar";
+import {
+  applyTheme,
+  loadSavedTheme,
+  readCachedTheme,
+  saveAndCacheTheme,
+  THEME_KEY,
+  type Theme,
+  ThemeReadTimeoutError,
+} from "./frame/theme";
 import { pingErrorText } from "./ping-text";
+import { renderSettings } from "./screens/settings/settings";
 import { errorMessage, getSetting, ping, setSetting } from "./shared/api";
 import { versionErrorText, versionText } from "./version-text";
 
 /** The settings key that keeps whether the sidebar is collapsed ("true" or "false"). */
 const COLLAPSED_KEY = "sidebar_collapsed";
+/** The id of the sidebar item that opens Settings. */
+const SETTINGS_ID = "settings";
 
 const status = document.querySelector<HTMLElement>("#ping-status");
 const versionEl = document.querySelector<HTMLElement>("#app-version");
+const themeNote = document.querySelector<HTMLElement>("#theme-read-note");
 const readNote = document.querySelector<HTMLElement>("#setting-read-note");
 const saveNote = document.querySelector<HTMLElement>("#setting-save-note");
+const themeSaveNote = document.querySelector<HTMLElement>("#theme-save-note");
 const screen = document.querySelector<HTMLElement>("#screen");
 const content = document.querySelector<HTMLElement>("#app-content");
 const frame = document.querySelector<HTMLElement>("#app");
@@ -65,6 +80,32 @@ function saveCollapsed(collapsed: boolean): void {
   });
 }
 
+// The theme in use now. It starts as the last known theme, applied here before the first paint,
+// while the saved choice is still being read.
+let currentTheme: Theme = readCachedTheme(localStorage);
+applyTheme(document.documentElement, currentTheme);
+
+function useTheme(theme: Theme): void {
+  currentTheme = theme;
+  applyTheme(document.documentElement, theme);
+}
+
+/** The saved theme, applied at once. A failed read gives the system theme and a visible line. */
+async function loadTheme(): Promise<void> {
+  currentTheme = await loadSavedTheme(
+    document.documentElement,
+    localStorage,
+    () => getSetting(THEME_KEY),
+    (error) => {
+      console.error("could not read the theme setting:", error);
+      showNote(
+        themeNote,
+        `Mnemo could not read the saved theme, so it uses the system theme. ${error instanceof ThemeReadTimeoutError ? error.message : errorMessage(error)}`,
+      );
+    },
+  );
+}
+
 async function showPing(): Promise<void> {
   if (!status) return;
   try {
@@ -88,14 +129,31 @@ async function start(): Promise<void> {
   if (!screen || !content || !frame) return;
   const router = createRouter(window, (route) => {
     sidebar.setCurrent(route.item.id);
-    renderEmptyState(screen, route);
+    if (route.item.id === SETTINGS_ID) {
+      renderSettings(screen, {
+        getTheme: () => currentTheme,
+        applyTheme: useTheme,
+        saveTheme: (theme) =>
+          saveAndCacheTheme(
+            (value) => setSetting(THEME_KEY, value),
+            localStorage,
+            theme,
+          ),
+        onDetachedSave: (failure) => showNote(themeSaveNote, failure),
+      });
+    } else {
+      renderEmptyState(screen, route);
+    }
     document.title = `${route.item.label} - Mnemo`;
   });
-  // The saved state is read first, so the sidebar is built in its final state.
+  // The theme and the sidebar state are read first, so the frame is built in its final state
+  // and never shows in the wrong theme.
+  const themeLoaded = loadTheme();
   const sidebar = await createSidebarFromSaved(document, loadCollapsed, {
     onToggle: saveCollapsed,
     onSearch: (text) => router.go(EVERYTHING_ID, text),
   });
+  await themeLoaded;
   frame.insertBefore(sidebar.element, content);
   router.start();
 }

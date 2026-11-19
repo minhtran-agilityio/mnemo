@@ -2,9 +2,55 @@
   Design tokens: the only file that defines colour values.
   Ported from the prototype's default pair: light (.th.s-v1) and dark (.th.s-v1.t-dark),
   with the prototype's cascade resolved (the "modern pass" rules win over the first pass).
-  Light is the base. Dark follows the system through prefers-color-scheme.
-  The theme picker (#12) can add an attribute override later. Other themes are out of scope.
+  Light is the base. The theme choice (Settings, #12) is the data-theme attribute on the root:
+    - no attribute or "system": dark follows the system through prefers-color-scheme;
+    - "light" or "dark": that palette wins over the system.
+  The dark palette is written twice (the attribute rule and the media rule) because CSS cannot
+  share one block between two conditions. ui/src/frame/theme.test.ts checks the two stay equal.
+  The dark attribute rule comes first so the light base below stays the last word for tools
+  that read this file top to bottom. Specificity, not order, decides the cascade here.
+  Other themes are out of scope.
 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --paper: #0d0f15;
+  --card: #161922;
+  --head: #1e222c;
+  --ink: #f2f1ec;
+  --ink2: #d9d8d2;
+  --muted: #a3a6ae;
+  --line: #262a36;
+  --edge: #2b3040;
+  --dotc: #24262d;
+  --player: #05060a;
+
+  --accent: #8fa2ff;
+  --accent-hover: #b3c0ff;
+  --on-accent: #0b1033;
+  --accent-soft: #232a4d;
+  --chip-ink: #c3cdff;
+  --warn-soft: #3d3511;
+  --warn-ink: #ffe45c;
+  --bad: #ff9c8c;
+  --bad-soft: #45201b;
+  --guess-ink: #ffb4a8;
+  --good: #7fd6a1;
+  --good-soft: #183a27;
+  --hl: #ffe45c;
+
+  --tint-info: #232a4d;
+  --tint-note: #33284a;
+  --tint-warn: #3d3511;
+  --tint-good: #183a27;
+  --tint-bad: #45201b;
+  --tint-neutral: #2a2d35;
+
+  --shadow: #a9abb3;
+  --sh1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.25);
+  --sh2: 0 2px 4px rgba(0, 0, 0, 0.4), 0 16px 36px -14px rgba(0, 0, 0, 0.75);
+}
+
 :root {
   color-scheme: light dark;
 
@@ -98,8 +144,12 @@
   --focus-ring: 3px;
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --paper: #0d0f15;
     --card: #161922;
     --head: #1e222c;
