@@ -21,7 +21,7 @@ const walk = (d, skip = new Set()) =>
         return statSync(f).isDirectory() ? walk(f, skip) : [f];
       });
 const uiAll = () => walk(p('ui'));
-const TOKENS = p('ui', 'src', 'tokens.css');
+const TOKENS = p('ui', 'src', 'ds', 'tokens.css');
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '');
 const tokens = () => {
   assert.ok(existsSync(TOKENS), 'ui/src/tokens.css is missing');
@@ -202,7 +202,7 @@ for (const [label, file, body] of [
 test('AC4: the raw-colour test allows colours inside ui/src/tokens.css', () => {
   const name = RAW_TEST();
   const d = sandbox();
-  writeFileSync(join(d, 'ui', 'src', 'tokens.css'), readFileSync(TOKENS, 'utf8') + '\n:root { --zz-test: #123456; }\n');
+  writeFileSync(join(d, 'ui', 'src', 'ds', 'tokens.css'), readFileSync(TOKENS, 'utf8') + '\n:root { --zz-test: #123456; }\n');
   const r = runIn(d, name);
   assert.equal(r.status, 0, `tokens.css was flagged:\n${r.stdout}`);
 });
