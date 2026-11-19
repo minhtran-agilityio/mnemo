@@ -69,7 +69,7 @@ const bridgeScript = (mode, seed) => `(() => {
   new MutationObserver(() => {
     const v = document.documentElement.getAttribute('data-theme');
     if (v && window.__paint.themeAt === null) { window.__paint.themeAt = performance.now(); window.__paint.themeVal = v; }
-  }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  }).observe(document, { attributes: true, subtree: true, attributeFilter: ['data-theme'] });
   const invoke = async (cmd, args) => {
     window.__calls.push({ cmd, args });
     if (/setting/i.test(cmd)) {
