@@ -85,13 +85,17 @@ export function readCachedTheme(storage: Pick<Storage, "getItem">): Theme {
   }
 }
 
-/** Keeps a copy of `theme` for the next start. A failure is safe: the next start reads the store. */
+/**
+ * Keeps a copy of `theme` for the next start. System is the default, so it needs no copy: the
+ * copy is removed instead. A failure is safe: the next start reads the store.
+ */
 export function cacheTheme(
-  storage: Pick<Storage, "setItem">,
+  storage: Pick<Storage, "setItem" | "removeItem">,
   theme: Theme,
 ): void {
   try {
-    storage.setItem(THEME_CACHE_KEY, theme);
+    if (theme === "system") storage.removeItem(THEME_CACHE_KEY);
+    else storage.setItem(THEME_CACHE_KEY, theme);
   } catch {
     // The copy is only a speed-up. Without it the next start shows System until the read ends.
   }
@@ -103,7 +107,7 @@ export function cacheTheme(
  */
 export async function loadSavedTheme(
   root: HTMLElement,
-  storage: Pick<Storage, "setItem">,
+  storage: Pick<Storage, "setItem" | "removeItem">,
   read: () => Promise<string | null>,
   onError: (error: unknown) => void,
   limitMs: number = THEME_READ_LIMIT_MS,
@@ -125,7 +129,7 @@ export async function loadSavedTheme(
 /** Saves `theme` and only then keeps a copy for the next start, so a failed save leaves no copy. */
 export async function saveAndCacheTheme(
   save: (theme: Theme) => Promise<void>,
-  storage: Pick<Storage, "setItem">,
+  storage: Pick<Storage, "setItem" | "removeItem">,
   theme: Theme,
 ): Promise<void> {
   await save(theme);

@@ -105,6 +105,7 @@ test("the cached theme is read at once, so the first paint needs no wait for the
   const storage = {
     getItem: (k: string) => data.get(k) ?? null,
     setItem: (k: string, v: string) => void data.set(k, v),
+    removeItem: (k: string) => void data.delete(k),
   };
   expect(readCachedTheme(storage)).toBe("system");
   cacheTheme(storage, "dark");
@@ -119,6 +120,9 @@ test("blocked storage gives System and never throws", () => {
     setItem: () => {
       throw new Error("blocked");
     },
+    removeItem: () => {
+      throw new Error("blocked");
+    },
   };
   expect(readCachedTheme(blocked)).toBe("system");
   expect(() => cacheTheme(blocked, "dark")).not.toThrow();
@@ -127,7 +131,10 @@ test("blocked storage gives System and never throws", () => {
 test("a failed read shows System but keeps a good cached theme", async () => {
   const root = document.createElement("html");
   const store = new Map<string, string>([["mnemo.theme", "dark"]]);
-  const storage = { setItem: (k: string, v: string) => void store.set(k, v) };
+  const storage = {
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+  };
   const errors: unknown[] = [];
   const theme = await loadSavedTheme(
     root,
@@ -143,7 +150,10 @@ test("a failed read shows System but keeps a good cached theme", async () => {
 test("a good read is shown and cached", async () => {
   const root = document.createElement("html");
   const store = new Map<string, string>();
-  const storage = { setItem: (k: string, v: string) => void store.set(k, v) };
+  const storage = {
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+  };
   const theme = await loadSavedTheme(
     root,
     storage,
@@ -157,7 +167,10 @@ test("a good read is shown and cached", async () => {
 
 test("a failed save leaves the cached theme alone, a good save updates it", async () => {
   const store = new Map<string, string>([["mnemo.theme", "light"]]);
-  const storage = { setItem: (k: string, v: string) => void store.set(k, v) };
+  const storage = {
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+  };
   await expect(
     saveAndCacheTheme(
       () => Promise.reject(new Error("disk full")),
@@ -168,4 +181,14 @@ test("a failed save leaves the cached theme alone, a good save updates it", asyn
   expect(store.get("mnemo.theme")).toBe("light");
   await saveAndCacheTheme(() => Promise.resolve(), storage, "dark");
   expect(store.get("mnemo.theme")).toBe("dark");
+});
+
+test("System needs no copy: choosing it removes the cached theme", () => {
+  const store = new Map<string, string>([["mnemo.theme", "dark"]]);
+  const storage = {
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+  };
+  cacheTheme(storage, "system");
+  expect(store.has("mnemo.theme")).toBe(false);
 });

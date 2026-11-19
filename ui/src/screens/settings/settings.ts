@@ -1,6 +1,8 @@
 // The Settings screen: a title, a list of sections on the left (each row shows its current value)
 // and the open section on the right. Only Appearance has content so far; AI and Data are empty
 // until their own tickets. All text goes in as text, never as markup.
+
+import { findItem } from "../../frame/nav";
 import { THEME_LABELS, THEMES, type Theme } from "../../frame/theme";
 import { errorMessage } from "../../shared/api";
 
@@ -68,7 +70,10 @@ export function renderSettings(
   const title = el(doc, "h1", undefined, "Settings");
   const note = el(doc, "p", "settings-note", "Changes are saved at once.");
   const header = el(doc, "header", "settings-head");
+  const phase = findItem("settings")?.phase;
   header.append(title, note);
+  if (phase !== undefined)
+    header.append(el(doc, "p", "settings-phase", `Phase ${phase}`));
 
   const list = el(doc, "nav", "settings-sections");
   list.setAttribute("aria-label", "Settings sections");
