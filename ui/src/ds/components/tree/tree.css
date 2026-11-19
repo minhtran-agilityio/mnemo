@@ -1,0 +1,80 @@
+.tree,
+.tree ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tree ul {
+  padding-left: var(--space-5);
+}
+
+.tree {
+  width: 100%;
+  max-width: var(--size-tree-max);
+}
+
+.tree ul[hidden] {
+  display: none;
+}
+
+.tnode {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  min-height: var(--size-tap-sm);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tnode:hover {
+  background: var(--head);
+}
+
+.tnode[aria-current="true"] {
+  background: var(--accent-soft);
+  color: var(--chip-ink);
+  font-weight: var(--weight-semibold);
+}
+
+.tnode .tname {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tnode .chev {
+  color: var(--muted);
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.tnode[aria-expanded="true"] .chev {
+  transform: rotate(90deg);
+}
+
+.tnode .cnt {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.tnode .spacer {
+  flex: none;
+  width: var(--icon-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tnode .chev {
+    transition: none;
+  }
+}

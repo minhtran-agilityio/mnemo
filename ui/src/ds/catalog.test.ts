@@ -46,11 +46,7 @@ test("entry names are unique", () => {
   expect(new Set(names).size).toBe(names.length);
 });
 
-test("the base styles are entries tagged base.css and their classes exist in the base style file", () => {
-  for (const name of ["list row"]) {
-    const entry = CATALOG.find((e) => e.name === name);
-    expect(entry?.source, name).toBe("base.css");
-  }
+test("every entry tagged base.css names a class that exists in the base style file", () => {
   for (const entry of CATALOG.filter((e) => e.source === "base.css")) {
     const cls = "className" in entry ? entry.className : undefined;
     expect(cls, `${entry.name} has no className`).toBeTruthy();
@@ -58,12 +54,9 @@ test("the base styles are entries tagged base.css and their classes exist in the
   }
 });
 
-test("each tab after Foundations, except Tokens and Feedback, has a planned entry with an issue number", () => {
+test("the tabs that still have planned parts name their issue", () => {
   const want: Record<string, string> = {
     Controls: `planned #${107}`,
-    Surfaces: `planned #${109}`,
-    Records: `planned #${110}`,
-    Lists: `planned #${110}`,
     Limits: `planned #${113}`,
   };
   for (const [tab, tag] of Object.entries(want)) {
@@ -100,7 +93,8 @@ test("coverage counts built entries against all entries of a tab", () => {
     built: controls.filter((e) => !e.source.startsWith("planned")).length,
     total: controls.length,
   });
-  expect(coverage("Records").built).toBe(0);
+  expect(coverage("Records").built).toBe(entriesFor("Records").length);
+  expect(coverage("Lists").built).toBe(entriesFor("Lists").length);
 });
 
 test("tokenNames lists each name once, in first-seen order, and ignores comments", () => {

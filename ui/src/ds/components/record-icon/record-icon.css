@@ -1,0 +1,9 @@
+.rec-ic {
+  flex: none;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.rec-ic-muted {
+  color: var(--muted);
+}

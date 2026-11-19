@@ -123,7 +123,7 @@ test("each built part outside Foundations and Tokens shows a live example", () =
 test("each panel shows how many of its parts are built", () => {
   mount();
   expect(panelFor("Foundations")?.textContent).toContain("9 of 9 parts in ds");
-  expect(panelFor("Records")?.textContent).toMatch(/0 of \d+ parts in ds/);
+  expect(panelFor("Records")?.textContent).toMatch(/(\d+) of \1 parts in ds/);
 });
 
 test("the eight tabs follow the registry order, and arrows, Home and End move focus", () => {

@@ -1,0 +1,56 @@
+.cite {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--size-cite);
+  height: var(--size-cite);
+  padding: 0 var(--space-1);
+  border: var(--border-1) solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--chip-ink);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  text-decoration: none;
+  vertical-align: var(--border-2);
+}
+
+a.cite:hover {
+  border-color: var(--accent);
+}
+
+.cite.missing {
+  background: var(--tint-bad);
+  color: var(--guess-ink);
+}
+
+.answer {
+  max-width: var(--measure-answer);
+  margin: 0;
+  color: var(--ink);
+  line-height: var(--leading-body);
+}
+
+.srcs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.srcs li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-md);
+}
+
+.srcs .src-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

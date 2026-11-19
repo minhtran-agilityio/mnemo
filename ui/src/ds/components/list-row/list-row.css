@@ -1,0 +1,58 @@
+/* List row. Class names are the original base style names (.row, .row-title, .row-meta). */
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-4);
+  background: var(--card);
+  color: var(--ink);
+}
+
+.row + .row {
+  border-top: var(--border-1) solid var(--line);
+}
+
+.row:hover,
+.row.is-hover {
+  background: var(--head);
+}
+
+.row[aria-selected="true"],
+.row.is-selected {
+  background: var(--accent-soft);
+}
+
+.row:focus-visible,
+.row.is-focus {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: calc(var(--focus-ring) * -1);
+}
+
+.row-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.row-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  padding-block: var(--border-2);
+  font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-meta {
+  color: var(--muted);
+  font-size: var(--text-md);
+}
+
+.row-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

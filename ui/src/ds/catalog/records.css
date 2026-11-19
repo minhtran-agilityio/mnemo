@@ -1,3 +1,56 @@
 /* UI Catalog styles of the records tab: only the rows of this tab (examples, captions, layout of the
    samples). A real part's own styles live in ui/src/ds/components/<name>/<name>.css, not here.
    Tokens only. Scope every rule to .ui-catalog. Only the records tab's agent edits this file. */
+
+.ui-catalog .rec-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.ui-catalog .rec-wrap > .st {
+  flex: 1 1 var(--size-basis-example);
+  max-width: var(--size-tags-max);
+}
+
+.ui-catalog .rec-hstack {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* The Bookmarks view switch: a catalog sample of a radio group, not a design system part. */
+.ui-catalog .rec-seg {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: var(--border-2);
+  padding: var(--space-1);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--head);
+}
+
+.ui-catalog .rec-seg button {
+  min-height: var(--size-tap-sm);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.ui-catalog .rec-seg button:hover {
+  color: var(--ink);
+}
+
+.ui-catalog .rec-seg button[aria-checked="true"] {
+  background: var(--card);
+  box-shadow: var(--sh1);
+  color: var(--ink);
+}
