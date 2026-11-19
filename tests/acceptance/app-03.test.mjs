@@ -251,3 +251,12 @@ test('used settings code has no stale allow(dead_code)', () => {
     assert.doesNotMatch(src, /allow\(dead_code\)/, f);
   }
 });
+
+test('a theme save result has its own line, apart from the sidebar save line', () => {
+  const html = readFileSync(p('ui', 'index.html'), 'utf8');
+  const main = readFileSync(p('ui', 'src', 'main.ts'), 'utf8');
+  assert.match(html, /id="theme-save-note"/);
+  assert.match(html, /id="setting-save-note"/);
+  assert.match(main, /onDetachedSave:\s*\(failure\)\s*=>\s*showNote\(themeSaveNote,/);
+  assert.doesNotMatch(main, /onDetachedSave:\s*\(failure\)\s*=>\s*showNote\(saveNote,/);
+});

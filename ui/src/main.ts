@@ -37,6 +37,7 @@ const versionEl = document.querySelector<HTMLElement>("#app-version");
 const themeNote = document.querySelector<HTMLElement>("#theme-read-note");
 const readNote = document.querySelector<HTMLElement>("#setting-read-note");
 const saveNote = document.querySelector<HTMLElement>("#setting-save-note");
+const themeSaveNote = document.querySelector<HTMLElement>("#theme-save-note");
 const screen = document.querySelector<HTMLElement>("#screen");
 const content = document.querySelector<HTMLElement>("#app-content");
 const frame = document.querySelector<HTMLElement>("#app");
@@ -138,7 +139,7 @@ async function start(): Promise<void> {
             localStorage,
             theme,
           ),
-        onDetachedSave: (failure) => showNote(saveNote, failure),
+        onDetachedSave: (failure) => showNote(themeSaveNote, failure),
       });
     } else {
       renderEmptyState(screen, route);
