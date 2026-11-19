@@ -191,18 +191,20 @@ test('AC2+AC3: guard (a), (b) and the write guard pass on the current code', { s
 });
 
 // ---------- AC6 ----------
-test('AC6: ci.yml has the ds-write-guard job and "CI result" depends on it', () => {
-  const y = read('.github', 'workflows', 'ci.yml');
-  assert.match(y, /^on:\s*\n\s+pull_request:/m, 'setup-03 shape broken');
+test('AC6: the ds-write-guard job runs in its own workflow, label events included, and ci.yml keeps its setup-03 shape', () => {
+  // The job moved out of ci.yml: label events there restarted the whole build (review of #118).
+  const y = read('.github', 'workflows', 'ds-write-guard.yml');
+  assert.match(y, /^on:\s*\n\s+pull_request:/m);
   assert.doesNotMatch(y, /contents:\s*write/);
-  assert.match(y, /types:\s*\[[^\]]*labeled[^\]]*unlabeled[^\]]*\]|types:[\s\S]{0,120}-\s*labeled/, 'label events do not trigger CI');
+  assert.match(y, /types:\s*\[[^\]]*labeled[^\]]*unlabeled[^\]]*\]|types:[\s\S]{0,120}-\s*labeled/, 'label events do not trigger the guard');
   assert.match(y, /^\s{2}ds-write-guard:/m, 'no ds-write-guard job');
+  assert.match(y, /name:\s*Design system write guard/);
   assert.match(y, /scripts\/ds-write-guard\.mjs/);
   assert.match(y, /DS_GUARD_LABELS/);
-  assert.match(y, /name:\s*CI result/, 'the "CI result" job was renamed or removed');
-  const result = y.slice(y.search(/^\s{2}result:/m));
-  assert.match(result, /needs:\s*\[[^\]]*ds-write-guard[^\]]*\]|needs:[\s\S]{0,120}-\s*ds-write-guard/, '"CI result" does not need ds-write-guard');
-  assert.match(result, /!cancelled\(\)/);
+  const ci = read('.github', 'workflows', 'ci.yml');
+  assert.match(ci, /^on:\s*\n\s+pull_request:/m, 'setup-03 shape broken');
+  assert.match(ci, /name:\s*CI result/, 'the "CI result" job was renamed or removed');
+  assert.match(ci.slice(ci.search(/^\s{2}result:/m)), /!cancelled\(\)/);
 });
 
 test('AC6: write guard rejects a ds change without the label and says how to fix it', () => {

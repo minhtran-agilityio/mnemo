@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { decide, main, parseFiles, parseLabels } from "../scripts/ds-write-guard.mjs";
+import { decide, GUARD_FILES, isProtected, main, parseFiles, parseLabels } from "../scripts/ds-write-guard.mjs";
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "ds-write-guard.mjs");
 
@@ -52,8 +52,29 @@ t("no ds change is accepted, with or without labels", () => {
   assert.equal(decide({ files: ["ui/src/dsx/a.ts", "docs/ui/src/ds/a.md"], labels: [] }).ok, true);
 });
 
-t("the guard test of #106 next to ui/src/ds/ is not a ds change", () => {
-  assert.equal(decide({ files: ["ui/src/ds-guard.test.ts"], labels: [] }).ok, true);
+t("the guard files are protected like ui/src/ds/: no label, no change", () => {
+  for (const f of [
+    "tests/lib/ds-guard.mjs",
+    "ui/src/ds-guard.test.ts",
+    "tests/ds-screen-css.test.mjs",
+    "tests/ds-screen-elements.test.mjs",
+    "tests/ds-write-guard.test.mjs",
+    "tests/guard-exceptions-pinned.test.mjs",
+    "scripts/ds-write-guard.mjs",
+    ".github/workflows/ds-write-guard.yml",
+  ]) {
+    const no = decide({ files: ["README.md", f], labels: [] });
+    assert.equal(no.ok, false, `${f} is not protected`);
+    assert.deepEqual(no.dsFiles, [f]);
+    assert.match(no.message, /guard files/);
+    assert.equal(decide({ files: [f], labels: ["design-system"] }).ok, true);
+  }
+});
+
+t("only the listed guard files are protected, not near names", () => {
+  assert.ok(GUARD_FILES.every(isProtected));
+  for (const f of ["tests/lib/other.mjs", "ui/src/ds-guard.test.tsx", "ui/src/dsx/ds-guard.test.ts", "docs/scripts/ds-write-guard.mjs", "tests/raw-colour.test.mjs"])
+    assert.equal(isProtected(f), false, f);
 });
 
 t("a move out of ds (both paths listed by --no-renames) is rejected", () => {
@@ -73,11 +94,20 @@ t("label parsing accepts only a JSON array of strings", () => {
     assert.equal(parseLabels(bad), null, `accepted ${bad}`);
 });
 
-t("main fails closed on empty input and on bad labels", () => {
+t("an empty but successful diff (empty commit, commit plus revert) is no protected change: exit 0", () => {
   const quiet = { log() {}, error() {} };
-  assert.equal(main("", "[]", quiet), 1);
-  assert.equal(main("\n\r\n", '["design-system"]', quiet), 1);
+  assert.equal(main("", "[]", quiet), 0);
+  assert.equal(main("\n\r\n", '["design-system"]', quiet), 0);
+  assert.equal(run("", "[]").status, 0);
+  assert.equal(run("\n", "[]").status, 0);
+  // Bad labels still fail, even with an empty diff.
+  assert.equal(run("", "{").status, 1);
+});
+
+t("main fails closed on bad labels", () => {
+  const quiet = { log() {}, error() {} };
   assert.equal(main("README.md\n", "nope", quiet), 1);
+  assert.equal(main("", "nope", quiet), 1);
   assert.equal(main("README.md\n", undefined, quiet), 1);
   assert.equal(main("README.md\n", "[]", quiet), 0);
 });
@@ -90,8 +120,9 @@ t("CLI: exit 1 for an unlabelled ds change, 0 with the label", () => {
   assert.equal(yes.status, 0, yes.stdout + yes.stderr);
 });
 
-t("CLI: exit 0 with no ds change, exit 1 on bad label JSON or empty stdin", () => {
+t("CLI: exit 0 with no ds change, exit 1 on bad label JSON", () => {
   assert.equal(run("README.md\n", "[]").status, 0);
   assert.equal(run("README.md\n", "{").status, 1);
-  assert.equal(run("", '["design-system"]').status, 1);
+  assert.equal(run("tests/lib/ds-guard.mjs\n", "[]").status, 1);
+  assert.equal(run("tests/lib/ds-guard.mjs\n", '["design-system"]').status, 0);
 });

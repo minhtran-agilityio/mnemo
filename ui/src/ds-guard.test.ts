@@ -32,6 +32,19 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
  */
 const KNOWN_STATE_GAPS: readonly string[] = ["shortcut hint"];
 
+/**
+ * The state gaps that exist today. KNOWN_STATE_GAPS can only shrink: adding a name there fails
+ * the test below until this list changes too. Both lists sit in this file, which
+ * scripts/ds-write-guard.mjs protects: a pull request that edits it needs the label design-system.
+ */
+const PINNED_STATE_GAPS: readonly string[] = ["shortcut hint"];
+
+/** The names in `gaps` that are not pinned. */
+const newStateGaps = (
+  gaps: readonly string[],
+  pinned: readonly string[] = PINNED_STATE_GAPS,
+) => gaps.filter((g) => !pinned.includes(g));
+
 /** Modules outside components/ that a barrel of ui/src/ds exports, with their entry names. */
 const EXTRA_MODULES: Readonly<Record<string, readonly string[]>> = {
   icon: ["icons"],
@@ -45,8 +58,10 @@ interface GuardEntry {
 }
 
 interface GuardInput {
-  /** Folder names in ui/src/ds/components/ that hold `<name>.ts`. */
+  /** Every folder name in ui/src/ds/components/. */
   readonly folders: readonly string[];
+  /** The files that exist as `<folder>/<folder>.ts`. */
+  readonly sourceFiles: readonly string[];
   /** Test file names that exist, as `<folder>/<folder>.test.ts`. */
   readonly testFiles: readonly string[];
   readonly entries: readonly GuardEntry[];
@@ -61,7 +76,7 @@ const norm = (s: string) => s.replace(/-/g, " ").toLowerCase();
 /** Every gap between the component folders, their tests, the barrels and the registry. */
 // biome-ignore lint/suspicious/noExportsInTest: the DS-04 acceptance test checks that the pure check is exported
 export function findGaps(input: GuardInput): string[] {
-  const { folders, testFiles, entries, aliases, barrels } = input;
+  const { folders, sourceFiles, testFiles, entries, aliases, barrels } = input;
   const stateGaps = input.stateGaps ?? [];
   const gaps: string[] = [];
   const built = entries.filter((e) => e.source === "ds");
@@ -69,6 +84,8 @@ export function findGaps(input: GuardInput): string[] {
   const matched = new Set<GuardEntry>();
 
   for (const folder of folders) {
+    if (!sourceFiles.includes(`${folder}/${folder}.ts`))
+      gaps.push(`${folder}: no ${folder}/${folder}.ts`);
     if (!testFiles.includes(`${folder}/${folder}.test.ts`))
       gaps.push(`${folder}: no ${folder}/${folder}.test.ts`);
     const names = aliases[folder] ?? [folder];
@@ -125,8 +142,10 @@ export function findGaps(input: GuardInput): string[] {
 function realInput(): GuardInput {
   const folders = readdirSync(COMPONENTS)
     .filter((n) => statSync(join(COMPONENTS, n)).isDirectory())
-    .filter((n) => existsSync(join(COMPONENTS, n, `${n}.ts`)))
     .sort();
+  const sourceFiles = folders
+    .map((f) => `${f}/${f}.ts`)
+    .filter((t) => existsSync(join(COMPONENTS, t)));
   const testFiles = folders
     .map((f) => `${f}/${f}.test.ts`)
     .filter((t) => existsSync(join(COMPONENTS, t)));
@@ -143,6 +162,7 @@ function realInput(): GuardInput {
   }
   return {
     folders,
+    sourceFiles,
     testFiles,
     entries: CATALOG,
     aliases: ALIASES,
@@ -186,6 +206,7 @@ test("the barrels are the only exports of ui/src/ds/index.ts, besides the icon h
 
 const clean: GuardInput = {
   folders: ["toast", "check"],
+  sourceFiles: ["toast/toast.ts", "check/check.ts"],
   testFiles: ["toast/toast.test.ts", "check/check.test.ts"],
   entries: [
     { name: "toast", source: "ds", states: ["success"] },
@@ -203,6 +224,7 @@ test("self-test: a folder with no registry entry is reported", () => {
   const gaps = findGaps({
     ...clean,
     folders: [...clean.folders, "chart"],
+    sourceFiles: [...clean.sourceFiles, "chart/chart.ts"],
     testFiles: [...clean.testFiles, "chart/chart.test.ts"],
     barrels: { ...clean.barrels, "lists.ts": ["chart"] },
   });
@@ -248,4 +270,35 @@ test("self-test: an entry with no states and no notes is reported, and a stale s
   expect(findGaps({ ...clean, stateGaps: ["toast"] }).join("\n")).toMatch(
     /remove it from KNOWN_STATE_GAPS/,
   );
+});
+
+test("self-test: a component folder with no <name>.ts is reported, not skipped", () => {
+  const gaps = findGaps({
+    ...clean,
+    folders: [...clean.folders, "ghost"],
+    testFiles: [...clean.testFiles, "ghost/ghost.test.ts"],
+    barrels: { ...clean.barrels, "lists.ts": ["ghost"] },
+  });
+  expect(gaps.join("\n")).toMatch(/ghost: no ghost\/ghost\.ts/);
+  expect(
+    findGaps({ ...clean, sourceFiles: ["check/check.ts"] }).join("\n"),
+  ).toMatch(/toast: no toast\/toast\.ts/);
+});
+
+test("every folder of ui/src/ds/components/ is listed, one with no <name>.ts too", () => {
+  const dirs = readdirSync(COMPONENTS).filter((n) =>
+    statSync(join(COMPONENTS, n)).isDirectory(),
+  );
+  expect(realInput().folders).toEqual([...dirs].sort());
+});
+
+test("the state gaps only shrink: KNOWN_STATE_GAPS holds nothing that is not pinned", () => {
+  expect(newStateGaps(KNOWN_STATE_GAPS)).toEqual([]);
+});
+
+test("self-test: a new state gap fails, a removed one passes", () => {
+  expect(newStateGaps([...PINNED_STATE_GAPS, "toast"])).toEqual(["toast"]);
+  expect(newStateGaps([])).toEqual([]);
+  expect(newStateGaps(["shortcut hint"], ["shortcut hint"])).toEqual([]);
+  expect(newStateGaps(["shortcut hint"], [])).toEqual(["shortcut hint"]);
 });

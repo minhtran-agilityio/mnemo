@@ -1,6 +1,10 @@
 // Guard (a) of #106 [DS-04]: CSS outside ui/src/ds/ holds layout only, with token values.
 // Colour, font, border, radius, shadow and custom property definitions fail; so does a number with
 // a unit that is not a token. Motion may only be switched off (transition/animation: none).
+// The same rules cover inline styles: in .ts files `node.style.color = ...`, `style.setProperty(...)`,
+// `style.cssText` and `setAttribute("style", ...)`; in ui/*.html a <style> block or a style="..."
+// attribute. A layout property with a computed value (`${px}px`) passes; a literal value is
+// checked like CSS.
 // Scope and exceptions: tests/lib/ds-guard.mjs (the only list of exceptions).
 // Run: MNEMO_NESTED=1 node --test --test-isolation=none tests/ds-screen-css.test.mjs
 import assert from "node:assert/strict";
@@ -15,6 +19,7 @@ import {
   ROOT,
   readRepo,
   scopeFiles,
+  stripComments,
   unusedExceptions,
 } from "./lib/ds-guard.mjs";
 
@@ -132,6 +137,69 @@ export function checkCss(text, tokens = dsTokens()) {
   return out;
 }
 
+const lineOf = (text, index) => text.slice(0, index).split("\n").length;
+const kebab = (p) => p.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`).replace(/^css-float$/, "float");
+/** The text of a plain string literal without \${} holes, or null. */
+const literal = (expr) => {
+  const m = expr.trim().match(/^(["'`])((?:\\.|(?!\1)[^\\])*)\1$/);
+  return m && !(m[1] === "`" && m[2].includes("${")) ? m[2] : null;
+};
+
+/** The reason an inline `prop = value` is not allowed, or null. `value` is source text. */
+function inlineReason(prop, value, tokens) {
+  const lit = literal(value);
+  if (MOTION_PROPERTIES.includes(prop))
+    return lit !== null && lit.trim().toLowerCase() === "none" ? null : `motion: ${prop} may only be none outside ui/src/ds`;
+  if (!LAYOUT.has(prop)) return `${category(prop)}: ${prop} is not a layout property`;
+  const bad = lit === null ? null : badValue(lit, tokens);
+  return bad ? `value: ${bad}` : null;
+}
+
+/**
+ * The violations of inline styles in one source: [{ line, prop, value, reason }]. In .ts it reads
+ * `.style.x = v`, `.style.setProperty("x", v)`, `.style.cssText`, `.style[...]`, `.style = ...`,
+ * `Object.assign(x.style, ...)` and `setAttribute("style", ...)`. In .html it reads <style>
+ * blocks and style="..." attributes with the rules of checkCss.
+ */
+export function checkInlineStyles(name, text, tokens = dsTokens()) {
+  const src = stripComments(name, text);
+  const out = [];
+  if (name.endsWith(".html")) {
+    const add = (index, css) => {
+      for (const v of checkCss(css, tokens)) out.push({ ...v, line: lineOf(src, index) + v.line - 1 });
+    };
+    for (const m of src.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)) add(m.index, m[1]);
+    for (const m of src.matchAll(/\sstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) add(m.index, `a{${m[1] ?? m[2]}}`);
+    return out;
+  }
+  const add = (index, prop, value, reason) => reason && out.push({ line: lineOf(src, index), prop, value, reason });
+  for (const m of src.matchAll(/\.style\.([A-Za-z]+)\s*[-+*/|&?]?=(?!=)\s*([^;\n]*)/g)) {
+    const prop = kebab(m[1]);
+    add(
+      m.index,
+      prop,
+      m[2].trim(),
+      prop === "css-text"
+        ? "not a layout property: style.cssText sets arbitrary style"
+        : inlineReason(prop, m[2], tokens),
+    );
+  }
+  for (const m of src.matchAll(/\.style\.setProperty\s*\(\s*([^,)]*)(?:,\s*([^)]*))?\)/g)) {
+    const prop = literal(m[1])?.trim().toLowerCase();
+    add(
+      m.index,
+      prop ?? m[1].trim(),
+      (m[2] ?? "").trim(),
+      prop === undefined ? "not a layout property: style.setProperty with a computed name" : prop.startsWith("--") ? "custom property definition: style.setProperty defines a custom property" : inlineReason(prop, m[2] ?? '""', tokens),
+    );
+  }
+  for (const m of src.matchAll(/\.style\s*\[/g)) add(m.index, "style[...]", "", "not a layout property: style[...] sets a property by a computed name");
+  for (const m of src.matchAll(/\.style\s*=(?!=)/g)) add(m.index, "style", "", "not a layout property: assigning style sets arbitrary style");
+  for (const m of src.matchAll(/Object\.assign\s*\(\s*[\w$.]*\.style\b/g)) add(m.index, "style", "", "not a layout property: Object.assign on style sets arbitrary style");
+  for (const m of src.matchAll(/setAttribute\s*\(\s*(["'`])style\1/g)) add(m.index, "style", "", 'not a layout property: setAttribute("style", ...) sets arbitrary style');
+  return out.sort((a, b) => a.line - b.line);
+}
+
 let failed = false;
 process.on("exit", () => {
   if (failed) process.exitCode = 1;
@@ -148,7 +216,10 @@ const t = (name, fn) =>
 
 const scan = () => {
   const tokens = dsTokens();
-  return new Map(scopeFiles("css").map((f) => [f, checkCss(readRepo(f), tokens)]));
+  const sheets = scopeFiles("css").map((f) => [f, checkCss(readRepo(f), tokens)]);
+  // Inline styles count as part of the css guard, so the same exceptions cover them.
+  const inline = [...scopeFiles("ts"), ...scopeFiles("html")].map((f) => [f, checkInlineStyles(f, readRepo(f), tokens)]);
+  return new Map([...sheets, ...inline]);
 };
 
 t("CSS outside ui/src/ds/ holds layout properties only, with token values", () => {
@@ -210,4 +281,73 @@ t("self-test: line numbers count lines inside comments and multi-line values", (
   const v = checkCss("/* one\n two */\n.a {\n  gap: 0;\n  color: red;\n}", new Set());
   assert.equal(v.length, 1);
   assert.equal(v[0].line, 5);
+});
+
+t("self-test: inline styles in .ts that set more than layout fail", () => {
+  const tokens = new Set(["--space-2"]);
+  for (const [src, want] of [
+    ["node.style.color = `var(--fg)`;", /colour/],
+    ["node.style.background = 'red';", /colour/],
+    ["node.style.fontSize = x;", /font/],
+    ["node.style.borderRadius = r;", /radius/],
+    ["node.style.boxShadow = s;", /shadow/],
+    ["node.style.outline += o;", /border/],
+    ["node.style.transform = `scale(${s})`;", /not a layout property/],
+    ["node.style.transition = 'opacity 1s';", /motion/],
+    ["node.style.animation = a;", /motion/],
+    ["node.style.gap = '12px';", /raw size/],
+    ["node.style.width = 'var(--not-a-token)';", /not a token/],
+    ["node.style.cssText = 'color: red';", /cssText/],
+    ["node.style.setProperty('color', v);", /colour/],
+    ["node.style.setProperty('--x', v);", /custom property/],
+    ["node.style.setProperty(name, v);", /computed name/],
+    ["node.style[prop] = v;", /computed name/],
+    ["node.style = 'color: red';", /assigning style/],
+    ["Object.assign(node.style, { color: 'red' });", /Object\.assign/],
+    ['node.setAttribute("style", "color: red");', /setAttribute/],
+  ]) {
+    const v = checkInlineStyles("x.ts", src, tokens);
+    assert.ok(v.length > 0, `accepted: ${src}`);
+    assert.match(v[0].reason, want, `${src} -> ${v[0].reason}`);
+  }
+});
+
+t("self-test: inline layout, motion off, reads and comments pass", () => {
+  const tokens = new Set(["--space-2"]);
+  for (const src of [
+    "node.style.left = `${x}px`;",
+    "node.style.width = `${(n / total) * 100}%`;",
+    "node.style.height = String(h);",
+    "node.style.zIndex = String(1 + i);",
+    "node.style.gap = 'var(--space-2)';",
+    "node.style.transition = 'none';",
+    "node.style.setProperty('display', 'none');",
+    "node.style.removeProperty('color-scheme');",
+    "const c = node.style.color;",
+    "if (node.style.color === 'red') {}",
+    "// node.style.color = 'red';",
+    "/* node.style.cssText = 'x'; */",
+    'node.setAttribute("aria-label", "style");',
+  ])
+    assert.deepEqual(checkInlineStyles("x.ts", src, tokens), [], `rejected: ${src}`);
+});
+
+t("self-test: <style> blocks and style attributes in html fail on more than layout", () => {
+  const tokens = new Set();
+  for (const html of [
+    "<style>.a { color: red; }</style>",
+    '<style media="screen">\n.a { border: 1px solid; }\n</style>',
+    '<div style="background: red">x</div>',
+    "<div style='font-size: 12px'>x</div>",
+    '<p class="a" style="opacity: 0.5; gap: 1px">x</p>',
+  ])
+    assert.ok(checkInlineStyles("x.html", html, tokens).length > 0, `accepted: ${html}`);
+  assert.equal(checkInlineStyles("x.html", "<style>\n\n.a { color: red; }</style>", tokens)[0].line, 3);
+  for (const html of [
+    "<style>.a { display: grid; gap: 0; }</style>",
+    '<div style="display: none">x</div>',
+    "<!-- <div style=\"color: red\"> -->",
+    '<div class="style">x</div>',
+  ])
+    assert.deepEqual(checkInlineStyles("x.html", html, tokens), [], `rejected: ${html}`);
 });
