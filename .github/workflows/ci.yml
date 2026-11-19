@@ -2,6 +2,10 @@ name: CI
 
 on:
   pull_request:
+    # labeled and unlabeled re-run CI, so adding the label design-system turns the
+    # design system write guard green. The full run repeats on those events: a run that
+    # skipped the build would report "CI result" for a commit whose build did not pass.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
 
@@ -119,11 +123,34 @@ jobs:
       - name: Debug build
         run: npx tauri build --debug --no-bundle
 
+  # Fails a pull request that changes ui/src/ds/ without the label design-system.
+  # How it decides is written at the top of scripts/ds-write-guard.mjs and in
+  # DESIGN.md section 6, rule 4. Labels reach the script through env as JSON,
+  # never through the shell text.
+  ds-write-guard:
+    name: Design system write guard
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check ui/src/ds changes against the label
+        # bash runs with -eo pipefail here, so a failing git diff fails the step.
+        shell: bash
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          DS_GUARD_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: git diff --name-only --no-renames "$PR_BASE...$PR_HEAD" | node scripts/ds-write-guard.mjs
+
   # One stable check for branch protection. It passes when the checks passed
   # or were skipped for a docs-only change, and fails otherwise.
   result:
     name: CI result
-    needs: [changes, check]
+    needs: [changes, check, ds-write-guard]
     # Not always(): a run cancelled by a newer push should not report a failure.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-22.04
@@ -134,13 +161,20 @@ jobs:
         env:
           CHANGES: ${{ needs.changes.result }}
           CHECK: ${{ needs.check.result }}
+          DS_GUARD: ${{ needs.ds-write-guard.result }}
+          EVENT: ${{ github.event_name }}
         run: |
-          echo "Detect code changes: $CHANGES. Build and tests: $CHECK."
+          echo "Detect code changes: $CHANGES. Build and tests: $CHECK. Design system write guard: $DS_GUARD."
           if [ "$CHANGES" != "success" ]; then
             echo "Detecting code changes did not succeed." >&2
             exit 1
           fi
           if [ "$CHECK" != "success" ] && [ "$CHECK" != "skipped" ]; then
             echo "The build and tests did not pass." >&2
+            exit 1
+          fi
+          # The write guard runs on pull requests only; on a push it is skipped.
+          if [ "$DS_GUARD" != "success" ] && { [ "$DS_GUARD" != "skipped" ] || [ "$EVENT" = "pull_request" ]; }; then
+            echo "The design system write guard did not pass." >&2
             exit 1
           fi
