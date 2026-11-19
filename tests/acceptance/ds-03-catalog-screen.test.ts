@@ -321,7 +321,7 @@ test("AC7: the screen sets no raw colour inline", async () => {
 });
 
 // ------------------------------------------------------------ AC9
-test("AC9: the screen never uses the name Kitchen sink", async () => {
+test("AC9: the screen never uses the banned old name of the showcase screen", async () => {
   await mount();
   for (const t of tabs()) open(t.textContent?.trim().replace(/\s.*$/, "") ?? "");
   expect(screen.textContent?.toLowerCase()).not.toMatch(new RegExp(["kitchen", "\\s*", "sink"].join("")));

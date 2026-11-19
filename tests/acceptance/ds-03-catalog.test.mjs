@@ -69,7 +69,7 @@ test('AC8: ui/src/screens/sample/ is removed', () => {
   assert.ok(!existsSync(p('ui', 'src', 'screens', 'sample')), 'ui/src/screens/sample/ still exists');
 });
 
-test('AC9: the name Kitchen sink appears nowhere in the tracked files', () => {
+test('AC9: the banned old name of the showcase screen appears nowhere in the tracked files', () => {
   assert.ok(existsSync(p('ui', 'src', 'screens', 'catalog', 'catalog.ts')), 'the catalog screen does not exist yet, so this check proves nothing');
   const ls = spawnSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8' });
   assert.equal(ls.status, 0, ls.stderr);
