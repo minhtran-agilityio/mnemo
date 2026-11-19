@@ -55,6 +55,10 @@ const panelFor = (name: string) => {
 };
 const press = (el: HTMLElement, key: string) =>
   el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+const switchNamed = (name: string) =>
+  [...screen.querySelectorAll<HTMLElement>("button")].find((b) =>
+    b.textContent?.startsWith(name),
+  );
 const buttonNamed = (text: string) =>
   [...screen.querySelectorAll("button")].find((b) => b.textContent === text);
 
@@ -147,7 +151,7 @@ test("the eight tabs follow the registry order, and arrows, Home and End move fo
 
 test("Motion starts on, and off when the system asks for reduced motion", () => {
   mount();
-  const sw = screen.querySelector<HTMLElement>('[role="switch"]');
+  const sw = switchNamed("Motion");
   expect(sw?.getAttribute("aria-checked")).toBe("true");
   expect(sw?.textContent).toBe("MotionOn");
   sw?.click();
@@ -173,7 +177,7 @@ test("teardown puts the frame theme back and clears data-motion", () => {
   frameTheme = "system";
   mount();
   buttonNamed("Dark")?.click();
-  screen.querySelector<HTMLElement>('[role="switch"]')?.click();
+  switchNamed("Motion")?.click();
   teardown?.();
   teardown = null;
   expect(root.hasAttribute("data-theme")).toBe(false);
@@ -182,9 +186,123 @@ test("teardown puts the frame theme back and clears data-motion", () => {
 
 test("after teardown the switches no longer act", () => {
   mount();
-  const sw = screen.querySelector<HTMLElement>('[role="switch"]');
+  const sw = switchNamed("Motion");
   teardown?.();
   teardown = null;
   sw?.click();
   expect(root.hasAttribute("data-motion")).toBe(false);
+});
+
+test("the specimen opens the row of a part when its hotspot is pressed", () => {
+  mount();
+  const hots = [...screen.querySelectorAll<HTMLElement>(".hot")];
+  expect(hots.length).toBeGreaterThan(8);
+  const hot = hots.find((h) =>
+    h.getAttribute("aria-label")?.startsWith("Button,"),
+  );
+  hot?.click();
+  const row = screen.querySelector<HTMLElement>('.cat-row[data-part="button"]');
+  expect(panelFor("Controls")?.hidden).toBe(false);
+  expect(document.activeElement).toBe(row);
+});
+
+test("every hotspot names a part that has a row in the catalog", () => {
+  mount();
+  const names = new Set(
+    [...screen.querySelectorAll<HTMLElement>(".cat-row")].map(
+      (r) => r.querySelector("h3")?.textContent,
+    ),
+  );
+  for (const h of screen.querySelectorAll<HTMLElement>(".hot > span"))
+    expect(names.has(h.textContent), h.textContent ?? "").toBe(true);
+});
+
+test("the I key and the Inspect switch turn Inspect on, and Escape turns it off", () => {
+  mount();
+  const sw = switchNamed("Inspect");
+  expect(sw?.getAttribute("aria-pressed")).toBe("false");
+  document.body.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "i", bubbles: true }),
+  );
+  expect(sw?.getAttribute("aria-pressed")).toBe("true");
+  expect(screen.querySelector(".inspecting")).not.toBeNull();
+  document.body.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  expect(sw?.getAttribute("aria-pressed")).toBe("false");
+  sw?.click();
+  expect(sw?.getAttribute("aria-pressed")).toBe("true");
+});
+
+test("Inspect shows the tokens, contrast and target size of a part under the pointer", async () => {
+  mount();
+  switchNamed("Inspect")?.click();
+  const target = screen.querySelector<HTMLElement>(".cat-ex .btn");
+  if (!target) throw new Error("no button");
+  // The test runner has no layout, so give the button a box.
+  target.getBoundingClientRect = () => new DOMRect(10, 10, 120, 44);
+  target.dispatchEvent(new Event("pointermove", { bubbles: true }));
+  await new Promise((r) => requestAnimationFrame(() => r(null)));
+  const card = screen.querySelector<HTMLElement>(".insp-card");
+  expect(card?.hidden).toBe(false);
+  const keys = [...(card?.querySelectorAll("dt") ?? [])].map(
+    (d) => d.textContent,
+  );
+  expect(keys).toEqual(
+    expect.arrayContaining(["Size", "Target", "Text", "Ground", "Type"]),
+  );
+  // The runner computes no colours, so the contrast rows are checked in colour.test.ts.
+  expect(card?.querySelector(".nm")?.textContent).toContain("button.btn");
+});
+
+test("Ctrl K opens Find a part, Enter opens the match and its tab", () => {
+  mount();
+  document.body.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
+  );
+  const dialog = screen.querySelector<HTMLDialogElement>("dialog.pal");
+  expect(dialog?.open).toBe(true);
+  const input = dialog?.querySelector("input") as HTMLInputElement;
+  expect(document.activeElement).toBe(input);
+  input.value = "kanban col";
+  input.dispatchEvent(new Event("input"));
+  input.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+  );
+  expect(dialog?.open).toBe(false);
+  expect(panelFor("Lists")?.hidden).toBe(false);
+  expect((document.activeElement as HTMLElement).dataset.part).toBe(
+    "kanban column",
+  );
+});
+
+test("Find a part lists tokens and ignores Vietnamese marks", () => {
+  mount();
+  [...screen.querySelectorAll("button")]
+    .find((b) => b.textContent?.startsWith("Find a part"))
+    ?.click();
+  const input = screen.querySelector<HTMLInputElement>("dialog.pal input");
+  if (!input) throw new Error("no input");
+  input.value = "--accent";
+  input.dispatchEvent(new Event("input"));
+  expect(screen.querySelector(".pal-list .mono")?.textContent).toContain(
+    "--accent",
+  );
+  input.value = "Vietnamese stacked";
+  input.dispatchEvent(new Event("input"));
+  expect(screen.querySelector(".pal-list")?.textContent).toContain(
+    "Vietnamese, stacked marks",
+  );
+});
+
+test("the Limits tab builds 1000 rows on request and every Limits row is a real part", () => {
+  mount();
+  const panel = panelFor("Limits");
+  expect(panel?.querySelectorAll(".cat-row").length).toBe(7);
+  expect(panel?.textContent).not.toContain("Not built yet: planned");
+  const build = [...(panel?.querySelectorAll("button") ?? [])].find(
+    (b) => b.textContent === "Build 1000 rows",
+  );
+  build?.click();
+  expect(panel?.querySelectorAll(".lim-rows li").length).toBe(1000);
 });

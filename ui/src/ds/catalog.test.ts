@@ -45,10 +45,9 @@ test("entry names are unique", () => {
   expect(new Set(names).size).toBe(names.length);
 });
 
-test("the tabs that still have planned parts name their issue", () => {
+test("the Controls tab still names the issue of its planned part", () => {
   const want: Record<string, string> = {
     Controls: `planned #${107}`,
-    Limits: `planned #${113}`,
   };
   for (const [tab, tag] of Object.entries(want)) {
     expect(entriesFor(tab as CatalogTab).map((e) => e.source)).toContain(tag);
@@ -86,6 +85,7 @@ test("coverage counts built entries against all entries of a tab", () => {
   });
   expect(coverage("Records").built).toBe(entriesFor("Records").length);
   expect(coverage("Lists").built).toBe(entriesFor("Lists").length);
+  expect(coverage("Limits").built).toBe(entriesFor("Limits").length);
 });
 
 test("tokenNames lists each name once, in first-seen order, and ignores comments", () => {

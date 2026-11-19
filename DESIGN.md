@@ -193,7 +193,9 @@ Also required for every interactive component: default, hover, focus-visible, ac
 | Path | Role |
 | --- | --- |
 | `ui/src/ds/tokens.css` | Token values. The only file with colour values |
-| `ui/src/ds/base.css` | Base styles |
+| `ui/src/ds/base.css` | Page-wide rules only (reset, body, headings, links, focus ring). No component rule |
+| `ui/src/ds/icon.ts` | The one icon helper, `createIcon`. Components import it; none keeps its own copy |
+| `ui/src/ds/components/<name>/` | One folder per component: `<name>.ts`, `<name>.css`, `<name>.test.ts`. The barrel of each catalog tab (`controls.ts`, `feedback.ts`, `surfaces.ts`, `records.ts`, `lists.ts`) exports them, and `ui/src/ds/index.ts` re-exports the barrels |
 | `ui/src/ds/` | The design system. **The only place that defines visual styles** (colour, font, size, spacing, radius, shadow, border) for a component |
 | `ui/src/screens/**` | Layout only: where parts go, grid, flex, gap, which part to show. No visual style of its own |
 | `ui/src/frame/`, `ui/src/screens/settings/`, `ui/src/screens/kanban/`, `ui/src/style.css` | Shipped before this contract and still hold their own CSS. They are known exceptions: #109 moves the sidebar into `ui/src/ds/`, #111 moves the rest and removes the exceptions |
@@ -206,7 +208,7 @@ Rules:
 4. `ui/src/ds/` changes only in a pull request that comes from a UI component request issue, and that updates the UI Catalog in the same pull request. Check: Review.
 5. Raw colour values stay out of `ui/src/ds/` and `ui/src/screens/**`. Check: Test (`tests/raw-colour.test.mjs`).
 
-The base styles live in `ui/src/ds/base.css` (moved in #104).
+Every component lives in `ui/src/ds/components/<name>/`; `ui/src/ds/base.css` holds page-wide rules only. A part that another part needs (the trust label, the spinner, the small button, the segmented choice, the tooltip) is imported, never copied. Check: Review; `grep -rn "function createIcon" ui/src/ds` shows one definition.
 
 ## 7. UI Catalog
 
@@ -226,7 +228,12 @@ The UI Catalog is the dev-only screen that shows every part in `ui/src/ds/`, wit
 | Tokens | Every token from section 3, light and dark side by side, with its value |
 | Limits | Messy content: very long titles, names and URLs, many items, smallest window size |
 
-- **Source tag on every row:** `ds` (in `ui/src/ds/`), `base.css` (exists today, moves into `ui/src/ds/` in #105) or `planned #N` (in an issue, not built yet). Check: Review.
+- **Parts per tab.** Controls: button, text input, textarea, search, checkbox, radio, toggle, segmented choice, filter chip, select, menu, popover, tag input, shortcut hint, link. Feedback: pill, dot, AI status light, usage meter, progress, spinner, skeleton, banner, toast, trust label, empty state, error state, AI-off state. Surfaces: nav rail, status bar, page header, card, panel, divider, tabs, page, dialog, confirm dialog, approval sheet, tooltip, context menu. Records: link card (three views), note row, task row, kanban card, citation, tag list, metadata line. Lists: list, list row, kanban column, table, tree. Limits: narrow width and 200% zoom, very long title, messy URLs, Vietnamese stacked marks, empty content, 1000 rows, reduced motion. The registry `ui/src/ds/catalog.ts` is the full list. Check: Test (`ui/src/ds/catalog.test.ts`); every built entry has a live row.
+- **Specimen window.** At the top, one Mnemo window built only from catalog parts and scaled to fit. A button over each part opens that part's row (Tab to it, Enter). "Show part names" labels them all. The window itself is inert. Check: Test (`ui/src/screens/catalog/catalog.test.ts`).
+- **Inspect.** Key I, or the Inspect button, then hover or focus an example: the card shows text and ground tokens, contrast ratio, border contrast, target size against 24 and 44 px, font and radius, in the theme on screen. Escape leaves it. Check: Test (`colour.test.ts`, `catalog.test.ts`); Review in the browser.
+- **Find a part.** Ctrl or Cmd K, or the Find a part button: a dialog that searches parts, tokens and actions, ignores Vietnamese marks, and opens the matching row. Arrows move, Enter opens, Escape closes, focus returns. Check: Test (`ui/src/screens/catalog/find.test.ts`).
+- **Left out on purpose.** The prototype's "Both themes" view and its animated theme reveal are not in the UI Catalog. Light and Dark switch at once.
+- **Source tag on every row:** `ds` (in `ui/src/ds/`), `base.css` (a base style in `ui/src/ds/base.css`) or `planned #N` (in an issue, not built yet). Check: Review.
 
 How to pick a part:
 

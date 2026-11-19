@@ -7,9 +7,11 @@
 // its own panel from ./tabs/<tab>.ts, so a tab's work never edits this file.
 
 import "../../ds/catalog.css";
+import "../../ds/catalog/tools.css";
 import "./catalog.css";
-import { ChevronRight } from "lucide";
+import { ChevronRight, Search } from "lucide";
 import {
+  CATALOG,
   CATALOG_TABS,
   type CatalogTab,
   coverage,
@@ -18,17 +20,26 @@ import {
   TAB_INTRO,
   TOKEN_GROUPS,
 } from "../../ds/catalog";
-import { createIcon, createToastRegion } from "../../ds/index";
+import {
+  createButton,
+  createIcon,
+  createKbd,
+  createToastRegion,
+} from "../../ds/index";
 import { applyTheme, type Theme } from "../../frame/theme";
 import { DECISIONS, DECISIONS_SUMMARY } from "./decisions";
+import { createFinder, type FindItem } from "./find";
+import { createInspector } from "./inspect";
 import {
   button,
   el,
+  headingOf,
   slug,
   sourceTag,
   type TabContext,
   type TabRenderer,
 } from "./parts";
+import { createSpecimen } from "./specimen";
 import { renderControls } from "./tabs/controls";
 import { renderFeedback } from "./tabs/feedback";
 import { renderFoundations } from "./tabs/foundations";
@@ -196,18 +207,28 @@ export function renderCatalog(
   decisions.append(summary, list);
   status.append(totals, decisions);
 
+  // The switches of the tab bar share one look: a track, a label and On or Off.
+  const makeSwitch = (label: string) => {
+    const b = el(doc, "button", "cat-switch");
+    b.type = "button";
+    b.setAttribute("role", "switch");
+    const knob = el(doc, "span", "cat-switch-track");
+    knob.append(el(doc, "span", "cat-switch-knob"));
+    const stateText = el(doc, "span", "cat-switch-state");
+    stateText.setAttribute("aria-hidden", "true");
+    b.append(knob, el(doc, "span", undefined, label), stateText);
+    const set = (on: boolean) => {
+      b.setAttribute("aria-checked", String(on));
+      stateText.textContent = on ? "On" : "Off";
+    };
+    set(false);
+    return { b, set };
+  };
+
   // Motion switch. Off sets data-motion="off" on the root, which stops every transition.
-  const motion = el(doc, "button", "cat-switch");
-  motion.type = "button";
-  motion.setAttribute("role", "switch");
-  const track = el(doc, "span", "cat-switch-track");
-  track.append(el(doc, "span", "cat-switch-knob"));
-  const motionState = el(doc, "span", "cat-switch-state");
-  motionState.setAttribute("aria-hidden", "true");
-  motion.append(track, el(doc, "span", undefined, "Motion"), motionState);
+  const { b: motion, set: paintMotion } = makeSwitch("Motion");
   const setMotion = (on: boolean) => {
-    motion.setAttribute("aria-checked", String(on));
-    motionState.textContent = on ? "On" : "Off";
+    paintMotion(on);
     if (on) root.removeAttribute("data-motion");
     else root.setAttribute("data-motion", "off");
   };
@@ -230,19 +251,16 @@ export function renderCatalog(
     dark.setAttribute("aria-pressed", String(theme === "dark"));
   };
   showTheme(effectiveTheme(root));
+  const chooseTheme = (theme: "light" | "dark") => {
+    applyTheme(root, theme);
+    showTheme(theme);
+    themeChanged();
+  };
   for (const [b, theme] of [
     [light, "light"],
     [dark, "dark"],
   ] as const) {
-    b.addEventListener(
-      "click",
-      () => {
-        applyTheme(root, theme);
-        showTheme(theme);
-        themeChanged();
-      },
-      { signal },
-    );
+    b.addEventListener("click", () => chooseTheme(theme), { signal });
   }
 
   // On the System theme the palette follows the OS at once, so the buttons and values follow too.
@@ -261,7 +279,29 @@ export function renderCatalog(
   // Tab bar: the tabs with their counts on the left, the switches on the right.
   const tabbar = el(doc, "div", "cat-tabbar");
   const switches = el(doc, "div", "cat-switches");
-  switches.append(motion, themes);
+  // Inspect is a toggle button (aria-pressed) with its state in words.
+  const inspectSwitch = createButton(doc, { label: "Inspect", size: "sm" });
+  const inspectState = el(doc, "span", "cat-switch-state", "Off");
+  inspectSwitch.append(inspectState);
+  inspectSwitch.setAttribute("aria-pressed", "false");
+  inspectSwitch.setAttribute("aria-keyshortcuts", "I");
+  inspectSwitch.title = "Shortcut: I";
+  const paintInspect = (on: boolean) => {
+    inspectSwitch.setAttribute("aria-pressed", String(on));
+    inspectState.textContent = on ? "On" : "Off";
+  };
+  const isMac = /Mac|iPhone|iPad/.test(
+    view?.navigator.platform || view?.navigator.userAgent || "",
+  );
+  const findButton = createButton(doc, {
+    label: "Find a part",
+    size: "sm",
+    icon: Search,
+  });
+  findButton.setAttribute("aria-haspopup", "dialog");
+  findButton.setAttribute("aria-keyshortcuts", isMac ? "Meta+K" : "Control+K");
+  findButton.append(createKbd(doc, isMac ? "⌘K" : "Ctrl K"));
+  switches.append(findButton, inspectSwitch, motion, themes);
 
   // Tabs with a roving tabindex: arrows move and wrap, Home and End jump, selection follows focus.
   const tablist = el(doc, "div", "cat-tabs");
@@ -328,7 +368,130 @@ export function renderCatalog(
   );
   select(0, false);
 
-  wrap.append(head, status, tabbar, ...panels, toasts.element);
+  // Opening a row: show its tab, scroll to it, flash it once and give it the focus.
+  const rowFor = (name: string) =>
+    [...wrap.querySelectorAll<HTMLElement>(".cat-row")].find(
+      (r) => r.dataset.part === name,
+    );
+  const motionOn = () =>
+    motion.getAttribute("aria-checked") === "true" &&
+    !matches(view, "(prefers-reduced-motion: reduce)");
+  let flashTimer: ReturnType<typeof setTimeout> | undefined;
+  const reveal = (node: HTMLElement) => {
+    node.scrollIntoView?.({
+      block: "center",
+      behavior: motionOn() ? "smooth" : "auto",
+    });
+    node.classList.remove("flash");
+    void node.offsetWidth;
+    node.classList.add("flash");
+    if (!node.hasAttribute("tabindex")) node.tabIndex = -1;
+    node.focus({ preventScroll: true });
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => node.classList.remove("flash"), 1900);
+  };
+  signal.addEventListener("abort", () => clearTimeout(flashTimer));
+  const jumpTo = (name: string) => {
+    const row = rowFor(name);
+    const at = panels.findIndex((p) => row && p.contains(row));
+    if (!row || at < 0) return;
+    select(at, false);
+    reveal(row);
+  };
+
+  const specimen = createSpecimen(doc, { open: jumpTo, signal });
+
+  // Inspect: the switch, the I key and the card follow one state.
+  const inspector = createInspector(wrap, signal, paintInspect);
+  inspectSwitch.addEventListener(
+    "click",
+    () => inspector.setOn(!inspector.isOn()),
+    { signal },
+  );
+
+  // Find a part: the parts of every tab, the tokens and a few actions.
+  const findItems = (): FindItem[] => {
+    const items: FindItem[] = [];
+    for (const entry of CATALOG) {
+      if (!rowFor(entry.name)) continue;
+      items.push({
+        label: headingOf(entry),
+        where: `${entry.tab} · ${entry.source}`,
+        keywords: `${entry.name} ${entry.variants.join(" ")}`,
+        run: () => jumpTo(entry.name),
+      });
+    }
+    for (const g of TOKEN_GROUPS) {
+      for (const name of g.names) {
+        items.push({
+          label: name,
+          mono: true,
+          where: `Tokens · ${g.group}`,
+          run: () => {
+            select(CATALOG_TABS.indexOf("Tokens"), false);
+            const tr = [...wrap.querySelectorAll<HTMLElement>("tr")].find(
+              (r) => r.dataset.token === name,
+            );
+            if (tr) reveal(tr);
+          },
+        });
+      }
+    }
+    const motionIsOn = motion.getAttribute("aria-checked") === "true";
+    items.push(
+      {
+        label: "Switch to dark",
+        where: "Action",
+        run: () => chooseTheme("dark"),
+      },
+      {
+        label: "Switch to light",
+        where: "Action",
+        run: () => chooseTheme("light"),
+      },
+      {
+        label: `Turn motion ${motionIsOn ? "off" : "on"}`,
+        where: "Action",
+        run: () => setMotion(!motionIsOn),
+      },
+      {
+        label: `${inspector.isOn() ? "Stop" : "Start"} inspecting parts`,
+        where: "Action · I",
+        run: () => inspector.setOn(!inspector.isOn()),
+      },
+    );
+    return items;
+  };
+  const finder = createFinder(wrap, signal, findItems);
+  findButton.addEventListener("click", () => finder.open(findButton), {
+    signal,
+  });
+  doc.addEventListener(
+    "keydown",
+    (event) => {
+      const t = event.target;
+      const typing =
+        t instanceof HTMLElement &&
+        (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        event.key.toLowerCase() === "k"
+      ) {
+        event.preventDefault();
+        if (!finder.isOpen()) finder.open();
+        return;
+      }
+      if (typing || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (finder.isOpen() || doc.querySelector("dialog[open]")) return;
+      if (event.key === "i" || event.key === "I") {
+        inspector.setOn(!inspector.isOn());
+      }
+    },
+    { signal },
+  );
+
+  wrap.append(head, status, specimen, tabbar, ...panels, toasts.element);
   screen.classList.add("cat-screen");
   screen.replaceChildren(wrap);
 

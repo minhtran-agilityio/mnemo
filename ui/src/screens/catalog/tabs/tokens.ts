@@ -117,6 +117,7 @@ export const renderTokens: TabRenderer = (panel, ctx) => {
     table.dataset.tokens = g.group;
     for (const name of g.names) {
       const row = el(doc, "tr");
+      row.dataset.token = name;
       const nameCell = el(doc, "td");
       nameCell.append(el(doc, "code", undefined, name));
       const valueCell = el(doc, "td", "tok-value");
