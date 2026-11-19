@@ -11,6 +11,13 @@ Mnemo is a local-first Tauri 2 desktop app: a Rust core in `src-tauri/`, a web U
 - `npm run lint`: lint the TypeScript and Rust code.
 - `npm run check`: format, lint, type check and tests. Run it before every commit.
 
+## Run and test
+
+- Test: `npm test` (cargo tests, then vitest, then the node acceptance tests).
+- Targeted test: `cargo test --manifest-path src-tauri/Cargo.toml <test_name>` for Rust, `npx vitest run <path>` for the UI, `MNEMO_NESTED=1 node --test --test-isolation=none tests/<file>.test.mjs` for a node test.
+- Lint: `npm run lint` (biome, then cargo clippy with warnings denied).
+- Full suite: `npm run check` (format check, lint, type check and tests).
+
 ## Shared rules (every feature follows these)
 
 1. Honest failure: if the app could not read something, it saves the link only, with no summary. A reason the app wrote is marked as a guess.
