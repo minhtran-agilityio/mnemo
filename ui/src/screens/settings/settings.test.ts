@@ -11,6 +11,7 @@ let saves: Theme[];
 let applied: Theme[];
 let release: Array<() => void>;
 let failWith: unknown;
+let detached: Array<string | null>;
 
 function deps(): SettingsDeps {
   return {
@@ -58,6 +59,7 @@ beforeEach(() => {
   saves = [];
   applied = [];
   release = [];
+  detached = [];
   failWith = undefined;
   renderSettings(container, deps());
 });
@@ -151,4 +153,19 @@ test("a later save that works clears the line", async () => {
   expect(container.querySelector<HTMLElement>(".settings-status")?.hidden).toBe(
     true,
   );
+});
+
+test("a failed save after the owner left Settings is still reported", async () => {
+  renderSettings(container, {
+    ...deps(),
+    onDetachedSave: (f) => detached.push(f),
+  });
+  failWith = { code: "storage", message: "disk full" };
+  pick("Dark");
+  container.replaceChildren();
+  await tick();
+  await tick();
+  expect(detached).toHaveLength(1);
+  expect(detached[0]).toContain("could not save the theme");
+  expect(detached[0]).toContain("disk full");
 });

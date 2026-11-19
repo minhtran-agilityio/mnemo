@@ -11,6 +11,11 @@ export interface SettingsDeps {
   applyTheme(theme: Theme): void;
   /** Saves `theme`. Rejects when it could not be saved. */
   saveTheme(theme: Theme): Promise<void>;
+  /**
+   * Hears a save result when the owner has left Settings, so the line has no screen to show on.
+   * `null` means the save worked. The caller shows the text somewhere that is still on screen.
+   */
+  onDetachedSave?(failure: string | null): void;
 }
 
 type SectionId = "appearance" | "ai" | "data";
@@ -154,10 +159,14 @@ export function renderSettings(
         await deps.saveTheme(theme);
         status.hidden = true;
         status.textContent = "";
+        if (!status.isConnected) deps.onDetachedSave?.(null);
       } catch (error) {
         console.error("could not save the theme:", error);
-        status.textContent = `Mnemo could not save the theme, so it applies only until Mnemo quits. ${errorMessage(error)}`;
+        const text = `Mnemo could not save the theme, so it applies only until Mnemo quits. ${errorMessage(error)}`;
+        status.textContent = text;
         status.hidden = false;
+        // The owner may have left Settings, so this line would be on a screen nobody sees.
+        if (!status.isConnected) deps.onDetachedSave?.(text);
       }
     });
   }

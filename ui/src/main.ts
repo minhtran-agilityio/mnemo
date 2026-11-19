@@ -134,6 +134,7 @@ async function start(): Promise<void> {
         getTheme: () => currentTheme,
         applyTheme: useTheme,
         saveTheme: (theme) => setSetting(THEME_KEY, theme),
+        onDetachedSave: (failure) => showNote(saveNote, failure),
       });
     } else {
       renderEmptyState(screen, route);
