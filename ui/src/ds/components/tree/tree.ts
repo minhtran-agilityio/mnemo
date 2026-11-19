@@ -2,7 +2,7 @@
 // opens and closes its group. The current node has aria-current. Arrow Up and Down move between
 // the visible nodes, Arrow Right opens and Arrow Left closes; Tab and Enter work as on any button.
 import { ChevronRight, Folder, type IconNode, Tag } from "lucide";
-import { createRecordIcon } from "../record-icon/record-icon";
+import { createIcon } from "../../icon";
 import "./tree.css";
 
 export interface TreeNode {
@@ -32,7 +32,7 @@ function buildNodes(
     const hasKids = (node.children?.length ?? 0) > 0;
     if (hasKids) {
       btn.setAttribute("aria-expanded", String(node.expanded === true));
-      btn.append(createRecordIcon(ChevronRight, "chev"));
+      btn.append(createIcon(ChevronRight, "sm", "chev"));
     } else {
       const spacer = doc.createElement("span");
       spacer.className = "spacer";
@@ -43,7 +43,7 @@ function buildNodes(
     name.className = "tname";
     name.textContent = node.label;
     name.title = node.label;
-    btn.append(createRecordIcon(ICONS[node.kind], "rec-ic-muted"), name);
+    btn.append(createIcon(ICONS[node.kind], "sm", "ic-muted"), name);
     if (node.count !== undefined) {
       const cnt = doc.createElement("span");
       cnt.className = "cnt";

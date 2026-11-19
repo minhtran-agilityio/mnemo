@@ -51,11 +51,3 @@ dialog::backdrop {
   justify-content: flex-end;
   gap: var(--space-2);
 }
-
-/* The danger button when the button styles do not carry it. */
-.dlg .btn-danger,
-.dlg-static .btn-danger {
-  border-color: var(--bad);
-  background: var(--bad);
-  color: var(--on-bad);
-}

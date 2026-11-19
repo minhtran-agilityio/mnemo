@@ -7,6 +7,7 @@ const ctx = {
   doc: document,
   root: document.documentElement,
   signal: new AbortController().signal,
+  toast() {},
   onThemeChange() {},
 };
 const mount = (render: typeof renderRecords) => {

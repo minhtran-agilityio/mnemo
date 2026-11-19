@@ -16,5 +16,5 @@ test("it shows the title and meta as text", () => {
 
 test("a note written by AI says so in text", () => {
   const row = createNoteRow(document, { title: "A", meta: "B", byAi: true });
-  expect(row.querySelector(".rec-flag-ai")?.textContent).toBe("Written by AI");
+  expect(row.querySelector(".trust-ai")?.textContent).toBe("Written by AI");
 });

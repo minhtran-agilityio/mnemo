@@ -4,6 +4,7 @@
 
 import "../../../ds/catalog/tokens.css";
 import { entriesFor, TOKEN_GROUPS } from "../../../ds/catalog";
+import { buildTrustLabel } from "../../../ds/index";
 import { el, sourceTag, type TabRenderer } from "../parts";
 
 /** Shown in the Value column when a token has no value in the current theme. */
@@ -180,7 +181,7 @@ export const renderTokens: TabRenderer = (panel, ctx) => {
   const cbox = el(doc, "div", "tok-group");
   const cheadText = el(doc, "span");
   const chead = el(doc, "h3", undefined, "Text contrast ");
-  chead.append(cheadText, " ", el(doc, "span", "pill pill-warn", "Unverified"));
+  chead.append(cheadText, " ", buildTrustLabel("unverified"));
   const cnote = el(
     doc,
     "p",

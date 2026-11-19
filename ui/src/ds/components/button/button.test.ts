@@ -47,12 +47,12 @@ test("a busy button shows a spinner, sets aria-busy and ignores clicks", () => {
   const b = createButton(document, { ...options, busy: true });
   expect(b.getAttribute("aria-busy")).toBe("true");
   expect(b.getAttribute("aria-disabled")).toBe("true");
-  expect(b.querySelector(".btn-spin")).not.toBeNull();
+  expect(b.querySelector(".spinner")).not.toBeNull();
   b.click();
   expect(onClick).not.toHaveBeenCalled();
   setButtonBusy(b, false, options);
   expect(b.hasAttribute("aria-busy")).toBe(false);
-  expect(b.querySelector(".btn-spin")).toBeNull();
+  expect(b.querySelector(".spinner")).toBeNull();
   b.click();
   expect(onClick).toHaveBeenCalledTimes(1);
 });

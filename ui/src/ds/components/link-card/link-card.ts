@@ -3,14 +3,16 @@
 // summary the app wrote is labelled "Written by AI", and a reason it guessed is labelled "Guess".
 // A long title wraps (card) or is cut off with its full text in the tooltip (rows); a long URL is
 // cut off with the full URL in the tooltip.
-import { Link, PowerOff, Sparkles, TriangleAlert } from "lucide";
+import { Link, PowerOff } from "lucide";
+import { createIcon } from "../../icon";
 import { createListRow } from "../list-row/list-row";
 import {
   type AppId,
   createAppBadge,
   createMetaLine,
 } from "../metadata-line/metadata-line";
-import { createRecordIcon } from "../record-icon/record-icon";
+import { buildSpinner } from "../spinner/spinner";
+import { buildTrustLabel } from "../trust-label/trust-label";
 import "./link-card.css";
 
 export interface LinkItem {
@@ -49,27 +51,11 @@ export function noSummaryText(item: LinkItem): string {
   return NO_SUMMARY[item.status ?? "unreadable"];
 }
 
-export function createSummaryFlag(
-  doc: Document,
-  kind: "ai" | "guess",
-): HTMLSpanElement {
-  const span = doc.createElement("span");
-  span.className = `rec-flag rec-flag-${kind}`;
-  span.append(
-    createRecordIcon(kind === "ai" ? Sparkles : TriangleAlert),
-    doc.createTextNode(kind === "ai" ? "Written by AI" : "Guess"),
-  );
-  return span;
-}
-
 function reading(doc: Document): HTMLElement {
   const box = doc.createElement("span");
   box.className = "rec-reading";
   box.setAttribute("role", "status");
-  const spin = doc.createElement("span");
-  spin.className = "rec-spin";
-  spin.setAttribute("aria-hidden", "true");
-  box.append(spin, doc.createTextNode(NO_SUMMARY.reading));
+  box.append(buildSpinner(), doc.createTextNode(NO_SUMMARY.reading));
   return box;
 }
 
@@ -83,7 +69,7 @@ export function createLinkCard(
   if (options.thumb) {
     const thumb = doc.createElement("div");
     thumb.className = "thumb";
-    thumb.append(createRecordIcon(Link));
+    thumb.append(createIcon(Link));
     card.append(thumb);
   }
   card.append(createMetaLine(doc, [createAppBadge(doc, item.app), item.age]));
@@ -95,7 +81,7 @@ export function createLinkCard(
   if (item.summary) {
     card.append(
       textEl(doc, "div", "sum", item.summary),
-      createSummaryFlag(doc, item.summaryKind ?? "ai"),
+      buildTrustLabel(item.summaryKind ?? "ai"),
     );
   } else if (item.status === "reading") {
     card.append(reading(doc));
@@ -103,7 +89,7 @@ export function createLinkCard(
     const none = doc.createElement("div");
     none.className = "nosum";
     none.append(
-      createRecordIcon(item.status === "ai-off" ? PowerOff : Link),
+      createIcon(item.status === "ai-off" ? PowerOff : Link),
       doc.createTextNode(noSummaryText(item)),
     );
     card.append(none);

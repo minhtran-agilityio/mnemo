@@ -24,6 +24,7 @@ import {
   createTextarea,
   createTextInput,
   createToggle,
+  createTooltip,
   setButtonBusy,
 } from "../../../ds/index";
 import {
@@ -74,10 +75,7 @@ function buttonRow(ctx: TabContext) {
     icon: Ellipsis,
     iconOnly: true,
   });
-  const tip = el(doc, "span", "cat-tip", "More actions");
-  tip.setAttribute("role", "tooltip");
-  tip.id = "cat-more-tip";
-  moreTrigger.setAttribute("aria-describedby", tip.id);
+  const moreTip = createTooltip(moreTrigger, "More actions", doc);
 
   const demoOptions: ButtonOptions = {
     label: "Summarise link",
@@ -145,15 +143,7 @@ function buttonRow(ctx: TabContext) {
         b({ label: "Rename", size: "sm" }, "small 32 px"),
         b({ label: "Accept", size: "sm", variant: "primary" }, "small primary"),
         b({ label: "New note", icon: Plus }, "with icon"),
-        state(
-          doc,
-          "icon only + tooltip",
-          (() => {
-            const anchor = el(doc, "span", "cat-tip-anchor");
-            anchor.append(moreTrigger, tip);
-            return anchor;
-          })(),
-        ),
+        state(doc, "icon only + tooltip", moreTip.element),
         b(
           {
             label: "Remove",

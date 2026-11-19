@@ -1,6 +1,6 @@
 // Filter chip: a button with aria-pressed. On shows a check mark too, so colour is not the only signal.
 import { Check } from "lucide";
-import { controlIcon } from "../button/icon";
+import { createIcon } from "../../icon";
 import "./chip.css";
 
 export interface ChipOptions {
@@ -23,7 +23,7 @@ export function createChip(
   const render = (pressed: boolean) => {
     chip.setAttribute("aria-pressed", String(pressed));
     chip.textContent = "";
-    if (pressed) chip.append(controlIcon(Check));
+    if (pressed) chip.append(createIcon(Check));
     chip.append(text);
   };
   render(options.pressed === true);

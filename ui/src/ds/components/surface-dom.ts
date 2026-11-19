@@ -1,6 +1,4 @@
 // Small DOM helpers shared by the surface components. Text always goes in as text, never as markup.
-import { createElement, type IconNode } from "lucide";
-
 export function el<K extends keyof HTMLElementTagNameMap>(
   doc: Document,
   tag: K,
@@ -11,18 +9,6 @@ export function el<K extends keyof HTMLElementTagNameMap>(
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
-}
-
-/** A Lucide icon as a decorative inline SVG, sized by a token. */
-export function icon(node: IconNode, size: "sm" | "md" = "md"): SVGElement {
-  const svg = createElement(node, {
-    "aria-hidden": "true",
-    focusable: "false",
-    class: "ic",
-  });
-  svg.style.width = `var(--icon-${size})`;
-  svg.style.height = `var(--icon-${size})`;
-  return svg;
 }
 
 let counter = 0;

@@ -1,8 +1,8 @@
 // Select: pick one (a native select, so the browser handles keys and screen readers) and pick many
 // (a button that opens a popover of checkboxes and says how many are chosen).
 import { ChevronDown } from "lucide";
+import { createIcon } from "../../icon";
 import { createButton } from "../button/button";
-import { controlIcon } from "../button/icon";
 import { createCheckbox } from "../check/check";
 import { nextControlId } from "../field/id";
 import { createPopover, type Popover } from "../popover/popover";
@@ -32,7 +32,7 @@ export function createSelect(
   }
   if (options.value !== undefined) select.value = options.value;
   if (options.disabled) select.disabled = true;
-  wrap.append(select, controlIcon(ChevronDown));
+  wrap.append(select, createIcon(ChevronDown));
   return { wrap, select };
 }
 
@@ -56,7 +56,7 @@ export function createMultiSelect(
   const summarise = options.summarise ?? ((n: number) => `${n} chosen`);
   const trigger = createButton(doc, { label: "" });
   const value = doc.createElement("span");
-  trigger.append(value, controlIcon(ChevronDown));
+  trigger.append(value, createIcon(ChevronDown));
   const panel = doc.createElement("div");
   panel.className = "popover";
   panel.setAttribute("role", "group");

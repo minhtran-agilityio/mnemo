@@ -60,12 +60,12 @@
   background: var(--line);
 }
 
-.tblwrap th button .rec-ic {
+.tblwrap th button .ic {
   color: var(--muted);
 }
 
-.tblwrap th[aria-sort="ascending"] button .rec-ic,
-.tblwrap th[aria-sort="descending"] button .rec-ic {
+.tblwrap th[aria-sort="ascending"] button .ic,
+.tblwrap th[aria-sort="descending"] button .ic {
   color: var(--accent);
 }
 

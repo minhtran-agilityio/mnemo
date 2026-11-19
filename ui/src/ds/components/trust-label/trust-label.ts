@@ -1,5 +1,5 @@
 import { CircleHelp, ShieldAlert, Sparkles } from "lucide";
-import { createFeedbackIcon } from "../feedback-icon/feedback-icon";
+import { createIcon } from "../../icon";
 import "./trust-label.css";
 
 export type TrustKind = "guess" | "unverified" | "ai";
@@ -18,9 +18,6 @@ export function buildTrustLabel(kind: TrustKind): HTMLSpanElement {
   const spec = LABELS[kind];
   const label = document.createElement("span");
   label.className = `trust ${spec.cls}`;
-  label.append(
-    createFeedbackIcon(spec.icon, "sm"),
-    document.createTextNode(spec.text),
-  );
+  label.append(createIcon(spec.icon, "sm"), document.createTextNode(spec.text));
   return label;
 }

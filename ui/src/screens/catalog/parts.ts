@@ -17,6 +17,8 @@ export interface TabContext {
   readonly root: HTMLElement;
   /** Aborts when the screen closes. Pass it to every listener you add outside your own panel. */
   readonly signal: AbortSignal;
+  /** Shows a message as a real toast from the Feedback toast region (no Undo). */
+  toast(message: string): void;
   /** Runs `fn` each time the theme on screen changes (Light or Dark, or the system setting). */
   onThemeChange(fn: () => void): void;
 }

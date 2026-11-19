@@ -1,13 +1,14 @@
 // Approval sheet: any write outside Mnemo shows exactly what will happen, then waits. It says where
 // the write goes, lists every step, and does nothing until the owner presses the approve button.
 import { ArrowRight, TriangleAlert } from "lucide";
+import { createIcon } from "../../icon";
 import {
   createDialog,
   createDialogButton,
   type DialogHandle,
   dialogContent,
 } from "../dialog/dialog";
-import { el, icon, uid } from "../surface-dom";
+import { el, uid } from "../surface-dom";
 import "./approval-sheet.css";
 
 /** One step: plain text and `{ code }` parts (file names, paths). */
@@ -31,7 +32,7 @@ export interface ApprovalOptions {
 function whereLine(doc: Document, where: string): HTMLElement {
   const line = el(doc, "div", "sheet-where");
   line.append(
-    icon(TriangleAlert),
+    createIcon(TriangleAlert, "md"),
     el(doc, "span", undefined, `Writes outside Mnemo: ${where}`),
   );
   return line;
@@ -46,7 +47,7 @@ function planList(doc: Document, plan: readonly PlanStep[]): HTMLUListElement {
       if (typeof part === "string") text.append(part);
       else text.append(el(doc, "code", undefined, part.code));
     }
-    item.append(icon(ArrowRight), text);
+    item.append(createIcon(ArrowRight, "md"), text);
     list.append(item);
   }
   return list;

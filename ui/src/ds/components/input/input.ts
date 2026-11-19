@@ -1,6 +1,6 @@
 // Text input, textarea and search field. Native controls; a Field gives them a label.
 import { Search } from "lucide";
-import { controlIcon } from "../button/icon";
+import { createIcon } from "../../icon";
 import { nextControlId } from "../field/id";
 import "./input.css";
 
@@ -58,6 +58,6 @@ export function createSearch(
     type: "search",
     placeholder: options.placeholder,
   });
-  wrap.append(controlIcon(Search), input);
+  wrap.append(createIcon(Search), input);
   return { wrap, input };
 }

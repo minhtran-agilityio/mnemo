@@ -21,7 +21,7 @@ import {
   buildToast,
   buildTrustLabel,
   buildUsageMeter,
-  createFeedbackIcon,
+  createIcon,
   createToastRegion,
   type PillTint,
 } from "../../../ds/index";
@@ -203,7 +203,7 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
       toast: () => {
         const demo = button(doc, "btn", "");
         demo.append(
-          createFeedbackIcon(Trash2, "sm"),
+          createIcon(Trash2, "sm"),
           doc.createTextNode('Delete "Notes on FTS5"'),
         );
         demo.addEventListener("click", () => {

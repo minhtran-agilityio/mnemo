@@ -1,5 +1,5 @@
 import { Pause, ShieldAlert, TriangleAlert } from "lucide";
-import { createFeedbackIcon } from "../feedback-icon/feedback-icon";
+import { createIcon } from "../../icon";
 import "./usage-meter.css";
 
 /** Share of the usage window at which Mnemo warns. */
@@ -28,10 +28,10 @@ function note(tone: UsageTone, resetsAt?: string): HTMLElement {
   box.className = "meter-note";
   const line = document.createElement("span");
   if (tone === "warn") {
-    box.append(createFeedbackIcon(TriangleAlert, "sm"));
+    box.append(createIcon(TriangleAlert, "sm"));
     line.textContent = `Over ${USAGE_WARN_AT}%. Background jobs pause at ${USAGE_PAUSE_AT}%.`;
   } else if (tone === "pause") {
-    box.append(createFeedbackIcon(Pause, "sm"));
+    box.append(createIcon(Pause, "sm"));
     line.textContent =
       "Background jobs paused. Links still save, with no summary.";
   } else {
@@ -107,7 +107,7 @@ export function buildRunCount(options: RunCountOptions): HTMLElement {
   const line = document.createElement("span");
   line.textContent =
     "Only Mnemo's own runs are known. Your full Claude usage is not shown.";
-  box.append(createFeedbackIcon(ShieldAlert, "sm"), line);
+  box.append(createIcon(ShieldAlert, "sm"), line);
   meter.append(top, box);
   return meter;
 }

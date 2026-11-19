@@ -1,5 +1,5 @@
 import type { IconNode } from "lucide";
-import { createFeedbackIcon } from "../feedback-icon/feedback-icon";
+import { createIcon } from "../../icon";
 import "./pill.css";
 
 export type PillTint = "default" | "info" | "good" | "warn" | "note" | "bad";
@@ -16,7 +16,7 @@ export function buildPill(options: PillOptions): HTMLSpanElement {
   const tint = options.tint ?? "default";
   const pill = document.createElement("span");
   pill.className = tint === "default" ? "pill" : `pill pill-${tint}`;
-  if (options.icon) pill.append(createFeedbackIcon(options.icon, "sm"));
+  if (options.icon) pill.append(createIcon(options.icon, "sm"));
   pill.append(document.createTextNode(options.text));
   return pill;
 }

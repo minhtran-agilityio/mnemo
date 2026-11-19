@@ -1,7 +1,8 @@
 // Button. A real <button> with a visible name. Text goes in as text.
 import type { IconNode } from "lucide";
 import "./button.css";
-import { controlIcon } from "./icon";
+import { createIcon } from "../../icon";
+import { buildSpinner } from "../spinner/spinner";
 
 export type ButtonVariant = "default" | "primary" | "danger" | "ghost";
 /** A fixed look for a state the pointer or keyboard cannot hold still (the catalog shows these). */
@@ -21,17 +22,12 @@ export interface ButtonOptions {
   readonly onClick?: (event: MouseEvent) => void;
 }
 
-const SPIN_CLASS = "btn-spin";
-
 function fill(button: HTMLButtonElement, options: ButtonOptions): void {
   button.textContent = "";
   if (options.busy) {
-    const spin = button.ownerDocument.createElement("span");
-    spin.className = SPIN_CLASS;
-    spin.setAttribute("aria-hidden", "true");
-    button.append(spin);
+    button.append(buildSpinner());
   } else if (options.icon) {
-    button.append(controlIcon(options.icon));
+    button.append(createIcon(options.icon));
   }
   if (options.iconOnly) {
     button.setAttribute("aria-label", options.label);

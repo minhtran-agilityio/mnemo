@@ -1,3 +1,4 @@
+import { createButton } from "../button/button";
 import "./toast.css";
 
 /** How long a toast stays, in milliseconds. Hover or focus holds it. */
@@ -19,11 +20,14 @@ export function buildToast(options: ToastOptions): HTMLDivElement {
   message.textContent = options.message;
   toast.append(message);
   if (options.onAction) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "btn btn-sm btn-ghost toast-action";
-    button.textContent = options.actionLabel ?? "Undo";
-    button.addEventListener("click", options.onAction);
+    const onAction = options.onAction;
+    const button = createButton(document, {
+      label: options.actionLabel ?? "Undo",
+      size: "sm",
+      variant: "ghost",
+      onClick: () => onAction(),
+    });
+    button.classList.add("toast-action");
     toast.append(button);
   }
   return toast;

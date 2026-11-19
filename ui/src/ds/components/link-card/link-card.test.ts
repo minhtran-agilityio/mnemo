@@ -35,7 +35,7 @@ test("a card shows title, url and summary as text, with the full values in toolt
 test("a summary is labelled as written by AI, or as a guess", () => {
   expect(createLinkCard(document, read).textContent).toContain("Written by AI");
   const guess = createLinkCard(document, { ...read, summaryKind: "guess" });
-  expect(guess.querySelector(".rec-flag-guess")?.textContent).toBe("Guess");
+  expect(guess.querySelector(".trust-guess")?.textContent).toBe("Guess");
 });
 
 test("a page that could not be read keeps the link only, with no summary", () => {

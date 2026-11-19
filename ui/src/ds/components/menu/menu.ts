@@ -1,8 +1,8 @@
 // Menu: a list of actions. Arrow keys, Home and End move between items; Escape closes and returns
 // focus to the button. A disabled item stays in the list with aria-disabled and says why.
 import { ChevronDown } from "lucide";
+import { createIcon } from "../../icon";
 import { createButton } from "../button/button";
-import { controlIcon } from "../button/icon";
 import { nextControlId } from "../field/id";
 import { createKbd } from "../kbd/kbd";
 import { createPopover, type Popover } from "../popover/popover";
@@ -92,7 +92,7 @@ export interface MenuOptions {
 /** A button that opens a menu. */
 export function createMenu(doc: Document, options: MenuOptions): Popover {
   const trigger = createButton(doc, { label: options.label });
-  trigger.append(controlIcon(ChevronDown));
+  trigger.append(createIcon(ChevronDown));
   trigger.id = nextControlId("menu");
   let pop: Popover | undefined;
   const panel = createMenuPanel(doc, options.items, {

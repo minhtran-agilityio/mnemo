@@ -65,50 +65,8 @@
   font-style: italic;
 }
 
-.rec-flag {
-  display: inline-flex;
-  align-items: center;
+.lcard .trust {
   align-self: flex-start;
-  gap: var(--space-1);
-  padding: 0 var(--space-2);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  line-height: var(--leading-label);
-  white-space: nowrap;
-}
-
-.rec-flag-ai {
-  background: var(--tint-note);
-  color: var(--ink);
-}
-
-.rec-flag-guess {
-  background: var(--tint-bad);
-  color: var(--guess-ink);
-}
-
-.rec-spin {
-  flex: none;
-  width: var(--icon-sm);
-  height: var(--icon-sm);
-  border: var(--border-2) solid var(--accent);
-  border-right-color: transparent;
-  border-radius: var(--radius-pill);
-  animation: rec-rot 0.8s linear infinite;
-}
-
-@keyframes rec-rot {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .rec-spin {
-    animation: none;
-    border-right-color: var(--accent);
-  }
 }
 
 .views {

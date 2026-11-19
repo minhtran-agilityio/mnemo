@@ -20,14 +20,9 @@
   padding: var(--space-4);
 }
 
-.ui-catalog .srf-result,
 .ui-catalog .srf-muted {
   color: var(--muted);
   font-size: var(--text-md);
-}
-
-.ui-catalog .srf-result:empty {
-  display: none;
 }
 
 .ui-catalog .card {

@@ -1,6 +1,6 @@
 import { CircleX, type IconNode, Pause, Power, TriangleAlert } from "lucide";
+import { createIcon } from "../../icon";
 import { buildDot } from "../dot/dot";
-import { createFeedbackIcon } from "../feedback-icon/feedback-icon";
 import "./ai-light.css";
 
 export type AiLightState =
@@ -24,7 +24,7 @@ export interface AiLightOptions {
 function glyph(icon: IconNode, tone: "off" | "bad" | "warn"): HTMLSpanElement {
   const wrap = document.createElement("span");
   wrap.className = `ai-light-glyph ai-light-glyph-${tone}`;
-  wrap.append(createFeedbackIcon(icon, "sm"));
+  wrap.append(createIcon(icon, "sm"));
   return wrap;
 }
 

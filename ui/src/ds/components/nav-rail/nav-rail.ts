@@ -1,7 +1,8 @@
 // Nav rail sample: the shape of the app's side menu, open and collapsed. Groups, a current item,
 // a "Later" mark on planned items, no counts and no badges. The app's own sidebar is in ui/src/frame.
 import { type IconNode, PanelLeft } from "lucide";
-import { el, icon, uid } from "../surface-dom";
+import { createIcon } from "../../icon";
+import { el, uid } from "../surface-dom";
 import "./nav-rail.css";
 
 export interface NavRailItem {
@@ -51,7 +52,7 @@ export function createNavRail(options: NavRailOptions): NavRail {
   const toggle = el(doc, "button", "rail-toggle");
   toggle.type = "button";
   toggle.setAttribute("aria-controls", rail.id);
-  toggle.append(icon(PanelLeft));
+  toggle.append(createIcon(PanelLeft, "md"));
   top.append(brand, toggle);
   rail.append(top);
 
@@ -68,7 +69,10 @@ export function createNavRail(options: NavRailOptions): NavRail {
       button.title = item.later
         ? `${item.label}, planned for later`
         : item.label;
-      button.append(icon(item.icon), el(doc, "span", "txt", item.label));
+      button.append(
+        createIcon(item.icon, "md"),
+        el(doc, "span", "txt", item.label),
+      );
       if (item.later) button.append(el(doc, "span", "navlater", "Later"));
       button.addEventListener("click", () => {
         setCurrent(item.id);

@@ -2,6 +2,7 @@
 // or Alt+Right moves it (see kanban-column). Forced states draw hover, focus and dragging in a
 // still view.
 import { createMetaLine } from "../metadata-line/metadata-line";
+import { buildSpinner } from "../spinner/spinner";
 import "./kanban-card.css";
 
 export interface KanbanCardOptions {
@@ -30,10 +31,7 @@ export function createKanbanCard(
     const line = doc.createElement("span");
     line.className = "k-working";
     line.setAttribute("role", "status");
-    const spin = doc.createElement("span");
-    spin.className = "rec-spin";
-    spin.setAttribute("aria-hidden", "true");
-    line.append(spin, doc.createTextNode("AI working"));
+    line.append(buildSpinner(), doc.createTextNode("AI working"));
     card.append(line);
   }
   return card;

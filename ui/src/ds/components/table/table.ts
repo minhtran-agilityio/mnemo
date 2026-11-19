@@ -2,7 +2,7 @@
 // a click sorts by that column (ascending, then descending). The table scrolls sideways inside its
 // own box, which can take focus so the keyboard can scroll it.
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide";
-import { createRecordIcon } from "../record-icon/record-icon";
+import { createIcon } from "../../icon";
 import "./table.css";
 
 export interface TableColumn {
@@ -60,7 +60,7 @@ export function createTable(
       const btn = th.querySelector("button");
       btn?.querySelector("svg")?.remove();
       btn?.append(
-        createRecordIcon(
+        createIcon(
           !on ? ArrowUpDown : dir === "ascending" ? ArrowUp : ArrowDown,
         ),
       );

@@ -2,7 +2,7 @@
 // through AND say "Done" in text, so colour and line are never the only signal. The whole label
 // is the click target.
 import { Check } from "lucide";
-import { createRecordIcon } from "../record-icon/record-icon";
+import { createIcon } from "../../icon";
 import "./task-row.css";
 
 export interface TaskRowOptions {
@@ -46,7 +46,7 @@ export function createTaskRow(
     status.textContent = "";
     if (done) {
       status.className = "pill pill-good";
-      status.append(createRecordIcon(Check), doc.createTextNode("Done"));
+      status.append(createIcon(Check), doc.createTextNode("Done"));
     } else if (options.badge) {
       status.className = `pill pill-${options.badge.tone}`;
       status.textContent = options.badge.text;

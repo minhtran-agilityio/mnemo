@@ -1,7 +1,7 @@
 // Field: a visible label above a control, a hint below, and an error that replaces the hint.
 // Never a placeholder as the label. The control keeps its own id; the label points at it.
 import { CircleAlert } from "lucide";
-import { controlIcon } from "../button/icon";
+import { createIcon } from "../../icon";
 import "./field.css";
 import { nextControlId } from "./id";
 
@@ -29,7 +29,7 @@ export function createField(doc: Document, options: FieldOptions): HTMLElement {
     const err = doc.createElement("span");
     err.className = "err-text";
     err.id = `${target.id}-error`;
-    err.append(controlIcon(CircleAlert), doc.createTextNode(options.error));
+    err.append(createIcon(CircleAlert), doc.createTextNode(options.error));
     target.setAttribute("aria-invalid", "true");
     target.setAttribute("aria-describedby", err.id);
     wrap.append(err);

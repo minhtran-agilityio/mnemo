@@ -2,7 +2,7 @@
 // off with an ellipsis and the full text is in its tooltip. The class names are the base ones
 // (.row, .row-title, .row-meta) so the existing screens keep working.
 import type { IconNode } from "lucide";
-import { createRecordIcon } from "../record-icon/record-icon";
+import { createIcon } from "../../icon";
 import "./list-row.css";
 
 export interface ListRowOptions {
@@ -36,7 +36,7 @@ export function createListRow(
     li.tabIndex = options.focusable === false ? -1 : 0;
   }
   if (options.forceState) li.classList.add(`is-${options.forceState}`);
-  if (options.icon) li.append(createRecordIcon(options.icon, "rec-ic-muted"));
+  if (options.icon) li.append(createIcon(options.icon, "sm", "ic-muted"));
   const title = doc.createElement("span");
   title.className = "row-title";
   title.textContent = options.title;

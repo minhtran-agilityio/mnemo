@@ -82,11 +82,8 @@ const NAV_GROUPS_COLLAPSED: readonly NavRailGroup[] = [
 export const renderSurfaces: TabRenderer = (panel, ctx) => {
   const doc = ctx.doc;
   const text = (cls: string, value: string) => el(doc, "span", cls, value);
-  const result = () => {
-    const out = el(doc, "span", "srf-result");
-    out.setAttribute("role", "status");
-    return out;
-  };
+  // A result of a demo shows as a real toast from the Feedback toast region.
+  const result = (message: string) => ctx.toast(message);
 
   panel.append(
     entryRows(ctx, "Surfaces", {
@@ -103,7 +100,7 @@ export const renderSurfaces: TabRenderer = (panel, ctx) => {
           current: "bookmarks",
         });
         const main = el(doc, "div", "frame-main");
-        main.append(text("srf-result", "current, hover (Notes), Later"));
+        main.append(text("srf-muted", "current, hover (Notes), Later"));
         const collapsed = createNavRail({
           label: "Main, collapsed example",
           groups: NAV_GROUPS_COLLAPSED,
@@ -266,7 +263,6 @@ export const renderSurfaces: TabRenderer = (panel, ctx) => {
       },
 
       dialog: () => {
-        const out = result();
         const input = el(doc, "input", "input");
         input.id = "srf-rename";
         input.value = "Đọc sau";
@@ -285,7 +281,7 @@ export const renderSurfaces: TabRenderer = (panel, ctx) => {
           title: "Rename folder",
           form: {
             onSubmit: () => {
-              out.textContent = `Renamed to "${input.value}".`;
+              result(`Renamed to "${input.value}".`);
             },
           },
           children: [label],
@@ -307,13 +303,12 @@ export const renderSurfaces: TabRenderer = (panel, ctx) => {
           ],
         });
         return [
-          state(doc, "live: focus trapped, Escape closes", [open, out]),
+          state(doc, "live: focus trapped, Escape closes", [open]),
           state(doc, "drawn in the page", sample, { grow: true }),
         ];
       },
 
       "confirm dialog": () => {
-        const out = result();
         const options = {
           title: 'Delete the folder "Đọc sau"?',
           message: "This deletes everything inside it. It cannot be restored:",
@@ -321,11 +316,10 @@ export const renderSurfaces: TabRenderer = (panel, ctx) => {
           keepLabel: "Keep folder",
           confirmLabel: "Delete 45 items",
           onConfirm: () => {
-            out.textContent =
-              "Folder deleted. 45 items removed. (Catalog only.)";
+            result("Folder deleted. 45 items removed. (Catalog only.)");
           },
           onKeep: () => {
-            out.textContent = "Kept.";
+            result("Kept.");
           },
         } as const;
         const dialog = createConfirmDialog(options);
@@ -341,13 +335,12 @@ export const renderSurfaces: TabRenderer = (panel, ctx) => {
           onKeep: () => {},
         });
         return [
-          state(doc, "live: safe button has the focus", [open, out]),
+          state(doc, "live: safe button has the focus", [open]),
           state(doc, "drawn in the page", sample, { grow: true }),
         ];
       },
 
       "approval sheet": () => {
-        const out = result();
         const options = {
           where: "Google Drive",
           title: 'Move 3 files into "Mnemo / 2026"?',
@@ -375,17 +368,16 @@ export const renderSurfaces: TabRenderer = (panel, ctx) => {
           declineLabel: "Not now",
           approveLabel: "Approve and move 3 files",
           onApprove: () => {
-            out.textContent = "Approved. Catalog only: nothing was moved.";
+            result("Approved. Catalog only: nothing was moved.");
           },
           onDecline: () => {
-            out.textContent = "Declined. Nothing changed.";
+            result("Declined. Nothing changed.");
           },
         } as const;
         const sheet = createApprovalSheet(options);
         ctx.signal.addEventListener("abort", () => sheet.close());
         const open = button(doc, "btn", "Review the plan…");
         open.addEventListener("click", () => sheet.open(open));
-        out.textContent = "Waiting: nothing happens until you approve.";
         return [
           state(
             doc,
@@ -397,7 +389,7 @@ export const renderSurfaces: TabRenderer = (panel, ctx) => {
             }),
             { grow: true },
           ),
-          state(doc, "live (modal)", [open, out]),
+          state(doc, "live (modal)", [open]),
         ];
       },
 
@@ -420,9 +412,8 @@ export const renderSurfaces: TabRenderer = (panel, ctx) => {
           el(doc, "span", "row-meta", "2 d"),
         );
         list.append(row);
-        const out = result();
         const say = (word: string) => () => {
-          out.textContent = `Chose "${word}". Catalog only.`;
+          result(`Chose "${word}". Catalog only.`);
         };
         const menu = createContextMenu({
           label: "Link actions",
@@ -444,7 +435,7 @@ export const renderSurfaces: TabRenderer = (panel, ctx) => {
           state(
             doc,
             "live: right-click the row, or Shift+F10",
-            [list, menu.element, out],
+            [list, menu.element],
             {
               grow: true,
             },

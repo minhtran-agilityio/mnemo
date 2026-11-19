@@ -18,7 +18,7 @@ import {
   TAB_INTRO,
   TOKEN_GROUPS,
 } from "../../ds/catalog";
-import { createIcon } from "../../ds/index";
+import { createIcon, createToastRegion } from "../../ds/index";
 import { applyTheme, type Theme } from "../../frame/theme";
 import { DECISIONS, DECISIONS_SUMMARY } from "./decisions";
 import {
@@ -136,8 +136,12 @@ export function renderCatalog(
   const themeChanged = () => {
     for (const fn of themeListeners) fn();
   };
+  const toasts = createToastRegion();
   const ctx: TabContext = {
     doc,
+    toast: (message) => {
+      toasts.show(message);
+    },
     root,
     signal,
     onThemeChange: (fn) => {
@@ -324,7 +328,7 @@ export function renderCatalog(
   );
   select(0, false);
 
-  wrap.append(head, status, tabbar, ...panels);
+  wrap.append(head, status, tabbar, ...panels, toasts.element);
   screen.classList.add("cat-screen");
   screen.replaceChildren(wrap);
 

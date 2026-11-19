@@ -1,5 +1,5 @@
 import { Bookmark, CircleX, type IconNode, Pause, Power } from "lucide";
-import { createFeedbackIcon } from "../feedback-icon/feedback-icon";
+import { createIcon } from "../../icon";
 import "./state-box.css";
 
 export interface StateAction {
@@ -41,7 +41,7 @@ export function buildStateBox(options: StateBoxOptions): HTMLDivElement {
   const body = document.createElement("p");
   if (typeof options.body === "string") body.textContent = options.body;
   else body.append(...options.body);
-  box.append(createFeedbackIcon(options.icon, "md"), title, body);
+  box.append(createIcon(options.icon, "md"), title, body);
   if (options.action) {
     const button = document.createElement("button");
     button.type = "button";

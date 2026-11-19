@@ -1,7 +1,8 @@
 // Status bar: the bottom line of the window. AI line, usage and save state.
 // Colour is never the only signal: every item has words, and a warning or limit also has an icon.
 import type { IconNode } from "lucide";
-import { el, icon } from "../surface-dom";
+import { createIcon } from "../../icon";
+import { el } from "../surface-dom";
 import "./status-bar.css";
 
 export interface StatusItem {
@@ -43,7 +44,7 @@ export function createStatusBar(options: StatusBarOptions): HTMLElement {
       dot.setAttribute("aria-hidden", "true");
       node.append(dot);
     }
-    if (item.icon) node.append(icon(item.icon));
+    if (item.icon) node.append(createIcon(item.icon, "md"));
     if (item.text !== undefined) {
       const text = el(
         doc,

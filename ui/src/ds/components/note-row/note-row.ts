@@ -1,8 +1,8 @@
 // A note in a list: a note icon, the title, a meta line, and a "Written by AI" label when the
 // text was not written by the owner.
-import { FileText, Sparkles } from "lucide";
+import { FileText } from "lucide";
 import { createListRow } from "../list-row/list-row";
-import { createRecordIcon } from "../record-icon/record-icon";
+import { buildTrustLabel } from "../trust-label/trust-label";
 import "./note-row.css";
 
 export interface NoteRowOptions {
@@ -23,13 +23,7 @@ export function createNoteRow(
     forceState: options.forceState,
   });
   if (options.byAi) {
-    const flag = doc.createElement("span");
-    flag.className = "rec-flag rec-flag-ai";
-    flag.append(
-      createRecordIcon(Sparkles),
-      doc.createTextNode("Written by AI"),
-    );
-    row.append(flag);
+    row.append(buildTrustLabel("ai"));
   }
   return row;
 }

@@ -7,6 +7,7 @@ import { ref } from "../../../ds/catalog/types";
 import {
   APP_LABELS,
   type AppId,
+  buildTrustLabel,
   createAnswer,
   createAppBadge,
   createCite,
@@ -17,8 +18,8 @@ import {
   createMetaLine,
   createMissingCite,
   createNoteRow,
+  createSegmented,
   createSourceList,
-  createSummaryFlag,
   createTagList,
   createTaskRow,
   type LinkItem,
@@ -63,45 +64,25 @@ const VIEWS: readonly [LinkView, string][] = [
   ["compact", "Compact"],
 ];
 
-/** The three-way switch of the Bookmarks view: a radio group with arrow keys. */
+/** The three-way switch of the Bookmarks view: the segmented choice of the Controls tab. */
 function viewSwitch(
   doc: Document,
   out: HTMLElement,
   initial: LinkView,
 ): HTMLElement {
-  const group = el(doc, "div", "rec-seg");
-  group.setAttribute("role", "radiogroup");
-  group.setAttribute("aria-label", "Bookmarks view");
-  const buttons: HTMLButtonElement[] = [];
-  const pick = (index: number) => {
-    buttons.forEach((b, i) => {
-      b.setAttribute("aria-checked", String(i === index));
-      b.tabIndex = i === index ? 0 : -1;
-    });
-    out.replaceChildren(createLinkView(doc, VIEWS[index][0], LINKS));
-  };
-  VIEWS.forEach(([, text], i) => {
-    const b = el(doc, "button", undefined, text);
-    b.type = "button";
-    b.setAttribute("role", "radio");
-    b.addEventListener("click", () => pick(i));
-    b.addEventListener("keydown", (e) => {
-      const to =
-        e.key === "ArrowRight" || e.key === "ArrowDown"
-          ? (i + 1) % VIEWS.length
-          : e.key === "ArrowLeft" || e.key === "ArrowUp"
-            ? (i - 1 + VIEWS.length) % VIEWS.length
-            : -1;
-      if (to < 0) return;
-      e.preventDefault();
-      pick(to);
-      buttons[to].focus();
-    });
-    buttons.push(b);
-    group.append(b);
+  const show = (view: LinkView) =>
+    out.replaceChildren(createLinkView(doc, view, LINKS));
+  const labelOf = (view: LinkView) => VIEWS.find(([v]) => v === view)?.[1];
+  show(initial);
+  return createSegmented(doc, {
+    label: "Bookmarks view",
+    options: VIEWS.map(([, text]) => text),
+    value: labelOf(initial),
+    onChange: (text) => {
+      const hit = VIEWS.find(([, t]) => t === text);
+      if (hit) show(hit[0]);
+    },
   });
-  pick(VIEWS.findIndex(([v]) => v === initial));
-  return group;
 }
 
 function linkCardRow(ctx: TabContext) {
@@ -240,7 +221,7 @@ export const renderRecords: TabRenderer = (panel, ctx) => {
     },
     citation: () => {
       const answer = createAnswer(doc, [
-        createSummaryFlag(doc, "ai"),
+        buildTrustLabel("ai"),
         " You saved two guides on data backups. Both say to use the online backup API instead of copying the file ",
         createCite(doc, 1),
         ". One adds that WAL mode needs a checkpoint first ",

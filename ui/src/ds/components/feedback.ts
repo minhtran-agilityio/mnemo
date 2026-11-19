@@ -3,7 +3,6 @@
 export * from "./ai-light/ai-light";
 export * from "./banner/banner";
 export * from "./dot/dot";
-export * from "./feedback-icon/feedback-icon";
 export * from "./pill/pill";
 export * from "./progress/progress";
 export * from "./skeleton/skeleton";

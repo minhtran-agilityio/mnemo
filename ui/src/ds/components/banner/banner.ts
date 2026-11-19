@@ -1,5 +1,6 @@
 import { CircleX, Info, TriangleAlert } from "lucide";
-import { createFeedbackIcon } from "../feedback-icon/feedback-icon";
+import { createIcon } from "../../icon";
+import { createButton } from "../button/button";
 import "./banner.css";
 
 export type BannerTone = "info" | "warn" | "bad";
@@ -34,15 +35,16 @@ export function buildBanner(options: BannerOptions): HTMLDivElement {
     text.append(lead, document.createTextNode(" "));
   }
   text.append(document.createTextNode(options.message));
-  msg.append(createFeedbackIcon(ICONS[options.tone], "sm"), text);
+  msg.append(createIcon(ICONS[options.tone], "sm"), text);
   banner.append(msg);
 
   if (options.action) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "btn btn-sm banner-action";
-    button.textContent = options.action.label;
-    button.addEventListener("click", options.action.onClick);
+    const button = createButton(document, {
+      label: options.action.label,
+      size: "sm",
+      onClick: options.action.onClick,
+    });
+    button.classList.add("banner-action");
     banner.append(button);
   }
   return banner;

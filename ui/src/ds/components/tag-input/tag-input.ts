@@ -1,7 +1,7 @@
 // Tag input: Enter adds a tag, Backspace on an empty box removes the last one, and each tag has a
 // remove button with a name. Tag names go in as text.
 import { X } from "lucide";
-import { controlIcon } from "../button/icon";
+import { createIcon } from "../../icon";
 import { nextControlId } from "../field/id";
 import "./tag-input.css";
 
@@ -42,7 +42,7 @@ export function createTagInput(
     const remove = doc.createElement("button");
     remove.type = "button";
     remove.setAttribute("aria-label", `Remove tag ${name}`);
-    remove.append(controlIcon(X));
+    remove.append(createIcon(X));
     remove.addEventListener("click", () => {
       tag.remove();
       input.focus();

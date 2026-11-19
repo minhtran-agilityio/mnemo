@@ -5,6 +5,5 @@ export * from "./kanban-card/kanban-card";
 export * from "./link-card/link-card";
 export * from "./metadata-line/metadata-line";
 export * from "./note-row/note-row";
-export * from "./record-icon/record-icon";
 export * from "./tag-list/tag-list";
 export * from "./task-row/task-row";

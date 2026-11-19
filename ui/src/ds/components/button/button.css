@@ -123,34 +123,13 @@
   cursor: progress;
 }
 
-.btn-spin {
-  flex: none;
-  width: var(--icon-sm);
-  height: var(--icon-sm);
-  border: var(--border-2) solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: btn-spin 0.8s linear infinite;
-}
-
-@keyframes btn-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .btn {
     transition: none;
   }
-
-  .btn-spin {
-    animation: none;
-  }
 }
 
-[data-motion="off"] .btn,
-[data-motion="off"] .btn-spin {
+[data-motion="off"] .btn {
   transition: none;
   animation: none;
 }
