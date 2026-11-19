@@ -47,27 +47,6 @@ a {
   outline-offset: 2px;
 }
 
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  max-width: 72ch;
-  padding: var(--space-5) var(--space-4);
-  background: var(--paper);
-  color: var(--ink);
-}
-
-.card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-5);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--card);
-  box-shadow: var(--sh1);
-}
-
 .btn {
   display: inline-flex;
   align-items: center;

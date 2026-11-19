@@ -1,0 +1,61 @@
+dialog {
+  width: min(var(--size-dialog-width), calc(100vw - var(--space-6)));
+  padding: 0;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: var(--sh2);
+}
+
+dialog::backdrop {
+  background: var(--scrim);
+}
+
+.dlg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+}
+
+/* The same layout drawn in the page, for samples. */
+.dlg-static {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: var(--size-dialog-static-max);
+  padding: var(--space-5);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: var(--sh2);
+}
+
+.dlg h3,
+.dlg-static h3 {
+  margin: 0;
+}
+
+.dlg p,
+.dlg-static p {
+  margin: 0;
+  font-size: var(--text-md);
+}
+
+.dlg-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* The danger button when the button styles do not carry it. */
+.dlg .btn-danger,
+.dlg-static .btn-danger {
+  border-color: var(--bad);
+  background: var(--bad);
+  color: var(--on-bad);
+}

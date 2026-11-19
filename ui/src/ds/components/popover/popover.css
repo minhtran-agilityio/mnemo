@@ -1,0 +1,30 @@
+.pop-anchor {
+  position: relative;
+  display: inline-block;
+}
+
+.popover {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: var(--size-menu-min);
+  max-width: min(var(--size-menu-max), 80vw);
+  padding: var(--space-3);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  box-shadow: var(--sh2);
+}
+
+.popover[hidden] {
+  display: none;
+}
+
+.popover p {
+  margin: 0;
+  font-size: var(--text-md);
+}

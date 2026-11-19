@@ -1,3 +1,15 @@
-// Barrel of the surfaces tab: re-export each component of this tab from here, one line per component.
-// Only the surfaces tab's agent edits this file. Example: export * from "./<name>/<name>";
-export {};
+// Barrel of the surfaces tab: one line per component.
+export * from "./approval-sheet/approval-sheet";
+export * from "./card/card";
+export * from "./column/column";
+export * from "./confirm-dialog/confirm-dialog";
+export * from "./context-menu/context-menu";
+export * from "./dialog/dialog";
+export * from "./divider/divider";
+export * from "./heading-bar/heading-bar";
+export * from "./nav-rail/nav-rail";
+export * from "./panel/panel";
+export * from "./popover/popover";
+export * from "./status-bar/status-bar";
+export * from "./tabs/tabs";
+export * from "./tooltip/tooltip";

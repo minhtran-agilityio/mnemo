@@ -1,0 +1,10 @@
+/* Page: the reading column. Tokens only. */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 72ch;
+  padding: var(--space-5) var(--space-4);
+  background: var(--paper);
+  color: var(--ink);
+}
