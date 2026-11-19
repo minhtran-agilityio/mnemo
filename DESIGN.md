@@ -128,7 +128,7 @@ The base styles live in `ui/src/ds/base.css` (moved in #104).
 
 The UI Catalog is the dev-only screen that shows every part in `ui/src/ds/`, with every state from section 5, in light and dark. It is the place an agent looks first. The name is "UI Catalog". No other name is used. Check: Review; a search of the repo for any other name for this screen finds nothing.
 
-- **Dev-only.** It is not in the release bundle. Check: Test or Review of the built `dist/` (it holds no UI Catalog code). **Planned** in #105.
+- **Dev-only.** It is not in the release bundle. A dev build (`npm run dev`) opens it at `#/ui-catalog`. Check: Test (`tests/acceptance/ds-03-catalog.test.mjs` builds the release and finds no UI Catalog code). Built in #105.
 - **Tabs, in this order:** Foundations, Controls, Feedback, Surfaces, Records, Lists, Tokens, Limits. Check: Review against this list.
 
 | Tab | Holds |
