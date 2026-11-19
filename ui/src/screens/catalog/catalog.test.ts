@@ -46,7 +46,9 @@ function stubMedia(reduce: boolean, dark = false) {
 function mount() {
   teardown = renderCatalog(screen, { getTheme: () => frameTheme });
 }
-const tabs = () => [...screen.querySelectorAll<HTMLElement>('[role="tab"]')];
+const tabs = () => [
+  ...screen.querySelectorAll<HTMLElement>('.cat-tabs [role="tab"]'),
+];
 const panelFor = (name: string) => {
   const tab = tabs().find((t) => t.textContent === name);
   return document.getElementById(tab?.getAttribute("aria-controls") ?? "");

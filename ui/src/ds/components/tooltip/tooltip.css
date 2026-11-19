@@ -1,0 +1,46 @@
+.tip-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.tip {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 50%;
+  z-index: var(--z-popover);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(-50%);
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+/* A bridge over the gap, so the pointer can move onto the tip without it closing. */
+.tip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  height: var(--space-2);
+}
+
+.tip.static {
+  position: static;
+  display: inline-block;
+  opacity: 1;
+  transform: none;
+}
+
+.tip-anchor:hover .tip,
+.tip-anchor:focus-within .tip {
+  opacity: 1;
+}
+
+.tip-anchor.tip-hidden .tip {
+  opacity: 0;
+}

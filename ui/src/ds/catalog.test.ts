@@ -47,7 +47,7 @@ test("entry names are unique", () => {
 });
 
 test("the base styles are entries tagged base.css and their classes exist in the base style file", () => {
-  for (const name of ["card", "list row"]) {
+  for (const name of ["list row"]) {
     const entry = CATALOG.find((e) => e.name === name);
     expect(entry?.source, name).toBe("base.css");
   }

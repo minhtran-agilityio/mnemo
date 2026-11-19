@@ -45,7 +45,7 @@ async function mount() {
   teardown = renderCatalog(screen, { getTheme: () => theme });
   return screen;
 }
-const tabs = () => [...screen.querySelectorAll<HTMLElement>('[role="tab"]')];
+const tabs = () => [...screen.querySelectorAll<HTMLElement>('.cat-tabs [role="tab"]')];
 const tab = (name: string) => {
   const t = tabs().find((x) => x.textContent?.trim().startsWith(name));
   if (!t) throw new Error(`no tab ${name}`);

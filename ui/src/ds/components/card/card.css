@@ -1,0 +1,11 @@
+/* Card: one item in a bordered surface. Tokens only. */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: var(--sh1);
+}
