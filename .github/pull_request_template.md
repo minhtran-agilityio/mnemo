@@ -21,6 +21,8 @@ Closes #
 - [ ] No embeddings. Search and the graph use plain code rules.
 - [ ] Colours come from tokens only.
 - [ ] Unchecked facts are marked "Unverified".
+- [ ] UI comes from `ui/src/ds` only. A missing part goes through a UI component request; only the ui-designer agent edits `ui/src/ds/**`.
+- [ ] `ui/src/ds` changed → the pull request has the label `design-system` (or `ui/src/ds` did not change).
 
 ## Working rules
 
