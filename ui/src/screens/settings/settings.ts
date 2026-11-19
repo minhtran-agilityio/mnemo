@@ -79,25 +79,34 @@ export function renderSettings(
   const currentValue = (id: SectionId): string =>
     id === "appearance" ? THEME_LABELS[deps.getTheme()] : EMPTY_VALUE;
 
-  function renderList(): void {
-    const rows = SECTIONS.map((section) => {
-      const row = el(doc, "button", "settings-row");
-      row.type = "button";
-      if (section.id === open) row.setAttribute("aria-current", "true");
-      row.addEventListener("click", () => {
-        open = section.id;
-        renderList();
-        renderBody();
-      });
-      // The plain space keeps the name and the value apart for a screen reader and for copy.
-      row.append(
-        el(doc, "span", "settings-row-name", section.label),
-        " ",
-        el(doc, "span", "settings-row-value", currentValue(section.id)),
-      );
-      return row;
+  // The rows are built once and updated in place, so the row that has keyboard focus keeps it.
+  const values = new Map<SectionId, HTMLElement>();
+  const rows = new Map<SectionId, HTMLButtonElement>();
+  for (const section of SECTIONS) {
+    const row = el(doc, "button", "settings-row");
+    row.type = "button";
+    row.addEventListener("click", () => {
+      open = section.id;
+      renderList();
+      renderBody();
     });
-    list.replaceChildren(...rows);
+    const value = el(doc, "span", "settings-row-value");
+    values.set(section.id, value);
+    rows.set(section.id, row);
+    // The plain space keeps the name and the value apart for a screen reader and for copy.
+    row.append(el(doc, "span", "settings-row-name", section.label), " ", value);
+    list.append(row);
+  }
+
+  function renderList(): void {
+    for (const section of SECTIONS) {
+      const row = rows.get(section.id);
+      const value = values.get(section.id);
+      if (!row || !value) continue;
+      value.textContent = currentValue(section.id);
+      if (section.id === open) row.setAttribute("aria-current", "true");
+      else row.removeAttribute("aria-current");
+    }
   }
 
   function renderBody(): void {

@@ -169,3 +169,15 @@ test("a failed save after the owner left Settings is still reported", async () =
   expect(detached[0]).toContain("could not save the theme");
   expect(detached[0]).toContain("disk full");
 });
+
+test("clicking a section row keeps keyboard focus on that row", () => {
+  renderSettings(container, deps());
+  const row = [
+    ...container.querySelectorAll<HTMLButtonElement>("button.settings-row"),
+  ].find((b) => b.querySelector(".settings-row-name")?.textContent === "AI");
+  if (!row) throw new Error("no AI row");
+  row.focus();
+  row.click();
+  expect(document.activeElement).toBe(row);
+  expect(row.getAttribute("aria-current")).toBe("true");
+});
