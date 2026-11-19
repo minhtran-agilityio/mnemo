@@ -12,10 +12,16 @@ pub struct Migration {
 }
 
 /// Every shipped migration, in order. Never edit one that has shipped; add a new one.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    number: 1,
-    sql: include_str!("../../migrations/0001_init.sql"),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        number: 1,
+        sql: include_str!("../../migrations/0001_init.sql"),
+    },
+    Migration {
+        number: 2,
+        sql: include_str!("../../migrations/0002_settings.sql"),
+    },
+];
 
 /// Reads the schema version stored in the database (0 for a new file).
 pub fn current_version(conn: &Connection) -> Result<u32, StorageError> {
@@ -73,7 +79,20 @@ mod tests {
     fn real_migrations_set_the_version() {
         let mut c = mem();
         run(&mut c, MIGRATIONS).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 2);
+    }
+
+    #[test]
+    fn migration_2_adds_settings_to_a_database_built_by_migration_1() {
+        let mut c = mem();
+        run(&mut c, &MIGRATIONS[..1]).unwrap();
         assert_eq!(current_version(&c).unwrap(), 1);
+        assert!(!table_exists(&c, "settings"));
+        run(&mut c, MIGRATIONS).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 2);
+        assert!(table_exists(&c, "settings"));
+        run(&mut c, MIGRATIONS).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 2);
     }
 
     #[test]
@@ -131,7 +150,7 @@ mod tests {
             err,
             StorageError::SchemaTooNew {
                 found: 99,
-                supported: 1
+                supported: 2
             }
         );
     }

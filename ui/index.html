@@ -4,22 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mnemo</title>
+    <script src="/theme-boot.js"></script>
   </head>
   <body>
-    <main>
-      <h1>Mnemo</h1>
-      <p id="ping-status" role="status">Asking the Rust core...</p>
-      <p id="app-version" role="status">Reading version...</p>
-    </main>
-    <section id="sample" aria-label="Style sample"></section>
-    <section class="kanban-proof" aria-label="UI approach proof">
-      <p class="note">
-        Proof screen for the UI approach (#7). Sample data only, not your
-        projects. Moves are not saved.
-      </p>
-      <section id="board" class="board" aria-label="Project board"></section>
-      <p id="board-status" role="status" class="status"></p>
-    </section>
+    <div class="app-frame" id="app">
+      <div class="app-content" id="app-content">
+        <main id="screen"></main>
+        <footer>
+          <p id="theme-read-note" class="app-status" role="status" hidden></p>
+          <p id="setting-read-note" class="app-status" role="status" hidden></p>
+          <p id="setting-save-note" class="app-status" role="status" hidden></p>
+          <p id="theme-save-note" class="app-status" role="status" hidden></p>
+          <p class="app-status">
+            <span id="ping-status" role="status">Asking the Rust core...</span>
+            ·
+            <span id="app-version" role="status">Reading version...</span>
+          </p>
+        </footer>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
