@@ -1,0 +1,4 @@
+/* The icons of the feedback parts never shrink in a flex row. */
+.feedback-icon {
+  flex: none;
+}

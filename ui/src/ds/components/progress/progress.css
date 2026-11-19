@@ -1,0 +1,39 @@
+/* Progress: a bar that is either measured (determinate) or sliding (indeterminate). */
+.progress {
+  width: 100%;
+  max-width: var(--size-field-max);
+  height: calc(var(--space-1) + var(--border-2));
+  border-radius: var(--radius-pill);
+  background: var(--head);
+  overflow: hidden;
+}
+
+.progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+}
+
+.progress.indet > span {
+  width: 35%;
+  animation: progress-slide 1.4s var(--ease) infinite;
+}
+
+@keyframes progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+/* Reduced motion: no slide. The bar stays as a short fixed segment; the words next to it say
+   that work is going on. */
+@media (prefers-reduced-motion: reduce) {
+  .progress.indet > span {
+    animation: none;
+    transform: none;
+  }
+}

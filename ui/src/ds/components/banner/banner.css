@@ -1,0 +1,46 @@
+/* Banner: a message that stays on the page, with at most one action. */
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: var(--border-1) solid var(--line);
+  background: var(--tint-info);
+  color: var(--ink);
+  width: 100%;
+}
+
+.banner-msg {
+  flex: 1 1 var(--size-basis-banner);
+  min-width: 0;
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.banner-msg svg {
+  margin-top: var(--space-1);
+}
+
+.banner-action {
+  min-height: var(--size-tap-sm);
+}
+
+.banner-warn {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+}
+
+.banner-warn b {
+  color: var(--warn-ink);
+}
+
+.banner-bad {
+  background: var(--bad-soft);
+}
+
+.banner-bad svg {
+  color: var(--bad);
+}
