@@ -15,6 +15,8 @@ import {
 } from "./frame/sidebar";
 import {
   applyTheme,
+  cacheTheme,
+  readCachedTheme,
   readTheme,
   THEME_KEY,
   type Theme,
@@ -77,12 +79,15 @@ function saveCollapsed(collapsed: boolean): void {
   });
 }
 
-// The theme in use now. System until the saved choice is read.
-let currentTheme: Theme = "system";
+// The theme in use now. It starts as the last known theme, applied here before the first paint,
+// while the saved choice is still being read.
+let currentTheme: Theme = readCachedTheme(localStorage);
+applyTheme(document.documentElement, currentTheme);
 
 function useTheme(theme: Theme): void {
   currentTheme = theme;
   applyTheme(document.documentElement, theme);
+  cacheTheme(localStorage, theme);
 }
 
 /** The saved theme, applied at once. A failed read gives the system theme and a visible line. */

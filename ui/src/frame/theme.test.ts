@@ -4,7 +4,9 @@ import { resolve } from "node:path";
 import { expect, test, vi } from "vitest";
 import {
   applyTheme,
+  cacheTheme,
   parseTheme,
+  readCachedTheme,
   readTheme,
   THEME_LABELS,
   THEMES,
@@ -94,4 +96,28 @@ test("a read that never finishes gives System after the limit", async () => {
   );
   expect(theme).toBe("system");
   expect(onError.mock.calls[0]?.[0]).toBeInstanceOf(ThemeReadTimeoutError);
+});
+
+test("the cached theme is read at once, so the first paint needs no wait for the store", () => {
+  const data = new Map<string, string>();
+  const storage = {
+    getItem: (k: string) => data.get(k) ?? null,
+    setItem: (k: string, v: string) => void data.set(k, v),
+  };
+  expect(readCachedTheme(storage)).toBe("system");
+  cacheTheme(storage, "dark");
+  expect(readCachedTheme(storage)).toBe("dark");
+});
+
+test("blocked storage gives System and never throws", () => {
+  const blocked = {
+    getItem: () => {
+      throw new Error("blocked");
+    },
+    setItem: () => {
+      throw new Error("blocked");
+    },
+  };
+  expect(readCachedTheme(blocked)).toBe("system");
+  expect(() => cacheTheme(blocked, "dark")).not.toThrow();
 });

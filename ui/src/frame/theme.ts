@@ -69,3 +69,30 @@ export async function readTheme(
     clearTimeout(timer);
   }
 }
+
+/** The browser key for the copy of the last known theme. The settings store stays the truth. */
+export const THEME_CACHE_KEY = "mnemo.theme";
+
+/**
+ * The last known theme, read at once with no wait, so the first paint is already in the right
+ * theme while the settings store is still being read. Missing or blocked storage gives System.
+ */
+export function readCachedTheme(storage: Pick<Storage, "getItem">): Theme {
+  try {
+    return parseTheme(storage.getItem(THEME_CACHE_KEY));
+  } catch {
+    return "system";
+  }
+}
+
+/** Keeps a copy of `theme` for the next start. A failure is safe: the next start reads the store. */
+export function cacheTheme(
+  storage: Pick<Storage, "setItem">,
+  theme: Theme,
+): void {
+  try {
+    storage.setItem(THEME_CACHE_KEY, theme);
+  } catch {
+    // The copy is only a speed-up. Without it the next start shows System until the read ends.
+  }
+}
