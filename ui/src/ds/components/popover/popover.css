@@ -24,9 +24,12 @@
   display: none;
 }
 
+/* A static panel sits in the page flow. A flex item still honours z-index, so reset it,
+   or the panel would paint above sticky bars. */
 .popover.static,
 .menu.static {
   position: static;
+  z-index: auto;
   box-shadow: var(--sh1);
 }
 
