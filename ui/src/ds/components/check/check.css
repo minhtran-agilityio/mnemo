@@ -1,0 +1,38 @@
+/* Checkbox and radio: native inputs tinted with the accent token. Tokens only. */
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--size-tap-sm);
+  color: var(--ink);
+  font-size: var(--text-lg);
+  cursor: pointer;
+}
+
+.check input {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.check input:disabled,
+.check input:disabled + span {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.check-group {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.check-group legend {
+  padding: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}

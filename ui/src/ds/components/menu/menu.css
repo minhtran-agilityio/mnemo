@@ -1,0 +1,49 @@
+/* Menu items. The panel itself is styled by popover.css. Tokens only. */
+.menu {
+  display: flex;
+  flex-direction: column;
+}
+
+.menu [role="menuitem"],
+.menu [role="menuitemcheckbox"] {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--size-row-menu);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu [role="menuitem"]:hover,
+.menu [role="menuitem"]:focus-visible,
+.menu .is-hover {
+  background: var(--head);
+  outline: none;
+  box-shadow: inset 0 0 0 var(--border-2) var(--accent);
+}
+
+.menu [role="menuitem"].danger {
+  color: var(--bad);
+}
+
+.menu [aria-disabled="true"] {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.menu hr {
+  margin: var(--space-1) 0;
+  border: 0;
+  border-top: var(--border-1) solid var(--line);
+}
+
+.menu kbd {
+  margin-left: auto;
+}
