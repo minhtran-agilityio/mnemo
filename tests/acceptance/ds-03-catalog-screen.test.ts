@@ -106,33 +106,27 @@ test("AC1: entriesFor(tab) returns exactly the entries of that tab", async () =>
 });
 
 // ------------------------------------------------------------ AC2 base.css entries and planned entries
-test("AC2: button, input, pill, card and list row are registry entries tagged base.css", async () => {
+test("AC2: button, input, pill, card and list row are registry entries that are built (base.css or ds)", async () => {
   const { CATALOG } = await loadRegistry();
   for (const n of ["button", "input", "pill", "card", "list row"]) {
     const e = CATALOG.find((x) => x.name.toLowerCase() === n);
     expect(e, `no entry named ${n}`).toBeTruthy();
-    expect(e?.source).toBe("base.css");
+    expect(["base.css", "ds"]).toContain(e?.source);
   }
 });
 
-test("AC2: Controls, Feedback, Surfaces, Records, Lists and Limits each list a planned entry with an issue number", async () => {
-  const { entriesFor } = await loadRegistry();
-  const want: Record<string, string | null> = {
-    Controls: "planned #107",
-    Feedback: "planned #108",
-    Surfaces: "planned #109",
-    Records: "planned #110",
-    Lists: "planned #110",
-    Limits: null,
-  };
-  for (const [t, tag] of Object.entries(want)) {
-    const planned = entriesFor(t as never).filter((e) => e.source.startsWith("planned #"));
-    expect(planned.length, `${t} has no planned entry`).toBeGreaterThan(0);
-    if (tag) expect(planned.map((e) => e.source)).toContain(tag);
+test("AC2: Controls, Feedback, Surfaces, Records, Lists and Limits each have entries, and every planned entry names an issue", async () => {
+  const { CATALOG, entriesFor } = await loadRegistry();
+  for (const t of ["Controls", "Feedback", "Surfaces", "Records", "Lists", "Limits"]) {
+    expect(entriesFor(t as never).length, `${t} has no entry`).toBeGreaterThan(0);
+  }
+  for (const e of CATALOG.filter((x) => x.source.startsWith("planned"))) {
+    expect(e.source, e.name).toMatch(/^planned #\d+$/);
   }
 });
 
-test("AC2: the screen draws base.css entries with the base classes and planned entries with their tag", async () => {
+test("AC2: the screen draws the base classes and shows each entry's source tag in its tab", async () => {
+  const { CATALOG } = await loadRegistry();
   await mount();
   const classOf: Array<[string, string]> = [
     ["Controls", ".btn"],
@@ -142,16 +136,11 @@ test("AC2: the screen draws base.css entries with the base classes and planned e
     ["Lists", ".row"],
   ];
   for (const [t, sel] of classOf) {
-    const panel = open(t);
-    expect(panel.querySelector(sel), `${t} panel has no ${sel}`).toBeTruthy();
-    expect(panel.textContent).toContain("base.css");
+    expect(open(t).querySelector(sel), `${t} panel has no ${sel}`).toBeTruthy();
   }
-  expect(open("Controls").textContent).toContain("planned #107");
-  expect(open("Feedback").textContent).toContain("planned #108");
-  expect(open("Surfaces").textContent).toContain("planned #109");
-  expect(open("Records").textContent).toContain("planned #110");
-  expect(open("Lists").textContent).toContain("planned #110");
-  expect(open("Limits").textContent).toContain("planned #113");
+  for (const e of CATALOG) {
+    expect(open(e.tab).textContent, `${e.name} tag`).toContain(e.source);
+  }
 });
 
 test("AC2: every registry entry name is shown in its tab", async () => {

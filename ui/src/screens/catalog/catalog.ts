@@ -465,6 +465,21 @@ export function renderCatalog(
     );
   }
 
+  // On the System theme the palette follows the OS at once, so the buttons and values follow too.
+  const os = root.ownerDocument.defaultView?.matchMedia?.(
+    "(prefers-color-scheme: dark)",
+  );
+  os?.addEventListener(
+    "change",
+    () => {
+      const set = root.getAttribute("data-theme");
+      if (set === "light" || set === "dark") return;
+      showTheme(effectiveTheme(root));
+      refreshTokens();
+    },
+    { signal },
+  );
+
   const switches = el(doc, "div", "cat-switches");
   switches.append(motion, themes);
   header.append(heading, switches);
@@ -552,12 +567,10 @@ function fillPanel(
   root: HTMLElement,
   onTokens: (refresh: () => void) => void,
 ): void {
-  for (const entry of entriesFor(tab)) {
-    panel.append(entryBlock(doc, entry));
-    if (tab === "Tokens") {
-      const [table, refresh] = tokenTable(doc, root);
-      panel.append(table);
-      onTokens(refresh);
-    }
+  for (const entry of entriesFor(tab)) panel.append(entryBlock(doc, entry));
+  if (tab === "Tokens") {
+    const [table, refresh] = tokenTable(doc, root);
+    panel.append(table);
+    onTokens(refresh);
   }
 }

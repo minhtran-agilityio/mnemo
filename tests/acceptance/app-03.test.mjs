@@ -113,7 +113,7 @@ test('AC2: base styles for page, card, button, input, pill and list row exist an
 
 test('AC2: a catalog page shows every base style', () => {
   const files = uiAll().filter((f) => /\.(html|ts)$/.test(f) && !/\.test\./.test(f));
-  const sample = files.filter((f) => /catalog|styleguide|style-guide|showcase|gallery|kit/i.test(relative(p('ui'), f)));
+  const sample = files.filter((f) => /screens\/catalog\/|styleguide|style-guide|showcase|gallery|kit/i.test(relative(p('ui'), f)));
   assert.ok(sample.length > 0, 'no catalog page under ui/ (name with catalog/styleguide/showcase/gallery)');
   const text = sample.map((f) => readFileSync(f, 'utf8')).join('\n');
   for (const [name, re] of [

@@ -135,26 +135,27 @@ async function start(): Promise<void> {
     const visit = ++routeCount;
     leaveScreen?.();
     leaveScreen = null;
-    // An unknown address opens Today in the router, so the sidebar marks Today here too.
-    sidebar.setCurrent(route.item.id);
     // The UI Catalog is dev only: a release build drops this branch and the catalog code with it.
+    // It is not a sidebar item, so no item is marked current while it is open.
     if (import.meta.env.DEV && window.location.hash === "#/ui-catalog") {
+      sidebar.setCurrent("");
       document.title = "UI Catalog - Mnemo";
-      import("./screens/catalog/catalog").then(
-        ({ renderCatalog }) => {
+      screen.textContent = "Loading the UI Catalog...";
+      import("./screens/catalog/catalog")
+        .then(({ renderCatalog }) => {
           if (visit !== routeCount) return;
           leaveScreen = renderCatalog(screen, {
             getTheme: () => currentTheme,
           });
-        },
-        (error: unknown) => {
+        })
+        .catch((error: unknown) => {
           console.error("could not load the UI Catalog:", error);
           if (visit === routeCount)
             screen.textContent = `The UI Catalog could not load. ${errorMessage(error)}`;
-        },
-      );
+        });
       return;
     }
+    sidebar.setCurrent(route.item.id);
     if (route.item.id === SETTINGS_ID) {
       renderSettings(screen, {
         getTheme: () => currentTheme,
