@@ -63,7 +63,7 @@ function declarations(css: string, header: string): string[] {
 
 test("the dark palette is the same for the attribute and for the OS rule", () => {
   const css = readFileSync(
-    resolve(process.cwd(), "ui/src/tokens.css"),
+    resolve(process.cwd(), "ui/src/ds/tokens.css"),
     "utf8",
   ).replace(/\/\*[\s\S]*?\*\//g, "");
   const byAttribute = declarations(css, ':root[data-theme="dark"]');

@@ -23,7 +23,7 @@ const walk = (d) =>
       });
 const uiFiles = () => walk(p('ui', 'src'));
 // The checks that the spike CSS sat in ui/ unchanged were retired by #10: the kanban now takes
-// its colours from ui/src/tokens.css, and tests/raw-colour.test.mjs guards raw colours in ui/.
+// its colours from ui/src/ds/tokens.css, and tests/raw-colour.test.mjs guards raw colours in ui/.
 const NESTED = process.env.MNEMO_NESTED ? 'nested run (inside npm test, which already runs vitest)' : false;
 const OLD_TESTS = ['ping-text.test.ts', 'version-text.test.ts'];
 const newUnitTests = () =>

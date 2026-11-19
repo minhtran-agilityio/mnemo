@@ -1,4 +1,4 @@
-/* Page layout for the app frame. Colours, type and spacing come from tokens.css. */
+/* Page layout for the app frame. Colours, type and spacing come from ds/tokens.css. */
 .app-frame {
   display: flex;
   min-height: 100vh;

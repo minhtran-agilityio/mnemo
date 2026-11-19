@@ -1,5 +1,5 @@
-/* Layout for the style sample only. Every look comes from base.css and tokens.css. */
-/* The page layout comes from .page in base.css. */
+/* Layout for the style sample only. Every look comes from ds/base.css and ds/tokens.css. */
+/* The page layout comes from .page in ds/base.css. */
 .sample-group {
   display: flex;
   flex-wrap: wrap;

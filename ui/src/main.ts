@@ -1,6 +1,5 @@
 import "./fonts";
-import "./tokens.css";
-import "./base.css";
+import "./ds";
 import "./style.css";
 import "./frame/sidebar.css";
 import "./screens/settings/settings.css";

@@ -488,7 +488,7 @@ test('AC4: Light and Dark ignore OS changes', UI, () =>
   }));
 
 test('AC4: tokens.css has attribute overrides for light and dark', () => {
-  const t = readFileSync(p('ui', 'src', 'tokens.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const t = readFileSync(p('ui', 'src', 'ds', 'tokens.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
   assert.match(t, /\[data-theme=["']?dark["']?\]/, 'no [data-theme=dark] rule in tokens.css');
   assert.match(t, /\[data-theme=["']?light["']?\]/, 'no [data-theme=light] rule in tokens.css');
   assert.match(t, /prefers-color-scheme\s*:\s*dark/i, 'the prefers-color-scheme rule must stay for System');

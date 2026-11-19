@@ -1,9 +1,5 @@
-/* The sidebar and the empty-state marks. Colours, type, spacing and radii come from tokens.css.
-   The two widths are this frame's own tokens, defined here because no other screen uses them. */
-:root {
-  --sidebar-width: 260px;
-  --sidebar-width-collapsed: 72px;
-}
+/* The sidebar and the empty-state marks. Colours, type, spacing and radii come from ds/tokens.css.
+   The two widths are tokens in ds/tokens.css. */
 
 .sidebar {
   position: sticky;
