@@ -1,0 +1,27 @@
+/* Trust label: marks what Mnemo made or did not check, so it never looks like the owner's words. */
+.trust {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--size-cite);
+  white-space: nowrap;
+}
+
+.trust-guess {
+  background: var(--tint-bad);
+  color: var(--guess-ink);
+}
+
+.trust-unv {
+  background: var(--tint-warn);
+  color: var(--warn-ink);
+}
+
+.trust-ai {
+  background: var(--tint-note);
+  color: var(--ink);
+}

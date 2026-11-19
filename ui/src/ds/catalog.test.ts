@@ -47,7 +47,7 @@ test("entry names are unique", () => {
 });
 
 test("the base styles are entries tagged base.css and their classes exist in the base style file", () => {
-  for (const name of ["button", "input", "pill", "card", "list row"]) {
+  for (const name of ["button", "input", "card", "list row"]) {
     const entry = CATALOG.find((e) => e.name === name);
     expect(entry?.source, name).toBe("base.css");
   }
@@ -58,10 +58,9 @@ test("the base styles are entries tagged base.css and their classes exist in the
   }
 });
 
-test("each tab after Foundations, except Tokens, has a planned entry with an issue number", () => {
+test("each tab after Foundations, except Tokens and Feedback, has a planned entry with an issue number", () => {
   const want: Record<string, string> = {
     Controls: `planned #${107}`,
-    Feedback: `planned #${108}`,
     Surfaces: `planned #${109}`,
     Records: `planned #${110}`,
     Lists: `planned #${110}`,

@@ -1,0 +1,40 @@
+/* Spinner: a ring that turns, always with words next to it. */
+.spinner {
+  display: inline-block;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  flex: none;
+  border-radius: 50%;
+  border: var(--border-2) solid currentColor;
+  border-right-color: transparent;
+  animation: spinner-turn 0.8s linear infinite;
+}
+
+.spinner-lg {
+  width: var(--size-icon-lg);
+  height: var(--size-icon-lg);
+}
+
+@keyframes spinner-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.busy-line {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+}
+
+.busy-line .spinner {
+  color: var(--accent);
+}
+
+/* Reduced motion: the ring stops turning; the words say that work is going on. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
