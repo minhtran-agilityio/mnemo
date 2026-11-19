@@ -160,7 +160,8 @@ test('AC3: the OFL licence text is copied into the repo', () => {
 const RAW_TEST = () => {
   const dir = join(ROOT, 'tests');
   const c = readdirSync(dir).filter((n) => n.endsWith('.test.mjs') && n !== 'version-sync.test.mjs');
-  const f = c.find((n) => /tokens\.css/.test(readFileSync(join(dir, n), 'utf8')));
+  // The raw-colour test by name first; other tests (the contrast test) also name tokens.css.
+  const f = c.find((n) => n === 'raw-colour.test.mjs') ?? c.find((n) => /tokens\.css/.test(readFileSync(join(dir, n), 'utf8')));
   assert.ok(f, 'no node test in tests/ that checks raw colours outside ui/src/ds/tokens.css');
   return f;
 };

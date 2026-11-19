@@ -9,6 +9,11 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+let failed = false;
+process.on("exit", () => {
+  if (failed) process.exitCode = 1;
+});
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CSS = readFileSync(join(ROOT, "ui", "src", "ds", "tokens.css"), "utf8").replace(
   /\/\*[\s\S]*?\*\//g,
@@ -73,7 +78,11 @@ const failures = (palette) => {
 
 for (const [mode, palette] of [["light", light], ["dark", dark]]) {
   test(`${mode}: text/surface pairs and control borders meet WCAG AA`, () => {
-    assert.deepEqual(failures(palette), [], `pairs below AA in ${mode}: report to the owner, do not change the palette`);
+    const found = failures(palette);
+    // A nested `node --test` that inherits NODE_TEST_CONTEXT ignores test failures in its exit code,
+    // so also set the exit code ourselves (as tests/raw-colour.test.mjs does).
+    if (found.length) failed = true;
+    assert.deepEqual(found, [], `pairs below AA in ${mode}: report to the owner, do not change the palette`);
   });
 }
 

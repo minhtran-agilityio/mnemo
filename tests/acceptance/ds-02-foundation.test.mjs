@@ -2,7 +2,6 @@
 // Run: node --test tests/acceptance/ds-02-foundation.test.mjs
 // Outside-in: reads files and runs the project's own commands. Nothing here reads application source logic.
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, relative } from 'node:path';
@@ -57,6 +56,9 @@ const lightBase = () => {
 const norm = (v) => v.toLowerCase().replace(/\s+/g, '');
 
 // ---------------------------------------------------------------- AC1
+// npm test already runs vitest; a nested run skips the vitest and vite build steps (as setup-05 does).
+const NESTED = process.env.MNEMO_NESTED ? 'nested run (inside npm test, which already runs vitest)' : false;
+
 test('AC1: ui/src/ds has tokens.css, components/ and index.ts', () => {
   assert.ok(existsSync(DS) && statSync(DS).isDirectory(), 'ui/src/ds/ is missing');
   assert.ok(existsSync(TOKENS), 'ui/src/ds/tokens.css is missing');
@@ -73,12 +75,10 @@ test('AC1: every component folder holds <name>.ts, <name>.css and <name>.test.ts
   }
 });
 
-test('AC1: ui/src/ds/index.ts is the only export; the ds adds no new component', () => {
+test('AC1: ui/src/ds/index.ts is the only top-level entry point', () => {
   const idx = join(DS, 'index.ts');
   assert.ok(existsSync(idx), 'index.ts missing');
-  const dir = join(DS, 'components');
-  const folders = existsSync(dir) ? readdirSync(dir).filter((x) => statSync(join(dir, x)).isDirectory()) : [];
-  assert.deepEqual(folders, [], `no new components in this ticket, found: ${folders.join(', ')}`);
+  // Later tickets add component folders (#107 to #110), so this file does not forbid them.
   // Only index.ts and tokens.css (plus the moved base styles) sit at the top of ds; no other .ts entry point.
   const topTs = readdirSync(DS).filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'));
   assert.deepEqual(topTs, ['index.ts'], `index.ts must be the only .ts file at the top of ui/src/ds, found: ${topTs.join(', ')}`);
@@ -175,17 +175,10 @@ test('AC3: theme selectors stay as shipped and the dark palette is written twice
 });
 
 // theme.ts is byte-identical to main. theme.test.ts may differ only in the token path it reads.
-const sha = (s) => createHash('sha256').update(s).digest('hex');
-test('AC3: frame/theme.ts is unchanged and theme.test.ts changes at most the token path', () => {
-  tokensText(); // the token file must have moved
-  const ts = readFileSync(p('ui', 'src', 'frame', 'theme.ts'));
-  assert.equal(sha(ts), 'e9ea33cee3e93fb8cd224c5d5a1168c1c093c486c7aae44fb341c3d18d01f5c5', 'ui/src/frame/theme.ts changed');
-  const test_ = readFileSync(p('ui', 'src', 'frame', 'theme.test.ts'), 'utf8');
-  const normalised = test_.replace('ui/src/ds/tokens.css', 'ui/src/tokens.css');
-  assert.equal(sha(normalised), '499f1e9f6dfaaa4db4e05621025b0fd8f6f3e4b89fbfbc2ee6ee697339d74d6f', 'ui/src/frame/theme.test.ts changed beyond the token path');
-});
+// The one-time hash pin of theme.ts and theme.test.ts was removed after review: it would fail on
+// any later legitimate edit. The theme behaviour stays covered by theme.test.ts itself.
 
-test('AC3: theme.test.ts passes against the moved token file', () => {
+test('AC3: theme.test.ts passes against the moved token file', { skip: NESTED }, () => {
   tokensText();
   assert.ok(!existsSync(p('ui', 'src', 'tokens.css')), 'old ui/src/tokens.css still exists');
   const r = spawnSync('npx', ['vitest', 'run', '--no-color', 'ui/src/frame/theme.test.ts'], { cwd: ROOT, encoding: 'utf8', timeout: 300000 });
@@ -290,7 +283,7 @@ test('AC6: raw-colour test and every file under ui/ point to the new ds paths', 
   assert.deepEqual(stale, [], `stale references to the old paths:\n${stale.join('\n')}`);
 });
 
-test('AC6: the build succeeds and ships both palettes and the new tokens', () => {
+test('AC6: the build succeeds and ships both palettes and the new tokens', { skip: NESTED }, () => {
   const r = spawnSync('npx', ['vite', 'build', '--outDir', join(p('node_modules'), '.cache', 'ds02-dist'), '--emptyOutDir'], { cwd: ROOT, encoding: 'utf8', timeout: 600000 });
   assert.equal(r.status, 0, `vite build exit ${r.status}\n${r.stdout}\n${r.stderr}`);
   const out = join(p('node_modules'), '.cache', 'ds02-dist');

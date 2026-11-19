@@ -1,4 +1,4 @@
-/* The Settings screen. Colours, type, spacing and radii come from tokens.css. */
+/* The Settings screen. Colours, type, spacing and radii come from ds/tokens.css. */
 .settings-head {
   display: flex;
   flex-direction: column;

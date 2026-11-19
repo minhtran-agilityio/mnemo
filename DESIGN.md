@@ -58,7 +58,7 @@ The owner approved these with the UI Catalog prototype v3 (https://claude.ai/art
 | `--control-height-primary` | 44px | Primary buttons |
 | `--control-edge` | light `#80858f`, dark `#6b7184` | Border of text inputs, textarea, select, search, filter chips and tag input. Cards, dividers and rows keep `--line` |
 | `--on-bad` | light `#ffffff`, dark `#0b1033` | Text on a danger button |
-| `--scrim` | `color-mix(in srgb, var(--player) 55%, transparent)` | Dialog backdrop. Support in WebKitGTK on Ubuntu 22.04 is **Unverified** |
+| `--scrim` | `color-mix(in srgb, var(--player) 55%, transparent)` | Dialog backdrop. Support in WebKitGTK on Ubuntu 22.04 is **Unverified**; where `color-mix()` is not understood, `tokens.css` falls back to `--player` at 55% for each theme |
 
 Proposed in the prototype and settled in #104 (values still **Unverified** in a real window): motion (`--dur-fast` 120ms, `--dur-base` 200ms, `--dur-slow` 1200ms), layers (`--z-sticky` 20, `--z-popover` 50, `--z-toast` 200), icon sizes (`--icon-sm` 16px, `--icon-md` 20px), border widths (`--border-1` 1px, `--border-2` 2px).
 
@@ -72,7 +72,7 @@ Rules:
 
 - Primary buttons are 44px tall (`--control-height-primary`). Other controls are `--control-height` (40px). Small buttons inside a row are 32px (`calc(var(--control-height) - var(--space-2))`). Check: Review in the UI Catalog.
 - Each pill tint also sets its text colour: info uses `--chip-ink`, warn `--warn-ink`, bad `--guess-ink`, the others `--ink`. Check: Review; the contrast test in #104.
-- Icons come from one set: Lucide (ISC licence; the licence check is **Unverified** until #104), bundled locally. Check: Review.
+- Icons come from one set: Lucide (ISC licence, text in `licenses/LUCIDE-LICENSE.txt`, decision in `docs/decisions/icons.md`), bundled locally. Check: Review.
 - The smallest window is 800 by 560 px, so the open sidebar (260px) leaves 540px for the page. It is set as `minWidth` and `minHeight` in `src-tauri/tauri.conf.json` by #113. The start size stays 900 by 640. Check: Review of the config; the Limits tab.
 - The sidebar stays as shipped with #11: it collapses only when the owner clicks, the saved `sidebar_collapsed` choice always wins, it never folds by itself, and it shows no counts or badges. Check: Test (`tests/acceptance/app-02.test.mjs`); Review.
 
