@@ -2,7 +2,7 @@
 // meet WCAG 2.2 AA (4.5:1 for text, 3:1 for control borders) in light and dark.
 // It reads ui/src/ds/tokens.css, so a palette change is checked with no edit here.
 // A failing pair is reported by name. Do not change the palette to make it pass: ask the owner.
-// Run: node --test tests/contrast.test.mjs   (runs under npm test and npm run check)
+// Run: node --test tests/wcag-contrast.test.mjs   (runs under npm test and npm run check)
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
