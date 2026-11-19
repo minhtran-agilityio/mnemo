@@ -9,7 +9,7 @@ Related files: `.claude/rules/design.md` (UX and accessibility rules), `.claude/
 ## 1. Style principles
 
 1. **Keep the prototype look.** The visual source of truth is the prototype's default pair: light (`.th.s-v1`) and dark (`.th.s-v1.t-dark`). Check: Review against the prototype (https://claude.ai/artifact/77KLF6DA2WFCMescbP92Vf).
-2. **No new palette, font or component style** without a change to this file in the same pull request. Check: Review. Any diff to `ui/src/tokens.css` colour values or to font imports in `ui/src/fonts.ts` must also change `DESIGN.md`.
+2. **No new palette, font or component style** without a change to this file in the same pull request. Check: Review. Any diff to `ui/src/ds/tokens.css` colour values or to font imports in `ui/src/fonts.ts` must also change `DESIGN.md`.
 3. **Light and dark both work.** The app follows the system through `prefers-color-scheme`, unless the owner picks Light or Dark in Settings (the `data-theme` attribute on the root). Check: Review each screen in both modes; Test (`ui/src/frame/theme.test.ts`).
 4. **Calm and plain.** No decorative gradients, glows, glass effects or stock "AI" styling. Check: Review.
 5. **One primary action per view.** Secondary actions look quieter. Check: Review.
@@ -21,20 +21,20 @@ Related files: `.claude/rules/design.md` (UX and accessibility rules), `.claude/
 
 | Item | Value | Where it lives |
 | --- | --- | --- |
-| Colours, both themes | Prototype default light and dark pair | `ui/src/tokens.css` (the only file with colour values) |
+| Colours, both themes | Prototype default light and dark pair | `ui/src/ds/tokens.css` (the only file with colour values) |
 | Body font | Source Sans 3 (400, 600, 700) | `ui/src/fonts.ts`, package `@fontsource/source-sans-3` |
 | Mono font | JetBrains Mono (400, 600) | `ui/src/fonts.ts`, package `@fontsource/jetbrains-mono` |
-| Base styles | page, card, button, input, pill, list row | `ui/src/base.css` |
+| Base styles | page, card, button, input, pill, list row | `ui/src/ds/base.css` |
 
 Rules:
 
 - Fonts are bundled locally. No remote font link and no CDN script. Check: Review; `grep -rn "fonts.googleapis" ui/` prints nothing.
-- No raw colour value (hex, `rgb`, `hsl`, `oklch`, named colour) outside `ui/src/tokens.css`. Check: Test (`tests/raw-colour.test.mjs`, runs in `npm test`).
+- No raw colour value (hex, `rgb`, `hsl`, `oklch`, named colour) outside `ui/src/ds/tokens.css`. Check: Test (`tests/raw-colour.test.mjs`, runs in `npm test`).
 - Every size, radius, shadow and spacing value in a component rule is a `var(--token)`. Check: Review. A later test may enforce it.
 
 ## 3. Token groups
 
-All tokens are CSS custom properties on `:root` in `ui/src/tokens.css`. Dark values override the colour tokens twice, as shipped with #12: in `:root[data-theme="dark"]` and in `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) }`. These selectors stay as they are. A token that exists in light must exist in dark. Check: Review of the diff; Test (`ui/src/frame/theme.test.ts` checks the two dark blocks are equal).
+All tokens are CSS custom properties on `:root` in `ui/src/ds/tokens.css`. Dark values override the colour tokens twice, as shipped with #12: in `:root[data-theme="dark"]` and in `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) }`. These selectors stay as they are. A token that exists in light must exist in dark. Check: Review of the diff; Test (`ui/src/frame/theme.test.ts` checks the two dark blocks are equal).
 
 | Group | Tokens | Use |
 | --- | --- | --- |
@@ -47,11 +47,11 @@ All tokens are CSS custom properties on `:root` in `ui/src/tokens.css`. Dark val
 | Spacing | `--space-1` to `--space-6` (4, 8, 12, 16, 20, 32 px) | Padding, gap, margin |
 | Radius | `--radius-sm`, `--radius-md`, `--radius-lg`, `--radius-pill` | Corners |
 | Control | `--control-height`, `--focus-ring` | Click target height, focus ring width |
-| Sidebar | `--sidebar-width` (260px), `--sidebar-width-collapsed` (72px) | Sidebar width open and collapsed. Today in `ui/src/frame/sidebar.css`; #104 moves them into the token file with the same names |
+| Sidebar | `--sidebar-width` (260px), `--sidebar-width-collapsed` (72px) | Sidebar width open and collapsed. Moved from `ui/src/frame/sidebar.css` into the token file in #104, same names |
 
-### Approved tokens, not yet in `ui/src/tokens.css`
+### Approved tokens added in #104
 
-The owner approved these with the UI Catalog prototype v3 (https://claude.ai/artifact/MbAwSzt4GxXmzTFevfAcHb). #104 adds them. Until then they are **Planned**.
+The owner approved these with the UI Catalog prototype v3 (https://claude.ai/artifact/MbAwSzt4GxXmzTFevfAcHb). #104 added them to `ui/src/ds/tokens.css`.
 
 | Token | Value | Use |
 | --- | --- | --- |
@@ -60,12 +60,12 @@ The owner approved these with the UI Catalog prototype v3 (https://claude.ai/art
 | `--on-bad` | light `#ffffff`, dark `#0b1033` | Text on a danger button |
 | `--scrim` | `color-mix(in srgb, var(--player) 55%, transparent)` | Dialog backdrop. Support in WebKitGTK on Ubuntu 22.04 is **Unverified** |
 
-Proposed in the prototype, values **Unverified**, settled in #104: motion (`--dur-fast` 120ms, `--dur-base` 200ms, `--dur-slow` 1200ms), layers (`--z-sticky` 20, `--z-popover` 50, `--z-toast` 200), icon sizes (`--icon-sm` 16px, `--icon-md` 20px), border widths (`--border-1` 1px, `--border-2` 2px).
+Proposed in the prototype and settled in #104 (values still **Unverified** in a real window): motion (`--dur-fast` 120ms, `--dur-base` 200ms, `--dur-slow` 1200ms), layers (`--z-sticky` 20, `--z-popover` 50, `--z-toast` 200), icon sizes (`--icon-sm` 16px, `--icon-md` 20px), border widths (`--border-1` 1px, `--border-2` 2px).
 
 Rules:
 
 - Add a token before using a new value. A token needs a name from the group above or a new group row in this file. Check: Review.
-- Token names in this table match the names in `ui/src/tokens.css`. Check: Review; `grep -o -- "--[a-z0-9-]*:" ui/src/tokens.css | sort -u` lists the names to compare.
+- Token names in this table match the names in `ui/src/ds/tokens.css`. Check: Review; `grep -o -- "--[a-z0-9-]*:" ui/src/ds/tokens.css | sort -u` lists the names to compare.
 - Connector brand tokens (`--app-*`) are used only for connector badges. Check: Review.
 
 ### Sizes, icons and fixed choices
@@ -83,7 +83,7 @@ Components and classes:
 1. Class names are lowercase kebab-case: `btn`, `btn-primary`, `row-title`. Check: Review; no camelCase or underscores in `ui/src/**/*.css` class selectors.
 2. A component has a base class named after the component (`btn`, `card`, `pill`, `row`). A variant adds a suffix with a hyphen (`pill-warn`). A part adds the part name after the component (`row-title`, `row-meta`). Check: Review.
 3. Name by role, not by look. Use `pill-warn`, not `pill-yellow`. No colour word, size in pixels or position word in a class name. Check: Review.
-4. A component lives in its own folder in `ui/src/ds/components/<name>/` (`<name>.ts`, `<name>.css`, `<name>.test.ts`). Check: Review. **Planned**: the folder is created by #104.
+4. A component lives in its own folder in `ui/src/ds/components/<name>/` (`<name>.ts`, `<name>.css`, `<name>.test.ts`). Check: Review. The folder exists since #104.
 5. A state is a modifier or an attribute, never a new component: `aria-busy`, `aria-invalid`, `disabled`, or a class `is-<state>` (`is-empty`, `is-loading`). Check: Review.
 6. Token names: lowercase kebab-case, group prefix first (`--text-`, `--space-`, `--radius-`, `--tint-`, `--app-`). Check: Review.
 7. UI labels name the action ("Save link"), not the mechanism ("Submit"). The same term is used for the same thing everywhere. Check: Review.
@@ -108,8 +108,8 @@ Also required for every interactive component: default, hover, focus-visible, ac
 
 | Path | Role |
 | --- | --- |
-| `ui/src/tokens.css` | Token values. The only file with colour values |
-| `ui/src/base.css` | Base styles that exist today |
+| `ui/src/ds/tokens.css` | Token values. The only file with colour values |
+| `ui/src/ds/base.css` | Base styles |
 | `ui/src/ds/` | The design system. **The only place that defines visual styles** (colour, font, size, spacing, radius, shadow, border) for a component |
 | `ui/src/screens/**` | Layout only: where parts go, grid, flex, gap, which part to show. No visual style of its own |
 | `ui/src/frame/`, `ui/src/screens/settings/`, `ui/src/screens/kanban/`, `ui/src/style.css` | Shipped before this contract and still hold their own CSS. They are known exceptions: #109 moves the sidebar into `ui/src/ds/`, #111 moves the rest and removes the exceptions |
@@ -122,7 +122,7 @@ Rules:
 4. `ui/src/ds/` changes only in a pull request that comes from a UI component request issue, and that updates the UI Catalog in the same pull request. Check: Review.
 5. Raw colour values stay out of `ui/src/ds/` and `ui/src/screens/**`. Check: Test (`tests/raw-colour.test.mjs`).
 
-Until #104 creates `ui/src/ds/`, the existing base styles in `ui/src/base.css` are the reference. This file does not move them.
+The base styles live in `ui/src/ds/base.css` (moved in #104).
 
 ## 7. UI Catalog
 

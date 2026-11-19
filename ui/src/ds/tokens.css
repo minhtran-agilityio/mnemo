@@ -38,6 +38,8 @@
   --good: #7fd6a1;
   --good-soft: #183a27;
   --hl: #ffe45c;
+  --on-bad: #0b1033;
+  --control-edge: #6b7184;
 
   --tint-info: #232a4d;
   --tint-note: #33284a;
@@ -80,6 +82,9 @@
   --good: #157a3e;
   --good-soft: #ddf3e4;
   --hl: #ffe45c;
+  --on-bad: #ffffff;
+  /* Border of text inputs, textarea, select, search, filter chips and tag input (3:1 on surfaces). */
+  --control-edge: #80858f;
 
   /* Colour: soft tints for pills and columns (prototype --o-*) */
   --tint-info: #e6eaff;
@@ -108,6 +113,21 @@
   --sh2-far: rgba(24, 28, 45, 0.24);
   --sh2: 0 2px 4px var(--sh2-near), 0 16px 34px -14px var(--sh2-far);
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 1200ms;
+
+  /* Dialog backdrop. color-mix() in WebKitGTK on Ubuntu 22.04 is Unverified, so the first
+     declaration is a fallback that needs no color-mix. A custom property accepts any text, so
+     the @supports rule below puts the fallback back where color-mix() is not understood. */
+  --scrim: rgba(5, 6, 10, 0.55);
+  /* biome-ignore lint/suspicious/noDuplicateCustomProperties: the line above is the fallback */
+  --scrim: color-mix(in srgb, var(--player) 55%, transparent);
+
+  /* Layers */
+  --z-sticky: 20;
+  --z-popover: 50;
+  --z-toast: 200;
 
   /* Type */
   --font-body:
@@ -141,7 +161,24 @@
 
   /* Control sizes (click targets) */
   --control-height: 40px;
+  --control-height-primary: 44px;
   --focus-ring: 3px;
+
+  /* Icon sizes and border widths */
+  --icon-sm: 16px;
+  --icon-md: 20px;
+  --border-1: 1px;
+  --border-2: 2px;
+
+  /* Sidebar width, open and collapsed */
+  --sidebar-width: 260px;
+  --sidebar-width-collapsed: 72px;
+}
+
+@supports not (color: color-mix(in srgb, red, blue)) {
+  :root:root {
+    --scrim: rgba(5, 6, 10, 0.55);
+  }
 }
 
 :root[data-theme="light"] {
@@ -174,6 +211,8 @@
     --good: #7fd6a1;
     --good-soft: #183a27;
     --hl: #ffe45c;
+    --on-bad: #0b1033;
+    --control-edge: #6b7184;
 
     --tint-info: #232a4d;
     --tint-note: #33284a;
