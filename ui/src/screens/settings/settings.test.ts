@@ -181,3 +181,18 @@ test("clicking a section row keeps keyboard focus on that row", () => {
   expect(document.activeElement).toBe(row);
   expect(row.getAttribute("aria-current")).toBe("true");
 });
+
+test("a good save while Settings is open clears an earlier detached failure", async () => {
+  renderSettings(container, {
+    ...deps(),
+    onDetachedSave: (f) => detached.push(f),
+  });
+  await tick();
+  detached.length = 0;
+  pick("Light");
+  await tick();
+  release[0]?.();
+  await tick();
+  await tick();
+  expect(detached).toEqual([null]);
+});

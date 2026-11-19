@@ -13,7 +13,8 @@ export interface SettingsDeps {
   saveTheme(theme: Theme): Promise<void>;
   /**
    * Hears a save result when the owner has left Settings, so the line has no screen to show on.
-   * `null` means the save worked. The caller shows the text somewhere that is still on screen.
+   * `null` means a save worked, and clears an earlier failure line. The caller shows the text
+   * somewhere that is still on screen.
    */
   onDetachedSave?(failure: string | null): void;
 }
@@ -168,7 +169,8 @@ export function renderSettings(
         await deps.saveTheme(theme);
         status.hidden = true;
         status.textContent = "";
-        if (!status.isConnected) deps.onDetachedSave?.(null);
+        // A failure shown after the owner left Settings is cleared by any later good save.
+        deps.onDetachedSave?.(null);
       } catch (error) {
         console.error("could not save the theme:", error);
         const text = `Mnemo could not save the theme, so it applies only until Mnemo quits. ${errorMessage(error)}`;
