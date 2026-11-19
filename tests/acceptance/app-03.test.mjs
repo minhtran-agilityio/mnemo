@@ -24,7 +24,7 @@ const uiAll = () => walk(p('ui'));
 const TOKENS = p('ui', 'src', 'ds', 'tokens.css');
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '');
 const tokens = () => {
-  assert.ok(existsSync(TOKENS), 'ui/src/tokens.css is missing');
+  assert.ok(existsSync(TOKENS), 'ui/src/ds/tokens.css is missing');
   return strip(readFileSync(TOKENS, 'utf8'));
 };
 const otherCss = () => uiAll().filter((f) => f.endsWith('.css') && f !== TOKENS);
@@ -161,7 +161,7 @@ const RAW_TEST = () => {
   const dir = join(ROOT, 'tests');
   const c = readdirSync(dir).filter((n) => n.endsWith('.test.mjs') && n !== 'version-sync.test.mjs');
   const f = c.find((n) => /tokens\.css/.test(readFileSync(join(dir, n), 'utf8')));
-  assert.ok(f, 'no node test in tests/ that checks raw colours outside ui/src/tokens.css');
+  assert.ok(f, 'no node test in tests/ that checks raw colours outside ui/src/ds/tokens.css');
   return f;
 };
 const sandbox = () => {
@@ -199,7 +199,7 @@ for (const [label, file, body] of [
   });
 }
 
-test('AC4: the raw-colour test allows colours inside ui/src/tokens.css', () => {
+test('AC4: the raw-colour test allows colours inside ui/src/ds/tokens.css', () => {
   const name = RAW_TEST();
   const d = sandbox();
   writeFileSync(join(d, 'ui', 'src', 'ds', 'tokens.css'), readFileSync(TOKENS, 'utf8') + '\n:root { --zz-test: #123456; }\n');
