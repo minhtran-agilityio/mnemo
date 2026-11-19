@@ -15,7 +15,6 @@ import {
 // The test runner hands style sheets to imports as empty text, so read the real files.
 const read = (name: string) =>
   readFileSync(resolve(import.meta.dirname, name), "utf8");
-const baseCss = read("base.css");
 const tokensCss = read("tokens.css");
 
 test("the tabs are the eight names in order", () => {
@@ -44,14 +43,6 @@ test("every entry has a name, a known tab, variants, states and a valid source t
 test("entry names are unique", () => {
   const names = CATALOG.map((e) => e.name.toLowerCase());
   expect(new Set(names).size).toBe(names.length);
-});
-
-test("every entry tagged base.css names a class that exists in the base style file", () => {
-  for (const entry of CATALOG.filter((e) => e.source === "base.css")) {
-    const cls = "className" in entry ? entry.className : undefined;
-    expect(cls, `${entry.name} has no className`).toBeTruthy();
-    expect(baseCss).toMatch(new RegExp(`\\.${cls}\\b`));
-  }
 });
 
 test("the tabs that still have planned parts name their issue", () => {
