@@ -1,3 +1,54 @@
 /* UI Catalog styles of the controls tab: only the rows of this tab (examples, captions, layout of the
    samples). A real part's own styles live in ui/src/ds/components/<name>/<name>.css, not here.
    Tokens only. Scope every rule to .ui-catalog. Only the controls tab's agent edits this file. */
+
+.ui-catalog .cat-hstack {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.ui-catalog .cat-hint {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.ui-catalog .cat-small {
+  margin: 0;
+  font-size: var(--text-md);
+}
+
+.ui-catalog .cat-tip-anchor {
+  position: relative;
+  display: inline-block;
+}
+
+/* The tooltip sample: shown while the button has the pointer or the keyboard focus. */
+.ui-catalog .cat-tip {
+  position: absolute;
+  bottom: calc(100% + var(--space-2));
+  left: 50%;
+  z-index: var(--z-popover);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.ui-catalog .cat-tip-anchor:hover .cat-tip,
+.ui-catalog .cat-tip-anchor:focus-within .cat-tip {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-catalog .cat-tip {
+    transition: none;
+  }
+}
