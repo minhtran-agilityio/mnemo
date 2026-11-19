@@ -46,3 +46,37 @@ test("the remove button removes its tag and returns focus to the box", () => {
   expect(t.tags()).toEqual(["b"]);
   expect(document.activeElement).toBe(t.input);
 });
+
+test("Enter and Backspace do nothing while an input method is composing", () => {
+  const onChange = vi.fn();
+  const t = createTagInput(document, { tags: ["rust"], onChange });
+  t.input.value = "viet";
+  t.input.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "Enter",
+      isComposing: true,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  t.input.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "Enter",
+      keyCode: 229,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  expect(t.tags()).toEqual(["rust"]);
+  expect(t.input.value).toBe("viet");
+  t.input.value = "";
+  t.input.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "Backspace",
+      isComposing: true,
+      bubbles: true,
+    }),
+  );
+  expect(t.tags()).toEqual(["rust"]);
+  expect(onChange).not.toHaveBeenCalled();
+});

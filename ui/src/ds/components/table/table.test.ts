@@ -67,3 +67,25 @@ test("a start sort is applied", () => {
     "descending",
   );
 });
+
+test("a numeric column sorts text that is not a number as the lowest, and a short row does not crash", () => {
+  const t = createTable(document, {
+    label: "Links",
+    columns: [{ label: "Title" }, { label: "Opens", numeric: true }],
+    rows: [
+      [{ text: "a" }, { text: "1,200" }],
+      [{ text: "b" }, { text: "5" }],
+      [{ text: "c" }, { text: "—" }],
+      [{ text: "d" }],
+      [{ text: "e" }, { text: "30" }],
+    ],
+    sort: { column: 1, direction: "ascending" },
+  });
+  const order = firstCol(t);
+  expect(order.slice(-2)).toEqual(["b", "e"]);
+  expect(new Set(order.slice(0, 3))).toEqual(new Set(["a", "c", "d"]));
+  t.querySelectorAll("th button")[1].dispatchEvent(
+    new MouseEvent("click", { bubbles: true }),
+  );
+  expect(firstCol(t).slice(0, 2)).toEqual(["e", "b"]);
+});

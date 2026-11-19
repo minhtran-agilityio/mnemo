@@ -6,6 +6,7 @@ export * from "./chip/chip";
 export * from "./field/field";
 export * from "./input/input";
 export * from "./kbd/kbd";
+export * from "./link/link";
 export * from "./menu/menu";
 export * from "./popover/popover";
 export * from "./segmented/segmented";

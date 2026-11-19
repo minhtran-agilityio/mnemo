@@ -87,6 +87,8 @@ export interface MenuOptions {
   readonly label: string;
   readonly items: readonly MenuEntry[];
   readonly onChoose?: (item: MenuItem) => void;
+  /** When it aborts, an open menu closes and its document listener goes. */
+  readonly signal?: AbortSignal;
 }
 
 /** A button that opens a menu. */
@@ -106,6 +108,7 @@ export function createMenu(doc: Document, options: MenuOptions): Popover {
     trigger,
     panel,
     haspopup: "menu",
+    signal: options.signal,
     firstFocus: () => enabled(panel)[0] ?? null,
   });
   return pop;

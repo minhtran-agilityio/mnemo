@@ -479,6 +479,7 @@ export function renderCatalog(
         event.key.toLowerCase() === "k"
       ) {
         event.preventDefault();
+        if (doc.querySelector("dialog[open]")) return;
         if (!finder.isOpen()) finder.open();
         return;
       }

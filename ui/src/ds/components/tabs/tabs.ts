@@ -34,8 +34,10 @@ export function createTabs(options: TabsOptions): Tabs {
   list.setAttribute("aria-label", options.label);
   const prefix = uid("tab");
   const buttons = new Map<string, HTMLButtonElement>();
-  let current =
-    options.selected ?? options.tabs.find((t) => !t.disabled)?.id ?? "";
+  const firstEnabled = options.tabs.find((t) => !t.disabled)?.id ?? "";
+  const wanted = options.tabs.find((t) => t.id === options.selected);
+  // A selected tab that is disabled (or unknown) cannot be reached: start on the first enabled one.
+  let current = wanted && !wanted.disabled ? wanted.id : firstEnabled;
 
   const enabled = () =>
     options.tabs.filter((t) => !t.disabled).map((t) => t.id);

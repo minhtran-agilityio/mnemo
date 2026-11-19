@@ -7,6 +7,7 @@
 import { tokensOfKind } from "../../ds/catalog";
 import {
   blend,
+  compositeLayers,
   contrastOf,
   parseColour,
   type Rgba,
@@ -69,20 +70,25 @@ export interface Inspector {
   setOn(on: boolean): void;
 }
 
-/** The first ancestor (or the node) with a mostly opaque background, and that colour. */
+/**
+ * What an element sits on: its background layers composited from the nearest opaque ancestor
+ * outward, so a semi-transparent layer in Dark is not blended over white. `node` is the nearest
+ * element with any background, for the token lookup.
+ */
 function groundOf(node: Element | null): { node: Element; colour: Rgba } {
   const doc = (node ?? document.body).ownerDocument;
+  const layers: Rgba[] = [];
+  let first: Element | null = null;
   for (let n = node; n; n = n.parentElement) {
     const c = parseColour(getComputedStyle(n).backgroundColor);
-    if (c && c[3] > 0.5)
-      return { node: n, colour: blend(c, [255, 255, 255, 1]) };
+    if (!c || c[3] <= 0) continue;
+    first ??= n;
+    layers.push(c);
+    if (c[3] >= 1) break;
   }
-  const body = doc.body;
-  const c = parseColour(getComputedStyle(body).backgroundColor);
-  return {
-    node: body,
-    colour: c ? blend(c, [255, 255, 255, 1]) : [255, 255, 255, 1],
-  };
+  const page: Rgba = [255, 255, 255, 1];
+  const colour = compositeLayers(layers, page);
+  return { node: first ?? doc.body, colour };
 }
 
 /** The colour token whose value in the theme on screen equals `colour`, or null. */
@@ -233,15 +239,19 @@ export function createInspector(
     const vh = view?.innerHeight ?? 0;
     box.hidden = false;
     card.hidden = false;
-    const grow = 3;
+    // Spacing comes from the tokens, read as pixels from the page as drawn.
+    const rootStyle = getComputedStyle(doc.documentElement);
+    const px = (name: string) =>
+      Number.parseFloat(rootStyle.getPropertyValue(name)) || 0;
+    const grow = px("--focus-ring");
     box.style.left = `${rect.left - grow}px`;
     box.style.top = `${rect.top - grow}px`;
     box.style.width = `${rect.width + grow * 2}px`;
     box.style.height = `${rect.height + grow * 2}px`;
     const cw = card.offsetWidth;
     const ch = card.offsetHeight;
-    const gap = 10;
-    const margin = 8;
+    const gap = px("--space-3");
+    const margin = px("--space-2");
     const x = Math.max(margin, Math.min(rect.left, vw - cw - margin));
     let y = rect.bottom + gap;
     if (y + ch > vh - margin) y = Math.max(margin, rect.top - ch - gap);

@@ -24,6 +24,16 @@ export interface TableOptions {
   readonly sort?: { column: number; direction: "ascending" | "descending" };
 }
 
+/** Orders two numeric sort values; a value that is not a finite number counts as the lowest. */
+function compareNumbers(x: string | number, y: string | number): number {
+  const a = typeof x === "number" ? x : Number(x);
+  const b = typeof y === "number" ? y : Number(y);
+  const fa = Number.isFinite(a);
+  const fb = Number.isFinite(b);
+  if (!fa || !fb) return fa === fb ? 0 : fa ? 1 : -1;
+  return a - b;
+}
+
 export function createTable(
   doc: Document,
   options: TableOptions,
@@ -37,7 +47,8 @@ export function createTable(
   const head = table.createTHead().insertRow();
   const body = table.createTBody();
   const ths: HTMLTableCellElement[] = [];
-  const sortValue = (cell: TableCell) => cell.sort ?? cell.text;
+  const cellSort = (cell: TableCell | undefined) =>
+    cell ? (cell.sort ?? cell.text) : "";
   const data = options.rows.map((cells) => ({
     cells,
     el: null as HTMLTableRowElement | null,
@@ -69,10 +80,10 @@ export function createTable(
   const sortBy = (column: number, dir: "ascending" | "descending") => {
     const numeric = options.columns[column]?.numeric === true;
     const sorted = [...data].sort((a, b) => {
-      const x = sortValue(a.cells[column]);
-      const y = sortValue(b.cells[column]);
+      const x = cellSort(a.cells[column]);
+      const y = cellSort(b.cells[column]);
       const r = numeric
-        ? Number(x) - Number(y)
+        ? compareNumbers(x, y)
         : String(x).localeCompare(String(y), "vi");
       return dir === "ascending" ? r : -r;
     });

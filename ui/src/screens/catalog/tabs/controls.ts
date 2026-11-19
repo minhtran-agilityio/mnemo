@@ -11,6 +11,7 @@ import {
   createChip,
   createField,
   createKbd,
+  createLink,
   createMenu,
   createMenuPanel,
   createMultiSelect,
@@ -338,6 +339,7 @@ export const renderControls: TabRenderer = (panel, ctx) => {
             { label: "tiếng việt", checked: true },
             { label: "to read" },
           ],
+          signal: ctx.signal,
           summarise: (n) =>
             n === 0 ? "No labels" : n === 1 ? "1 label" : `${n} labels`,
         });
@@ -363,6 +365,7 @@ export const renderControls: TabRenderer = (panel, ctx) => {
         const live = createMenu(doc, {
           label: "Actions",
           items: menuItems(),
+          signal: ctx.signal,
         });
         const open = createMenuPanel(
           doc,
@@ -397,6 +400,7 @@ export const renderControls: TabRenderer = (panel, ctx) => {
           trigger,
           panel: panelEl,
           haspopup: "dialog",
+          signal: ctx.signal,
         });
         const staticPanel = el(doc, "div", "popover static");
         staticPanel.setAttribute("role", "dialog");
@@ -424,6 +428,62 @@ export const renderControls: TabRenderer = (panel, ctx) => {
               target: tags.input,
             }),
             { grow: true },
+          ),
+        ];
+      },
+      link: () => {
+        // A sample must not leave the catalog: the click is stopped and says so.
+        const demo = (event: MouseEvent) => {
+          event.preventDefault();
+          ctx.toast("Sample link: nothing opens from the catalog.");
+        };
+        const sentence = el(doc, "p", "cat-small");
+        sentence.append(
+          "Read ",
+          createLink(doc, {
+            label: "the Tauri guide",
+            href: "#/ui-catalog",
+            onClick: demo,
+          }),
+          " before Friday.",
+        );
+        const stand = (caption: string, forced?: "hover" | "focus") =>
+          state(
+            doc,
+            caption,
+            createLink(doc, {
+              label: "Open the reading list",
+              href: "#/ui-catalog",
+              variant: "standalone",
+              forced,
+              onClick: demo,
+            }),
+          );
+        return [
+          state(doc, "inline", sentence),
+          stand("standalone"),
+          stand("hover", "hover"),
+          stand("focus", "focus"),
+          state(
+            doc,
+            "external",
+            createLink(doc, {
+              label: "vnexpress.net",
+              href: LINK,
+              external: true,
+              onClick: demo,
+              variant: "standalone",
+            }),
+          ),
+          state(
+            doc,
+            "unavailable: text + reason",
+            createLink(doc, {
+              label: "Open in Telegram",
+              href: "https://t.me/",
+              variant: "standalone",
+              unavailable: "Telegram is not connected.",
+            }),
           ),
         ];
       },

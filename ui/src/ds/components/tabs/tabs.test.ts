@@ -67,3 +67,17 @@ test("a disabled tab cannot be selected", () => {
   t.select("history");
   expect(t.selected()).toBe("write");
 });
+
+test("a disabled selected tab falls back to the first enabled one", () => {
+  const tabs = createTabs({
+    label: "Note view",
+    selected: "history",
+    tabs: [
+      { id: "write", label: "Write" },
+      { id: "history", label: "History (Later)", disabled: true },
+    ],
+  });
+  document.body.append(tabs.element);
+  expect(tabs.selected()).toBe("write");
+  expect(buttons(tabs)[0].tabIndex).toBe(0);
+});

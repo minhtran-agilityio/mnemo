@@ -43,6 +43,8 @@ export interface MultiSelectOptions {
   /** The button text for n chosen. Defaults to "n chosen". */
   readonly summarise?: (count: number) => string;
   readonly onChange?: (chosen: readonly string[]) => void;
+  /** When it aborts, an open list closes and its document listener goes. */
+  readonly signal?: AbortSignal;
 }
 
 export interface MultiSelect extends Popover {
@@ -78,6 +80,11 @@ export function createMultiSelect(
     });
   }
   refresh();
-  const pop = createPopover(doc, { trigger, panel, haspopup: "true" });
+  const pop = createPopover(doc, {
+    trigger,
+    panel,
+    haspopup: "true",
+    signal: options.signal,
+  });
   return { ...pop, chosen };
 }

@@ -1,6 +1,6 @@
 // UI Catalog registry entries of the Controls tab. Buttons, fields and ways to choose.
 // The tab's own agent edits this file only. Data only: no DOM and no CSS.
-import { type CatalogEntry, NONE, planned, ref } from "./types";
+import { type CatalogEntry, NONE, ref } from "./types";
 
 /** The line under the tab's title. */
 export const CONTROLS_INTRO = `Buttons, text fields and ways to choose. Built in DS-05 (${ref(107)}). Hover, focus and pressed are shown as fixed states; the live ones react too.`;
@@ -141,9 +141,12 @@ export const CONTROLS = [
   },
   {
     name: "link",
+    className: "lnk",
     tab: "Controls",
-    variants: ["inline", "standalone"],
-    states: NONE,
-    source: planned(107),
+    variants: ["inline", "standalone", "external", "unavailable"],
+    states: ["default", "hover", "focus", "external", "unavailable"],
+    source: "ds",
+    notes:
+      "Accent colour with an underline, so colour is not the only signal. An external link shows an icon and says it opens outside Mnemo. An unavailable link is text with the reason beside it.",
   },
 ] as const satisfies readonly CatalogEntry[];

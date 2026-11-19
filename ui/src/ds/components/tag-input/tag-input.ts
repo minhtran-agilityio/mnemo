@@ -54,6 +54,8 @@ export function createTagInput(
   for (const name of options.tags ?? []) add(name);
 
   input.addEventListener("keydown", (event) => {
+    // An input method (Vietnamese Telex, IBus) is composing: Enter and Backspace belong to it.
+    if (event.isComposing || event.keyCode === 229) return;
     const text = input.value.trim();
     if (event.key === "Enter" && text) {
       event.preventDefault();

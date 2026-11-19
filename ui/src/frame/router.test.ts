@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { expect, test } from "vitest";
 import { ALL_ITEMS, EVERYTHING_ID } from "./nav";
-import { createRouter, hashFor, parseHash } from "./router";
+import { createRouter, hashFor, parseHash, splitHash } from "./router";
 
 test("every item has an address that opens it", () => {
   for (const item of ALL_ITEMS)
@@ -40,4 +40,20 @@ test("the router shows the current address, then each change, and a repeat of th
   router.go("notes");
   expect(seen.at(-1)).toBe("notes");
   expect(seen.length).toBeGreaterThan(afterFirst);
+});
+
+test("splitHash strips the hash, leading and trailing slashes and the search part", () => {
+  for (const hash of [
+    "#/ui-catalog",
+    "#ui-catalog",
+    "#/ui-catalog/",
+    "#/ui-catalog?x=1",
+    "ui-catalog",
+  ])
+    expect(splitHash(hash).path).toBe("ui-catalog");
+  expect(splitHash("#/everything?q=a b")).toEqual({
+    path: "everything",
+    search: "q=a b",
+  });
+  expect(splitHash("").path).toBe("");
 });

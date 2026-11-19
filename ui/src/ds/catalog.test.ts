@@ -4,7 +4,6 @@ import { expect, test } from "vitest";
 import {
   CATALOG,
   CATALOG_TABS,
-  type CatalogTab,
   coverage,
   entriesFor,
   TOKEN_GROUPS,
@@ -45,13 +44,18 @@ test("entry names are unique", () => {
   expect(new Set(names).size).toBe(names.length);
 });
 
-test("the Controls tab still names the issue of its planned part", () => {
-  const want: Record<string, string> = {
-    Controls: `planned #${107}`,
-  };
-  for (const [tab, tag] of Object.entries(want)) {
-    expect(entriesFor(tab as CatalogTab).map((e) => e.source)).toContain(tag);
+test("a planned entry, when there is one, names its issue; none is required", () => {
+  for (const tab of CATALOG_TABS) {
+    for (const e of entriesFor(tab)) {
+      if (e.source.startsWith("planned"))
+        expect(e.source).toMatch(/^planned #\d+$/);
+    }
   }
+});
+
+test("the Controls tab has a built link part", () => {
+  const link = entriesFor("Controls").find((e) => e.name === "link");
+  expect(link?.source).toBe("ds");
 });
 
 test("Foundations lists type, colour, spacing, radius, shadow, focus ring, control border, icons and motion, built in ds", () => {

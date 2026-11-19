@@ -131,7 +131,18 @@ main.cat-screen {
 
 .cat-ex.col {
   flex-direction: column;
+  flex-wrap: nowrap;
   align-items: stretch;
+}
+
+/* In a stack the basis would set a height, and a wrapping stack lets the widest example widen the
+   whole line past its row. Nowrap keeps every example inside the example column. */
+.cat-ex.col > .st {
+  max-width: 100%;
+}
+
+.cat-ex.col > .st.grow {
+  flex: 0 0 auto;
 }
 
 .st {

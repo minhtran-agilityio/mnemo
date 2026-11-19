@@ -46,3 +46,45 @@ test("a click outside closes it", () => {
   document.body.click();
   expect(pop.isOpen()).toBe(false);
 });
+
+test("focus moving outside the popover closes it; focus inside does not", () => {
+  const { panel, pop } = make();
+  const outside = document.createElement("button");
+  document.body.append(outside);
+  pop.open();
+  const inner = document.createElement("button");
+  panel.append(inner);
+  panel.dispatchEvent(
+    new FocusEvent("focusout", { bubbles: true, relatedTarget: inner }),
+  );
+  expect(pop.isOpen()).toBe(true);
+  panel.dispatchEvent(
+    new FocusEvent("focusout", { bubbles: true, relatedTarget: outside }),
+  );
+  expect(pop.isOpen()).toBe(false);
+});
+
+test("an aborted signal closes an open popover and a later outside click does nothing", () => {
+  const trigger = createButton(document, { label: "Why?" });
+  const panel = document.createElement("div");
+  const ctl = new AbortController();
+  const pop = createPopover(document, {
+    trigger,
+    panel,
+    haspopup: "dialog",
+    signal: ctl.signal,
+  });
+  document.body.append(pop.anchor);
+  pop.open();
+  ctl.abort();
+  expect(pop.isOpen()).toBe(false);
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
+});
+
+test("destroy closes the panel and can be called twice", () => {
+  const { pop } = make();
+  pop.open();
+  pop.destroy();
+  pop.destroy();
+  expect(pop.isOpen()).toBe(false);
+});

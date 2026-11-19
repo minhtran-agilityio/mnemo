@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import {
   blend,
+  compositeLayers,
   contrastOf,
   parseColour,
   targetVerdict,
@@ -46,4 +47,38 @@ test("verdict words", () => {
   expect(targetVerdict(44, 44)).toBe("24: ok · 44: ok");
   expect(targetVerdict(100, 32)).toBe("24: ok · 44: under");
   expect(targetVerdict(20, 20)).toBe("24: under · 44: under");
+});
+
+test("parseColour reads four-digit hex and does not scale percentages twice", () => {
+  expect(parseColour(`${hash}f008`)).toEqual([255, 0, 0, 136 / 255]);
+  expect(parseColour(fn("color", "srgb 100% 50% 0%"))).toEqual([
+    255, 127.5, 0, 1,
+  ]);
+  expect(parseColour(fn("color", "srgb 50% 50% 50% / 50%"))).toEqual([
+    127.5, 127.5, 127.5, 0.5,
+  ]);
+  expect(parseColour(fn("color", "srgb 0.5 0.5 0.5"))).toEqual([
+    127.5, 127.5, 127.5, 1,
+  ]);
+  expect(parseColour(`${hash}ff00ff80`)?.[3]).toBeCloseTo(0.5, 2);
+});
+
+test("compositeLayers blends each translucent layer over the nearest opaque one, outermost first", () => {
+  const white: [number, number, number, number] = [255, 255, 255, 1];
+  const dark: [number, number, number, number] = [0, 0, 0, 1];
+  // A half white layer on a black page is grey, not white.
+  expect(compositeLayers([[255, 255, 255, 0.5]], dark)).toEqual([
+    127.5, 127.5, 127.5, 1,
+  ]);
+  // Layers run innermost first: 50% black over 50% white over an opaque grey.
+  const grey: [number, number, number, number] = [100, 100, 100, 1];
+  const got = compositeLayers(
+    [[0, 0, 0, 0.5], [255, 255, 255, 0.5], grey],
+    white,
+  );
+  expect(got).toEqual([88.75, 88.75, 88.75, 1]);
+  // The walk stops at the first opaque layer: the white one behind it does not matter.
+  expect(compositeLayers([dark, [255, 0, 0, 1]], white)).toEqual(dark);
+  // No layer at all is the page colour.
+  expect(compositeLayers([], white)).toEqual(white);
 });

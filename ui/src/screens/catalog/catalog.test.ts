@@ -306,3 +306,45 @@ test("the Limits tab builds 1000 rows on request and every Limits row is a real 
   build?.click();
   expect(panel?.querySelectorAll(".lim-rows li").length).toBe(1000);
 });
+
+test("the Controls tab shows every link state as a real link or text", () => {
+  mount();
+  const row = panelFor("Controls")?.querySelector('[data-part="link"]');
+  expect(row).toBeTruthy();
+  expect(row?.querySelectorAll("a.lnk").length).toBeGreaterThanOrEqual(4);
+  expect(row?.querySelector(".is-external")?.textContent).toContain(
+    "opens outside Mnemo",
+  );
+  expect(
+    row?.querySelector(".is-unavailable")?.getAttribute("aria-disabled"),
+  ).toBe("true");
+  expect(row?.querySelector(".lnk-reason")?.textContent).toContain(
+    "not connected",
+  );
+});
+
+test("Ctrl K does not open Find on top of an open modal dialog", () => {
+  mount();
+  const modal = document.createElement("dialog");
+  modal.setAttribute("open", "");
+  document.body.append(modal);
+  document.body.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
+  );
+  expect(
+    screen.querySelector<HTMLDialogElement>("dialog.pal")?.open ?? false,
+  ).toBe(false);
+  modal.remove();
+});
+
+test("closing the catalog closes an open popover", () => {
+  mount();
+  const trigger = panelFor("Controls")?.querySelector<HTMLButtonElement>(
+    'button[aria-haspopup="dialog"]',
+  );
+  trigger?.click();
+  expect(trigger?.getAttribute("aria-expanded")).toBe("true");
+  teardown?.();
+  teardown = null;
+  expect(trigger?.getAttribute("aria-expanded")).toBe("false");
+});

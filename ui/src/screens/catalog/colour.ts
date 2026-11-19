@@ -12,7 +12,7 @@ export function parseColour(text: string): Rgba | null {
   const hex = /^#([0-9a-f]{3,8})$/.exec(s);
   if (hex) {
     let h = hex[1];
-    if (h.length === 3) h = h.replace(/./g, "$&$&");
+    if (h.length === 3 || h.length === 4) h = h.replace(/./g, "$&$&");
     if (h.length !== 6 && h.length !== 8) return null;
     const n = (i: number) => Number.parseInt(h.slice(i, i + 2), 16);
     return [n(0), n(2), n(4), h.length === 8 ? n(6) / 255 : 1];
@@ -23,11 +23,14 @@ export function parseColour(text: string): Rgba | null {
   if (fn[1] === "color" && body === fn[2]) return null;
   const parts = body.split(/[\s,/]+/).filter(Boolean);
   if (parts.length < 3) return null;
-  const nums = parts.map((p) =>
-    p.endsWith("%") ? (Number.parseFloat(p) / 100) * 255 : Number.parseFloat(p),
-  );
+  // In the srgb colour function a bare number is 0 to 1 and a percentage is of 1; both end up 0 to 255.
+  const isColor = fn[1] === "color";
+  const channel = (p: string) => {
+    if (p.endsWith("%")) return (Number.parseFloat(p) / 100) * 255;
+    return Number.parseFloat(p) * (isColor ? 255 : 1);
+  };
+  const nums = parts.slice(0, 3).map(channel);
   if (nums.some(Number.isNaN)) return null;
-  const scale = fn[1] === "color" ? 255 : 1;
   const alphaPart = parts[3];
   const alpha =
     alphaPart === undefined
@@ -35,7 +38,7 @@ export function parseColour(text: string): Rgba | null {
       : alphaPart.endsWith("%")
         ? Number.parseFloat(alphaPart) / 100
         : Number.parseFloat(alphaPart);
-  return [nums[0] * scale, nums[1] * scale, nums[2] * scale, alpha];
+  return [nums[0], nums[1], nums[2], alpha];
 }
 
 /** The colour `top` shows as when it lies over the opaque colour `ground`. */
@@ -47,6 +50,20 @@ export function blend(top: Rgba, ground: Rgba): Rgba {
     top[2] * a + ground[2] * (1 - a),
     1,
   ];
+}
+
+/**
+ * The colour a stack of backgrounds shows. `layers` run from the innermost (the element itself) to
+ * the outermost. The walk stops at the first opaque layer; that colour, or `page` when none is
+ * opaque, is the base, and each semi-transparent layer inside it is blended over it in order.
+ */
+export function compositeLayers(layers: readonly Rgba[], page: Rgba): Rgba {
+  const stop = layers.findIndex((l) => l[3] >= 1);
+  const base: Rgba = stop < 0 ? page : layers[stop];
+  const over = stop < 0 ? layers : layers.slice(0, stop);
+  let ground = base;
+  for (let i = over.length - 1; i >= 0; i--) ground = blend(over[i], ground);
+  return ground;
 }
 
 function luminance(c: Rgba): number {

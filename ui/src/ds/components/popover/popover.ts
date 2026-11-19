@@ -10,6 +10,8 @@ export interface PopoverOptions {
   /** Which element takes focus on open. Defaults to the first input or button in the panel. */
   readonly firstFocus?: () => HTMLElement | null;
   readonly onOpen?: () => void;
+  /** When it aborts, the popover closes and drops its document listener. */
+  readonly signal?: AbortSignal;
 }
 
 export interface Popover {
@@ -17,6 +19,8 @@ export interface Popover {
   open(): void;
   close(returnFocus?: boolean): void;
   isOpen(): boolean;
+  /** Closes the panel and removes the document listener. Safe to call twice. */
+  destroy(): void;
 }
 
 let counter = 0;
@@ -37,6 +41,13 @@ export function createPopover(doc: Document, options: PopoverOptions): Popover {
     if (event.target instanceof Node && !anchor.contains(event.target))
       close(false);
   };
+
+  // Focus moved out of the popover (Tab away): close. A null target (a click on nothing) is left
+  // to the document click listener.
+  anchor.addEventListener("focusout", (event) => {
+    const to = event.relatedTarget;
+    if (isOpen() && to instanceof Node && !anchor.contains(to)) close(false);
+  });
 
   function isOpen(): boolean {
     return !panel.hidden;
@@ -70,5 +81,12 @@ export function createPopover(doc: Document, options: PopoverOptions): Popover {
     }
   });
 
-  return { anchor, open, close, isOpen };
+  function destroy(): void {
+    close(false);
+    doc.removeEventListener("click", outside);
+  }
+  options.signal?.addEventListener("abort", destroy, { once: true });
+  if (options.signal?.aborted) destroy();
+
+  return { anchor, open, close, isOpen, destroy };
 }
