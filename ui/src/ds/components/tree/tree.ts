@@ -470,7 +470,14 @@ export function createTree(
   sync();
 
   tree.addEventListener("contextmenu", (e) => {
-    const btn = (e.target as Element).closest<HTMLButtonElement>(".tnode");
+    const from = e.target as Element;
+    // A name field keeps the native menu (paste, spelling).
+    if (from.closest(".tedit")) return;
+    // The node's row, so the follow-up contextmenu of the ContextMenu key (its target is the menu
+    // item that took focus) or a right click on the "..." button is ours too, not the browser's.
+    const btn = from
+      .closest(".trow")
+      ?.querySelector<HTMLButtonElement>(".tnode");
     if (!btn || !build.menus.has(btn)) return;
     e.preventDefault();
     openMenu(btn);
