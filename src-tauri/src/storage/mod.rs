@@ -4,6 +4,7 @@ mod concurrency;
 mod error;
 pub mod files;
 pub mod items;
+pub mod labels;
 pub mod links;
 mod migrate;
 pub mod record;
@@ -162,7 +163,7 @@ mod tests {
         assert_eq!(s.journal_mode().unwrap(), "wal");
         assert_eq!(s.busy_timeout_ms().unwrap(), 5000);
         assert_eq!(s.synchronous_level().unwrap(), 1, "NORMAL");
-        assert_eq!(s.schema_version().unwrap(), 5);
+        assert_eq!(s.schema_version().unwrap(), 6);
     }
 
     #[test]
@@ -170,7 +171,7 @@ mod tests {
         let (_d, p) = temp_db();
         drop(Storage::open(&p).unwrap());
         let s = Storage::open(&p).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 5);
+        assert_eq!(s.schema_version().unwrap(), 6);
     }
 
     #[test]

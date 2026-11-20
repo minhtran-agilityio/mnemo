@@ -213,7 +213,15 @@ pub fn run() {
             commands::file_orphan_report,
             commands::add_link,
             commands::list_links,
-            commands::remove_link
+            commands::remove_link,
+            commands::create_label,
+            commands::rename_label,
+            commands::move_label,
+            commands::delete_label,
+            commands::count_label_delete_moves,
+            commands::list_labels,
+            commands::save_labelled_note,
+            commands::list_labelled_notes
         ])
         .build(tauri::generate_context!())
         .expect("error while building Mnemo")

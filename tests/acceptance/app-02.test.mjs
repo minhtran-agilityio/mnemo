@@ -222,7 +222,8 @@ test('AC1: every sidebar item exists and opens a screen that shows its name and 
       await openItem(app, item);
       const text = await app.mainText();
       if (!text.toLowerCase().includes(item.toLowerCase())) failures.push(`${item}: main shows no name (${JSON.stringify(text.slice(0, 80))})`);
-      else if (!/\b(phase\s*\d+|P\d+)\b/i.test(text)) failures.push(`${item}: main shows no phase (${JSON.stringify(text.slice(0, 80))})`);
+      // #33: Notes now opens its own screen (note list and editor), not the roadmap empty state, so its phase is not shown.
+      else if (item !== 'Notes' && !/\b(phase\s*\d+|P\d+)\b/i.test(text)) failures.push(`${item}: main shows no phase (${JSON.stringify(text.slice(0, 80))})`);
     }
     assert.deepEqual(failures, [], failures.join('\n'));
   }));
