@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import { createMarkdownView, MARKDOWN_EMPTY_TEXT } from "./markdown-view";
 
@@ -486,3 +488,49 @@ test("fuzz: fixed-seed sources always return and never produce script, img or on
     }
   }
 }, 60000);
+
+test("a label with an image or brackets keeps the outer address", () => {
+  const logo = linkOf(
+    "[logo ![Mnemo](https://cdn.test/logo.png)](https://mnemo.test)",
+  );
+  expect(logo.getAttribute("href")).toBe("https://mnemo.test");
+  expect(logo.textContent).toContain("Mnemo");
+  const arr = linkOf("[array[0] docs](https://docs.test/a)");
+  expect(arr.getAttribute("href")).toBe("https://docs.test/a");
+  expect(arr.textContent).toContain("array[0] docs");
+});
+
+test("a wrapped line that starts with a number does not start a numbered list", () => {
+  const v = view("It was released in\n2019. Since then\n3) see below");
+  expect(v.querySelector("ol")).toBeNull();
+  expect(v.querySelectorAll("p")).toHaveLength(1);
+  // After a blank line any list start still works.
+  const late = view("text\n\n2019. a").querySelector("ol") as HTMLOListElement;
+  expect(late.start).toBe(2019);
+  // A bullet, or a number 1, may interrupt a paragraph.
+  expect(view("text\n- a").querySelector("ul")).not.toBeNull();
+  expect(view("text\n1. a").querySelector("ol")).not.toBeNull();
+});
+
+test("a task in a numbered list keeps its number marker", () => {
+  const ol = view("1. [x] a").querySelector("ol");
+  expect(ol?.querySelector("li")?.classList.contains("md-item-task")).toBe(
+    true,
+  );
+  // The rule that hides the marker is scoped to bullet lists in the style sheet.
+  const css = readFileSync(
+    join(import.meta.dirname, "markdown-view.css"),
+    "utf8",
+  );
+  expect(css).toMatch(
+    /ul\.md-list\s*>\s*\.md-item-task\s*\{[^}]*list-style:\s*none/,
+  );
+  expect(css).not.toMatch(/(^|\n)\.md-item-task\s*\{/);
+});
+
+test("an indented top-level fence loses its own indent in the body", () => {
+  const code = view("  ```ts\n  const a = 1;\n    nested\n  ```").querySelector(
+    "pre code",
+  );
+  expect(code?.textContent).toBe("const a = 1;\n  nested");
+});

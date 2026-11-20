@@ -63,21 +63,27 @@
   margin: 0;
 }
 
-/* The marker column is one width (--size-icon-lg): bullets and numbers sit in it, and a task mark
-   fills it, so task items line up with the others at every nesting depth. */
-.md-item-task {
-  list-style: none;
-}
-
+/* The marker column is one width (--size-icon-lg): bullets and numbers sit in it. In a bullet list a
+   task mark fills it, so task items line up with the others at every nesting depth. In a numbered
+   list the number stays and the mark follows it. */
 .md-check {
-  display: inline-block;
-  box-sizing: border-box;
-  width: var(--size-icon-lg);
-  margin-left: calc(-1 * var(--size-icon-lg));
+  margin-right: var(--space-1);
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   white-space: nowrap;
+}
+
+ul.md-list > .md-item-task {
+  list-style: none;
+}
+
+ul.md-list > .md-item-task > .md-check {
+  display: inline-block;
+  box-sizing: border-box;
+  width: var(--size-icon-lg);
+  margin-right: 0;
+  margin-left: calc(-1 * var(--size-icon-lg));
 }
 
 .md-code {

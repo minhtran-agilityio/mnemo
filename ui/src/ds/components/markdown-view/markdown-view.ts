@@ -53,11 +53,42 @@ const QUOTE = /^ {0,3}>/;
 // An address may hold one level of balanced parentheses (Wikipedia style). The two alternatives
 // never match the same character, so the pattern cannot backtrack badly.
 const URL_BODY = "((?:[^()\\s]|\\([^()\\s]*\\)){0,2000})";
-const LINK = new RegExp(
-  `\\[([^\\]]{0,2000})\\]\\(${URL_BODY}(?:\\s+"[^"]{0,500}")?\\)`,
-  "y",
-);
-const URL_PART = new RegExp(`\\(${URL_BODY}\\)`, "y");
+const LINK_TAIL = new RegExp(`\\(${URL_BODY}(?:\\s+"[^"]{0,500}")?\\)`, "y");
+const MAX_LABEL = 2000;
+
+interface Bracketed {
+  /** Where the label ends (the index of its closing bracket). */
+  readonly labelEnd: number;
+  readonly href: string;
+  /** The index after the closing parenthesis. */
+  readonly end: number;
+}
+
+/**
+ * The "[label](address)" that starts at s[at], or null. The label is matched by bracket depth, so it
+ * may hold balanced brackets (an image, `array[0]`) and the outer "](" is the one that closes it.
+ */
+function matchBracketed(s: string, at: number, hi: number): Bracketed | null {
+  let depth = 0;
+  const limit = Math.min(hi, at + MAX_LABEL + 2);
+  for (let j = at; j < limit; j++) {
+    const c = s[j];
+    if (c === "\\") j += 1;
+    else if (c === "[") depth += 1;
+    else if (c === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        if (s[j + 1] !== "(") return null;
+        LINK_TAIL.lastIndex = j + 1;
+        const tail = LINK_TAIL.exec(s);
+        const end = LINK_TAIL.lastIndex;
+        if (!tail || end > hi) return null;
+        return { labelEnd: j, href: tail[1], end };
+      }
+    }
+  }
+  return null;
+}
 const ALNUM = /[\p{L}\p{N}]/u;
 
 /** A list item line. A thematic break such as "- - -" is not an item. */
@@ -236,47 +267,27 @@ function inline(
       i += n;
       continue;
     }
-    // A badge: [![alt](image)](page). The image never loads; its alt text is the link label.
-    if (!inLink && c === "[" && s[i + 1] === "!" && s[i + 2] === "[") {
-      LINK.lastIndex = i + 2;
-      const img = LINK.exec(s);
-      const imgEnd = LINK.lastIndex;
-      if (img && s[imgEnd] === "]" && s[imgEnd + 1] === "(") {
-        URL_PART.lastIndex = imgEnd + 1;
-        const page = URL_PART.exec(s);
-        const pageEnd = URL_PART.lastIndex;
-        if (page && pageEnd <= hi) {
-          flush();
-          out.push(
-            ...linkNode(ctx, [doc.createTextNode(img[1] || "image")], page[1]),
-          );
-          i = pageEnd;
-          continue;
-        }
-      }
-    }
+    // A link, or an image (never loaded: its alt text shows). A badge is a link whose label is an image.
     const image = c === "!" && s[i + 1] === "[";
     if ((c === "[" && !inLink) || image) {
-      LINK.lastIndex = image ? i + 1 : i;
-      const m = LINK.exec(s);
-      const end = LINK.lastIndex;
-      if (m && end <= hi) {
+      const at = image ? i + 1 : i;
+      const m = matchBracketed(s, at, hi);
+      if (m) {
         flush();
         if (image) {
           const alt = make(doc, "span", "md-image");
-          alt.textContent = m[1] || "image";
+          alt.textContent = s.slice(at + 1, m.labelEnd) || "image";
           out.push(alt);
         } else {
-          const from = i + 1;
           out.push(
             ...linkNode(
               ctx,
-              inline(ctx, s, from, from + m[1].length, depth + 1, true),
-              m[2],
+              inline(ctx, s, at + 1, m.labelEnd, depth + 1, true),
+              m.href,
             ),
           );
         }
-        i = end;
+        i = m.end;
         continue;
       }
     }
@@ -357,8 +368,14 @@ function isBlockStart(line: string): boolean {
     HEADING.test(line) ||
     RULE.test(line) ||
     QUOTE.test(line) ||
-    LIST_ITEM.test(line)
+    interruptsParagraph(line)
   );
+}
+
+/** Only a bullet, or an ordered item numbered 1, may interrupt a paragraph ("2019. Since" may not). */
+function interruptsParagraph(line: string): boolean {
+  const m = LIST_ITEM.exec(line);
+  return !!m && (!/\d/.test(m[2]) || Number.parseInt(m[2], 10) === 1);
 }
 
 /**
@@ -510,9 +527,10 @@ function blocks(ctx: Context, lines: string[], depth: number): HTMLElement[] {
     const fence = matchFence(line);
     if (fence) {
       const body: string[] = [];
+      const fenceIndent = leadW(line);
       i += 1;
       while (i < lines.length && !closesFence(lines[i], fence)) {
-        body.push(lines[i]);
+        body.push(dedent(lines[i], fenceIndent));
         i += 1;
       }
       i += 1;
