@@ -112,6 +112,8 @@ export function renderNotes(
 ): NotesHandle {
   const doc = container.ownerDocument;
   const stop = new AbortController();
+  // The shipped page column is narrow for reading; the three panes need the full width while open.
+  container.classList.add("notes-screen");
   let notes: LabelledNote[] = [];
   let next: ChangeCursor | null = null;
   let loads = 0;
@@ -895,6 +897,7 @@ export function renderNotes(
     leave() {
       left = true;
       stop.abort();
+      container.classList.remove("notes-screen");
       dialog?.close();
       moveDialog?.close();
     },

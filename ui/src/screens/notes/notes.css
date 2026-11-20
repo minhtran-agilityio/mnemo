@@ -1,5 +1,10 @@
 /* The Notes screen: layout only, with token values. Every look comes from ui/src/ds (tree, label
    picker, list, state box, skeleton, segmented choice, field, text area, button, pill, banner). */
+
+/* The shipped page column is narrow for reading; the three panes use the full width while open. */
+main.notes-screen {
+  max-width: none;
+}
 .notes-head {
   display: flex;
   flex-wrap: wrap;
@@ -11,7 +16,10 @@
 
 .notes-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 3fr);
+  grid-template-columns:
+    minmax(var(--size-basis-column), 1fr)
+    minmax(var(--size-basis-example), 1.5fr)
+    minmax(0, 3fr);
   gap: var(--space-5);
   align-items: start;
 }
