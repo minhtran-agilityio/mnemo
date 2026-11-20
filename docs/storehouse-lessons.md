@@ -50,6 +50,22 @@ requests (UI-QUEUED). Pull requests: #132, #131, #133, #134.
 - **Green CI did not mean safe to merge.** #132 and #133 passed all checks while important review
   findings were still open.
 
+- **Review rounds did not converge on the parts that took the most code.** The tree (#132) went through
+  seven review rounds, the Markdown view (#133) four, the picker (#131) one. Each round found new
+  problems in code added to fix the last round (async refusal with undo, reopen with focus, created-name
+  tracking). The loop stopped only when the keeper cut the design down: the tree now only reports a
+  rename or create and the screen re-renders (net code went down), and the last Markdown round was
+  declared final with the rest listed as "Known limits" in the pull request.
+- **Untrusted-text parsing had hangs and quadratic scans that tests did not cover.** A heading regex that
+  backtracked on a long run of spaces; a list item that was a thematic break looped forever
+  (`- a` then `  - - -`); a long run of blank lines in an item was quadratic; the nesting cap could be
+  bypassed with mixed list and quote nesting. Each was found by review, one case at a time. A seeded fuzz
+  test (3000 generated sources, no clock) was added only in round 3.
+- **The merged tree still had one known important issue.** The owner asked to merge #132 while the last
+  fix (the native context menu showing over the node menu on the ContextMenu key) was uncommitted in the
+  designer's worktree. It shipped as follow-up PR #139. A merge request that arrives while a designer is
+  mid-fix needs the designer's last state checked first.
+
 ### What failed in the process
 
 - Three designer agents and the board agent were stopped by a session restart and then by the 5-hour
@@ -84,4 +100,9 @@ These are suggestions from this round, not decisions.
    pull request body if it does.
 5. Retake screenshots as the last step after the last fix, and say the commit they were taken at.
 6. Keeper: before replying UI-EXISTS, read the part's builder, not only the registry entry.
-7. Keeper: batch UI-ASK messages by part into one issue each, as done here; keep that.
+7. Fuzz test (fixed seed, no clock) from the first commit for any part that parses untrusted text.
+8. Cap review rounds per pull request (for example three). After the cap, cut scope or list the rest as
+   "Known limits" in the pull request body instead of adding more code.
+9. Ask the designer to make a part report events only and leave data to the screen, unless the request
+   needs the part to own the data.
+10. Keeper: batch UI-ASK messages by part into one issue each, as done here; keep that.
