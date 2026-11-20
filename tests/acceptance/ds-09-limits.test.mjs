@@ -81,7 +81,9 @@ const freePort = () => new Promise((ok) => { const s = createServer(); s.listen(
 let started = null;
 const ensureServer = () => (started ??= (async () => {
   port = await freePort();
-  vite = spawn('npx', ['vite', '--port', String(port), '--strictPort', '--host', '127.0.0.1'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+  // Start Vite with node directly, not through npx: killing npx left the real Vite running with
+  // its pipes open, so node --test never exited after the last test.
+  vite = spawn(process.execPath, [join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js'), '--port', String(port), '--strictPort', '--host', '127.0.0.1'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
   vite.stdout.on('data', (d) => { viteLog += d; });
   vite.stderr.on('data', (d) => { viteLog += d; });
   for (let i = 0; i < 300; i++) {
@@ -90,7 +92,12 @@ const ensureServer = () => (started ??= (async () => {
   }
   assert.fail(`vite dev server did not start:\n${viteLog.slice(-800)}`);
 })());
-after(() => { vite?.kill('SIGKILL'); });
+after(() => {
+  if (!vite) return;
+  vite.stdout?.destroy();
+  vite.stderr?.destroy();
+  vite.kill('SIGKILL');
+});
 
 const bridgeScript = (mode) => `(() => {
   const MODE = ${JSON.stringify(mode)};
