@@ -375,7 +375,7 @@ export const renderLimits: TabRenderer = (panel, ctx) => {
           quick: {
             id: "save",
             label: "Save or ask",
-            href: "#save",
+            href: "#/ui-catalog",
             icon: Plus,
           },
           searchLabel: "Search everything",
@@ -387,13 +387,13 @@ export const renderLimits: TabRenderer = (panel, ctx) => {
                 {
                   id: "word",
                   label: word,
-                  href: "#word",
+                  href: "#/ui-catalog",
                   icon: Bell,
                 },
                 {
                   id: "marks",
                   label: `${marks} thông báo lặng lẽ từ mọi ứng dụng và lịch`,
-                  href: "#marks",
+                  href: "#/ui-catalog",
                   icon: Bell,
                 },
               ],
@@ -402,12 +402,19 @@ export const renderLimits: TabRenderer = (panel, ctx) => {
           bottom: {
             label: "Apps and settings",
             icon: Plus,
-            items: [],
+            items: [
+              {
+                id: "settings",
+                label: "Settings",
+                href: "#/ui-catalog",
+                icon: Plus,
+              },
+            ],
           },
           collapsed: false,
           idPrefix: "lim-sb",
         });
-        const frame = el(doc, "div", "frame");
+        const frame = el(doc, "div", "frame frame-sidebar");
         frame.append(sidebar.element);
         return {
           column: true,

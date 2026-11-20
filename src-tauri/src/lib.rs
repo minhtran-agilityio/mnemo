@@ -104,6 +104,14 @@ pub fn run() {
             app.manage(system::window::TrayAvailable(tray));
             app.manage(system::window::HiddenAt::default());
 
+            // The minimum is also enforced on every resize, so it holds when the size is restored late
+            // or when a window saved maximized is un-maximized.
+            let main = app.config().app.windows.iter().find(|w| w.label == "main");
+            app.manage(system::window::MinimumSize {
+                width: main.and_then(|w| w.min_width),
+                height: main.and_then(|w| w.min_height),
+            });
+
             // The main window is built here (`create: false` in tauri.conf.json) so it can
             // start on the error page. If it cannot be built, Mnemo prints why and exits
             // with code 1. Returning an error from setup would make Tauri panic instead.
@@ -132,6 +140,7 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            system::window::enforce_on_resize(window, event);
             // The error page asks the owner to quit and start again, so a close there
             // quits instead of hiding to the tray.
             let failed = window.try_state::<StartupFailed>().is_some_and(|s| s.0);

@@ -6,9 +6,11 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 /**
- * The declarations of the first rule whose selector list holds `selector` exactly, as a property
- * to value map (values with their spaces collapsed). Throws when there is no such rule, so a
- * renamed class fails the test instead of passing on nothing.
+ * The declarations of the rules whose selector list holds `selector` exactly, as a property to
+ * value map (values with their spaces collapsed). Only top-level rules count: a rule inside an
+ * @media or @container block applies only in some conditions, so it never stands for the base
+ * style. Matching rules merge in file order, the last value of a property wins (as in the cascade).
+ * Throws when there is no such rule, so a renamed class fails the test instead of passing on nothing.
  */
 export function cssRule(
   dir: string,
@@ -19,21 +21,45 @@ export function cssRule(
     /\/\*[\s\S]*?\*\//g,
     "",
   );
-  for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    const selectors = (match[1] ?? "").split(",").map((s) => s.trim());
-    if (!selectors.includes(selector)) continue;
-    const out: Record<string, string> = {};
-    for (const line of (match[2] ?? "").split(";")) {
-      const at = line.indexOf(":");
-      if (at < 0) continue;
-      out[line.slice(0, at).trim()] = line
-        .slice(at + 1)
-        .replace(/\s+/g, " ")
-        .trim();
+  const out: Record<string, string> = {};
+  let found = false;
+  let depth = 0;
+  let start = 0;
+  let head = "";
+  for (let i = 0; i < css.length; i++) {
+    const ch = css[i];
+    if (ch === "{") {
+      if (depth === 0) {
+        head = css.slice(start, i);
+        start = i + 1;
+      }
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        // A rule with no nested block: its head is a selector list. An at-rule holds blocks, so
+        // its body has braces and is skipped here.
+        const body = css.slice(start, i);
+        const selectors = head.split(",").map((s) => s.trim());
+        if (!head.trim().startsWith("@") && !body.includes("{")) {
+          if (selectors.includes(selector)) {
+            found = true;
+            for (const line of body.split(";")) {
+              const at = line.indexOf(":");
+              if (at < 0) continue;
+              out[line.slice(0, at).trim()] = line
+                .slice(at + 1)
+                .replace(/\s+/g, " ")
+                .trim();
+            }
+          }
+        }
+        start = i + 1;
+      }
     }
-    return out;
   }
-  throw new Error(`no rule for ${selector} in ${file}`);
+  if (!found) throw new Error(`no rule for ${selector} in ${file}`);
+  return out;
 }
 
 /** The pair that gives a line room for stacked Vietnamese marks without moving the layout. */

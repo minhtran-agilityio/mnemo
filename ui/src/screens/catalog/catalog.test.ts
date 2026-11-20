@@ -348,3 +348,19 @@ test("closing the catalog closes an open popover", () => {
   teardown = null;
   expect(trigger?.getAttribute("aria-expanded")).toBe("false");
 });
+
+test("every link inside a catalog sample stays in the UI Catalog", () => {
+  mount();
+  const links = [...screen.querySelectorAll<HTMLAnchorElement>("a[href]")];
+  const outside = links
+    .map((a) => a.getAttribute("href"))
+    .filter((h) => h !== "#/ui-catalog" && !h?.startsWith("#/ui-catalog/"));
+  // Open every tab so the samples of each one are built.
+  for (const tab of tabs()) tab.click();
+  const all = [...screen.querySelectorAll<HTMLAnchorElement>("a[href]")]
+    .map((a) => a.getAttribute("href"))
+    .filter((h) => h !== "#/ui-catalog" && !h?.startsWith("#/ui-catalog/"));
+  expect([...outside, ...all].filter((h) => !/^https?:/.test(h ?? ""))).toEqual(
+    [],
+  );
+});

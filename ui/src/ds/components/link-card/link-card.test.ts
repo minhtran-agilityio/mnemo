@@ -86,7 +86,7 @@ test("a compact row shows the site and keeps the full url in a tooltip", () => {
   expect(row.tabIndex).toBe(0);
 });
 
-// The Limits tab fix (issue 113)es: the url line has room for stacked marks, the trust label wraps inside a narrow card,
+// The Limits tab fix for issue 113: the url line has room for stacked marks, the trust label wraps inside a narrow card,
 // and the cards view never asks for more than its container.
 test("a messy url is whole text in .url, which has room for stacked marks, and the card keeps the full value", () => {
   const url = `example.com/${"ẪẬẲỖỮỰ".repeat(6)}/${"a".repeat(120)}?x=1&y=${"b".repeat(60)}`;
