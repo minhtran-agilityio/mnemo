@@ -328,12 +328,24 @@ impl ClaudeCli for SystemClaude {
         let mut child = spawn_retrying_busy(program, args)?;
         let stdout = child.stdout.take().ok_or(())?;
         let (sender, receiver) = std::sync::mpsc::channel();
+        let buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let shared = std::sync::Arc::clone(&buffer);
         // The reader is not joined: if a descendant keeps the pipe open it ends when that does.
+        // It writes into a shared buffer, so what it read is kept even if it never finishes.
         std::thread::spawn(move || {
-            let mut text = String::new();
-            // Bytes that are not text make the read fail; the empty text then reads as a problem.
-            let _ = stdout.take(MAX_OUTPUT).read_to_string(&mut text);
-            let _ = sender.send(text);
+            let mut stdout = stdout.take(MAX_OUTPUT);
+            let mut chunk = [0u8; 4096];
+            loop {
+                match stdout.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        if let Ok(mut bytes) = shared.lock() {
+                            bytes.extend_from_slice(&chunk[..n]);
+                        }
+                    }
+                }
+            }
+            let _ = sender.send(());
         });
         let deadline = Instant::now() + CHECK_TIMEOUT;
         let status = loop {
@@ -349,7 +361,11 @@ impl ClaudeCli for SystemClaude {
                 }
             }
         };
-        let stdout = receiver.recv_timeout(DRAIN_TIMEOUT).map_err(|_| ())?;
+        // Wait a short while for the end of the stream; on a timeout keep what was read.
+        let _ = receiver.recv_timeout(DRAIN_TIMEOUT);
+        let bytes = buffer.lock().map(|b| b.clone()).unwrap_or_default();
+        // Bytes that are not text read as empty text, which then reads as a problem.
+        let stdout = String::from_utf8(bytes).unwrap_or_default();
         Ok(CliOutput {
             success: status.success(),
             stdout,
@@ -618,7 +634,10 @@ esac"#;
             write_claude(&dir, "echo hi; sleep 8 &");
             let cli = SystemClaude::new(vec![dir.clone()]);
             let started = Instant::now();
-            assert!(cli.run(&dir.join("claude"), &[]).is_err());
+            // The exit was normal, so the text read before the wait ended is kept.
+            let got = cli.run(&dir.join("claude"), &[]).unwrap();
+            assert_eq!(got.stdout.trim(), "hi");
+            assert!(got.success);
             assert!(started.elapsed() < Duration::from_secs(6));
             let _ = std::fs::remove_dir_all(dir);
         }
