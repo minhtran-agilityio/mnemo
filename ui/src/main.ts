@@ -2,6 +2,7 @@ import "./fonts";
 import "./ds";
 import "./style.css";
 import "./screens/settings/settings.css";
+import "./screens/ideas/ideas.css";
 import { getVersion } from "@tauri-apps/api/app";
 import { renderEmptyState } from "./frame/empty-state";
 import { EVERYTHING_ID, isRoadmapItem, UI_CATALOG_ID } from "./frame/nav";
@@ -21,14 +22,21 @@ import {
   ThemeReadTimeoutError,
 } from "./frame/theme";
 import { pingErrorText } from "./ping-text";
+import { renderIdeas } from "./screens/ideas/ideas";
 import { renderSettings } from "./screens/settings/settings";
 import {
+  addIdea,
   checkAiHealth,
   errorMessage,
   getAiHealth,
   getSetting,
+  listBookmarks,
+  listIdeas,
+  listNotes,
   ping,
   setSetting,
+  turnIdeaIntoProject,
+  updateIdea,
 } from "./shared/api";
 import { versionErrorText, versionText } from "./version-text";
 
@@ -36,6 +44,8 @@ import { versionErrorText, versionText } from "./version-text";
 const COLLAPSED_KEY = "sidebar_collapsed";
 /** The id of the sidebar item that opens Settings. */
 const SETTINGS_ID = "settings";
+/** The id of the sidebar item that opens Ideas (#34). */
+const IDEAS_ID = "ideas";
 
 const status = document.querySelector<HTMLElement>("#ping-status");
 const versionEl = document.querySelector<HTMLElement>("#app-version");
@@ -175,6 +185,15 @@ async function start(): Promise<void> {
         onDetachedSave: (failure) => showNote(themeSaveNote, failure),
         getAiHealth,
         checkAiHealth,
+      });
+    } else if (item.id === IDEAS_ID) {
+      leaveScreen = renderIdeas(screen, {
+        listIdeas,
+        addIdea,
+        updateIdea,
+        turnIdeaIntoProject,
+        listBookmarks,
+        listNotes,
       });
     } else if (isRoadmapItem(item)) {
       renderEmptyState(screen, { item, query: route.query });
