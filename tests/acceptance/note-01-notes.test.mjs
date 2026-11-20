@@ -359,7 +359,8 @@ async function openApp(mode) {
         await app.until(`document.readyState === 'complete' && !!document.querySelector('nav')`, 'the sidebar to render', 15000);
         await sleep(300);
       },
-      click: (label) => app.h(`(() => { const e = __h.find(${JSON.stringify(label)})[0]; if (!e) return false; e.click(); return true; })()`),
+      // Prefer an exact name inside main: a bare prefix match would also hit the sidebar's "Save or ask" for "Save".
+      click: (label) => app.h(`(() => { const all = __h.find(${JSON.stringify(label)}); const inMain = all.filter((x) => __h.main().contains(x)); const e = inMain.find((x) => __h.name(x) === ${JSON.stringify(label)}) || inMain[0] || all.find((x) => __h.name(x) === ${JSON.stringify(label)}) || all[0]; if (!e) return false; e.click(); return true; })()`),
       async typeInEditor(t) {
         assert.ok(await app.h(`(() => { const a = __h.area(); if (!a) return false; a.focus(); a.setSelectionRange(a.value.length, a.value.length); return true; })()`), 'no visible text area in the editor');
         await S('Input.insertText', { text: t });
