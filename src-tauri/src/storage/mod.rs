@@ -1,6 +1,7 @@
 // Owns persistence: reading and writing Mnemo's local data. The only module that touches SQLite.
 mod error;
 pub mod items;
+pub mod labels;
 pub mod links;
 mod migrate;
 pub mod record;
