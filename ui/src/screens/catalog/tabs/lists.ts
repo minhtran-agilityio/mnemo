@@ -13,6 +13,7 @@ import {
   createSectionList,
   createTable,
   createTree,
+  type TreeActionsOptions,
   type TreeNode,
 } from "../../../ds/index";
 import { el, entryRows, state, type TabRenderer } from "../parts";
@@ -41,6 +42,60 @@ const TREE: TreeNode[] = [
   },
   { label: "Đọc sau", kind: "folder", count: 42 },
 ];
+
+const LABELS: TreeNode[] = [
+  {
+    label: "Work",
+    kind: "label",
+    expanded: true,
+    children: [
+      { label: "Mnemo", kind: "label", expanded: true, current: true },
+      {
+        label: "Design notes",
+        kind: "label",
+        refused: {
+          delete: "This label still holds notes that have no other label",
+        },
+      },
+    ],
+  },
+  {
+    label: "Personal",
+    kind: "label",
+    expanded: true,
+    children: [
+      {
+        label: "Sức khoẻ",
+        kind: "label",
+        expanded: true,
+        children: [{ label: "Tập luyện buổi sáng", kind: "label" }],
+      },
+    ],
+  },
+];
+
+const LONG_LABELS: TreeNode[] = [
+  {
+    label: "Ghi chú dài về kiến trúc lưu trữ cục bộ và đồng bộ ngoại tuyến",
+    kind: "label",
+    count: 12,
+  },
+];
+
+/** Room under a tree whose menu is held open, so the menu does not cover the caption. */
+const wrapRoom = (doc: Document, tree: HTMLElement): HTMLElement => {
+  const room = el(doc, "div", "lst-menu-room");
+  room.append(tree);
+  return room;
+};
+
+/** The live example: it reports to a toast, the way a screen would do the work. */
+const labelActions = (toast: (text: string) => void): TreeActionsOptions => ({
+  onAction: (e) =>
+    toast(
+      `${e.action} ${e.name ?? e.label ?? "top level"}. Catalog only, nothing changed.`,
+    ),
+});
 
 export const renderLists: TabRenderer = (panel, ctx) => {
   const doc = ctx.doc;
@@ -196,6 +251,91 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           doc,
           "expanded, collapsed, current (click or use the arrow keys)",
           createTree(doc, "Folders", TREE),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "with actions, live: F2 renames, Delete asks, Shift+F10 opens the menu",
+          createTree(
+            doc,
+            "Labels, live example",
+            LABELS,
+            undefined,
+            labelActions(ctx.toast),
+          ),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "empty: no labels yet",
+          createTree(doc, "Labels, empty example", [], undefined, {
+            onAction: () => {},
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "menu open, one action refused with its reason",
+          wrapRoom(
+            doc,
+            createTree(doc, "Labels, menu example", LABELS, undefined, {
+              onAction: () => {},
+              forced: { id: "Design notes", state: "menu" },
+            }),
+          ),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "renaming (Enter saves, Escape cancels)",
+          createTree(doc, "Labels, rename example", LABELS, undefined, {
+            onAction: () => {},
+            forced: { id: "Mnemo", state: "renaming" },
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "rename refused: duplicate name at the field",
+          createTree(doc, "Labels, rename error example", LABELS, undefined, {
+            onAction: () => {},
+            forced: { id: "Mnemo", state: "error", value: "Design notes" },
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "hover",
+          createTree(doc, "Labels, hover example", LABELS, undefined, {
+            onAction: () => {},
+            forced: { id: "Mnemo", state: "hover" },
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "focus-visible",
+          createTree(doc, "Labels, focus example", LABELS, undefined, {
+            onAction: () => {},
+            forced: { id: "Mnemo", state: "focus" },
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "active (pressed)",
+          createTree(doc, "Labels, active example", LABELS, undefined, {
+            onAction: () => {},
+            forced: { id: "Mnemo", state: "active" },
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "overflow: long Vietnamese name, 60 characters, cut with the full name as title",
+          createTree(doc, "Labels, long name example", LONG_LABELS, undefined, {
+            onAction: () => {},
+          }),
           { grow: true },
         ),
       ],

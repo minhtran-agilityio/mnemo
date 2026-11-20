@@ -82,3 +82,96 @@
     transition: none;
   }
 }
+
+/* Actions (#126): a row holds the node button and its menu button. */
+.tnode[hidden] {
+  display: none;
+}
+
+.tnode.is-hover {
+  background: var(--head);
+}
+
+.tnode:active,
+.tnode.is-active {
+  background: var(--line);
+}
+
+.tnode.is-focus {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: calc(-1 * var(--focus-ring));
+}
+
+.tree-box {
+  width: 100%;
+  max-width: var(--size-tree-max);
+}
+
+.tree-box .tree {
+  max-width: none;
+}
+
+.tree-box [hidden] {
+  display: none;
+}
+
+.tree-new {
+  margin-top: var(--space-2);
+}
+
+.trow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.trow .tnode {
+  flex: 1;
+  min-width: 0;
+}
+
+.trow .pop-anchor {
+  flex: none;
+}
+
+.tmore {
+  color: var(--muted);
+}
+
+.trow .tmenu {
+  left: auto;
+  right: 0;
+}
+
+.tmenu [role="menuitem"].has-why {
+  flex-wrap: wrap;
+  padding-block: var(--space-2);
+}
+
+.tmenu .tmenu-why {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  white-space: normal;
+}
+
+/* Inline rename and create: the field takes the place of the node button. */
+.tedit {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+}
+
+.tedit-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.tedit .input {
+  min-height: var(--size-tap-sm);
+  font-size: var(--text-md);
+}
