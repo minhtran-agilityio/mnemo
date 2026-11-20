@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
 use crate::ai::health::{self, AiHealth};
+use crate::storage::files::OrphanReport;
 use crate::storage::ideas::{Idea, IdeaInput, IdeaProject};
 use crate::storage::items::{
     Bookmark, BookmarkInput, Event, EventInput, Memory, MemoryInput, Note, NoteInput, Project,
@@ -13,7 +14,7 @@ use crate::storage::items::{
 };
 use crate::storage::links::Link;
 use crate::storage::record::{Cursor, Page};
-use crate::storage::{Item, ItemRef, PageRequest, Storage, StorageError};
+use crate::storage::{FileRecord, Item, ItemRef, PageRequest, Storage, StorageError};
 
 /// The one error shape every command returns: a stable machine `code` and a plain
 /// `message`. It never carries file paths, stack traces or raw error text.
@@ -282,6 +283,155 @@ fn item_failed(e: StorageError) -> AppError {
     }
 }
 
+/// The error the UI sees for a file call. Size and name problems keep their own codes
+/// and plain messages; any other reason stays in the log.
+fn file_failed(e: StorageError) -> AppError {
+    match e {
+        StorageError::FileTooLarge { .. } => AppError {
+            code: "file_too_large",
+            message: e.to_string(),
+        },
+        StorageError::InvalidFileName => AppError {
+            code: "invalid_file_name",
+            message: e.to_string(),
+        },
+        StorageError::FileMissing => AppError {
+            code: "file_missing",
+            message: e.to_string(),
+        },
+        StorageError::NotFound { .. } => AppError {
+            code: "file_not_found",
+            message: "There is no such file. It may have been deleted.".to_string(),
+        },
+        StorageError::Invalid(message) => AppError {
+            code: "invalid_input",
+            message,
+        },
+        other => {
+            log::error!("file storage call failed: {other}");
+            AppError {
+                code: "storage_error",
+                message: "Mnemo could not read or save this file. Nothing was deleted.".to_string(),
+            }
+        }
+    }
+}
+
+/// The header that carries the file's original name, percent-encoded by the UI.
+const FILE_NAME_HEADER: &str = "x-mnemo-file-name";
+
+fn invalid_file_input(message: &str) -> AppError {
+    AppError {
+        code: "invalid_input",
+        message: message.to_string(),
+    }
+}
+
+/// Decodes `%XX` escapes as UTF-8 text. Bad escapes or bad UTF-8 give `None`.
+fn percent_decode(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = std::str::from_utf8(bytes.get(i + 1..i + 3)?).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+/// A file id must look like a UUID before storage is touched, so a path such as
+/// `../mnemo.db` is refused here.
+fn check_file_id(id: &str) -> Result<(), AppError> {
+    if crate::storage::files::is_file_id(id) {
+        Ok(())
+    } else {
+        Err(file_failed(StorageError::InvalidFileName))
+    }
+}
+
+fn save_file_item(
+    storage: &AppStorage,
+    encoded_name: Option<&str>,
+    bytes: &[u8],
+) -> Result<FileRecord, AppError> {
+    let name = encoded_name
+        .and_then(percent_decode)
+        .ok_or_else(|| invalid_file_input("The file name was missing or not readable."))?;
+    storage.get()?.save_file(&name, bytes).map_err(file_failed)
+}
+
+fn get_file_item(storage: &AppStorage, id: &str) -> Result<FileRecord, AppError> {
+    check_file_id(id)?;
+    storage.get()?.get_file(id).map_err(file_failed)
+}
+
+fn read_file_item(storage: &AppStorage, id: &str) -> Result<Vec<u8>, AppError> {
+    check_file_id(id)?;
+    storage.get()?.read_file(id).map_err(file_failed)
+}
+
+fn delete_file_item(storage: &AppStorage, id: &str) -> Result<(), AppError> {
+    check_file_id(id)?;
+    storage.get()?.delete_file(id).map_err(file_failed)
+}
+
+fn orphan_report_item(storage: &AppStorage) -> Result<OrphanReport, AppError> {
+    storage.get()?.orphan_report().map_err(file_failed)
+}
+
+/// Saves a file. The request body is the raw bytes; the original name is in the
+/// `x-mnemo-file-name` header, percent-encoded.
+#[tauri::command]
+pub async fn add_file(
+    app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<FileRecord, AppError> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(invalid_file_input("The file must be sent as raw bytes."));
+    };
+    let bytes = bytes.clone();
+    let name = request
+        .headers()
+        .get(FILE_NAME_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    off_main_thread(app, move |s| save_file_item(s, name.as_deref(), &bytes)).await
+}
+
+/// The details of a saved file.
+#[tauri::command]
+pub async fn get_file(app: tauri::AppHandle, id: String) -> Result<FileRecord, AppError> {
+    off_main_thread(app, move |s| get_file_item(s, &id)).await
+}
+
+/// The bytes of a saved file, as a raw reply. Only a file id is accepted, never a path.
+#[tauri::command]
+pub async fn read_file(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<tauri::ipc::Response, AppError> {
+    let bytes = off_main_thread(app, move |s| read_file_item(s, &id)).await?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Soft-deletes a saved file. The file stays on disk.
+#[tauri::command]
+pub async fn delete_file(app: tauri::AppHandle, id: String) -> Result<(), AppError> {
+    off_main_thread(app, move |s| delete_file_item(s, &id)).await
+}
+
+/// Lists files in the folder that no row owns. It deletes nothing.
+#[tauri::command]
+pub async fn file_orphan_report(app: tauri::AppHandle) -> Result<OrphanReport, AppError> {
+    off_main_thread(app, orphan_report_item).await
+}
+
 fn add_item<T: Item>(storage: &AppStorage, input: &T::Input) -> Result<T, AppError> {
     storage.get()?.add::<T>(input).map_err(item_failed)
 }
@@ -516,6 +666,109 @@ mod tests {
     fn temp_storage() -> (Storage, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("mnemo-appstorage-{}", uuid::Uuid::new_v4()));
         (Storage::open(&dir.join("mnemo.db")).unwrap(), dir)
+    }
+
+    fn app_storage() -> (AppStorage, std::path::PathBuf) {
+        let (s, dir) = temp_storage();
+        (AppStorage::new(Ok(s)), dir)
+    }
+
+    #[test]
+    fn read_file_refuses_a_dotdot_request() {
+        let (state, dir) = app_storage();
+        std::fs::write(dir.join("outside.txt"), b"secret").unwrap();
+        for bad in [
+            "../mnemo.db",
+            "../outside.txt",
+            "/etc/passwd",
+            "a/b",
+            "a\\b",
+            "..",
+        ] {
+            for err in [
+                read_file_item(&state, bad).unwrap_err(),
+                get_file_item(&state, bad).unwrap_err(),
+                delete_file_item(&state, bad).unwrap_err(),
+            ] {
+                assert_eq!(err.code, "invalid_file_name", "{bad}");
+                assert!(!err.message.contains('/'), "{}", err.message);
+            }
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn file_commands_save_read_delete_end_to_end() {
+        let (state, dir) = app_storage();
+        let bytes: Vec<u8> = (0..=255u8).collect();
+        let name = "caf%C3%A9%20photo.png";
+        let rec = save_file_item(&state, Some(name), &bytes).unwrap();
+        assert_eq!(rec.original_name, "caf\u{e9} photo.png");
+        assert_eq!(get_file_item(&state, &rec.id).unwrap(), rec);
+        assert_eq!(read_file_item(&state, &rec.id).unwrap(), bytes);
+        assert!(orphan_report_item(&state).unwrap().files.is_empty());
+        delete_file_item(&state, &rec.id).unwrap();
+        assert_eq!(
+            read_file_item(&state, &rec.id).unwrap_err().code,
+            "file_not_found"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_file_lost_from_disk_gives_file_missing_not_deleted() {
+        let (state, dir) = app_storage();
+        let rec = save_file_item(&state, Some("a.png"), b"png").unwrap();
+        std::fs::remove_dir_all(dir.join("files")).unwrap();
+        let err = read_file_item(&state, &rec.id).unwrap_err();
+        assert_eq!(err.code, "file_missing");
+        assert!(
+            !err.message.contains("may have been deleted"),
+            "{}",
+            err.message
+        );
+        assert!(
+            !err.message.contains('/'),
+            "no path may reach the UI: {}",
+            err.message
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn add_file_over_the_limit_gives_file_too_large() {
+        let (state, dir) = app_storage();
+        state
+            .get()
+            .unwrap()
+            .set_setting("files.max_bytes", "10")
+            .unwrap();
+        let err = save_file_item(&state, Some("big.bin"), &[1u8; 11]).unwrap_err();
+        assert_eq!(err.code, "file_too_large");
+        assert!(err.message.contains("10 bytes"), "{}", err.message);
+        assert!(orphan_report_item(&state).unwrap().files.is_empty());
+        assert_eq!(
+            save_file_item(&state, None, b"x").unwrap_err().code,
+            "invalid_input"
+        );
+        assert_eq!(
+            save_file_item(&state, Some("%ZZ"), b"x").unwrap_err().code,
+            "invalid_input"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn percent_decode_round_trips_utf8_names() {
+        assert_eq!(percent_decode("plain.png").as_deref(), Some("plain.png"));
+        assert_eq!(
+            percent_decode("na%C3%AFve%20%E2%9C%93.txt").as_deref(),
+            Some("na\u{ef}ve \u{2713}.txt")
+        );
+        assert_eq!(percent_decode("%"), None);
+        assert_eq!(percent_decode("%4"), None);
+        assert_eq!(percent_decode("%GG"), None);
+        assert_eq!(percent_decode("%FF"), None);
     }
 
     #[test]

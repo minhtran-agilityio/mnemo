@@ -96,6 +96,7 @@ The UI Catalog tabs need fixed lengths that no token covered (prototype v3 uses 
 | `--size-textarea-min` | 88px |
 | `--size-tags-max` | 360px |
 | `--size-tag-input-min` | 80px |
+| `--size-label-picker-max` | 280px |
 | `--size-menu-min` | 220px |
 | `--size-menu-max` | 320px |
 | `--size-toggle-width` | 40px |

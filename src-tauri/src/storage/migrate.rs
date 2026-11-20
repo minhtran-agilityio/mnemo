@@ -31,7 +31,13 @@ pub const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         number: 5,
-        sql: include_str!("../../migrations/0005_ideas.sql"),
+        sql: include_str!("../../migrations/0005_files.sql"),
+    },
+    // Number 6 is taken by the labels migration of #33 (PR #141), which merges first.
+    // Numbers only need to grow: `run` applies every migration above the stored version.
+    Migration {
+        number: 7,
+        sql: include_str!("../../migrations/0007_ideas.sql"),
     },
 ];
 
@@ -91,7 +97,7 @@ mod tests {
     fn real_migrations_set_the_version() {
         let mut c = mem();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 5);
+        assert_eq!(current_version(&c).unwrap(), 7);
     }
 
     #[test]
@@ -162,7 +168,7 @@ mod tests {
             err,
             StorageError::SchemaTooNew {
                 found: 99,
-                supported: 5
+                supported: 7
             }
         );
     }
@@ -228,6 +234,48 @@ mod tests {
     }
 
     #[test]
+    fn migration_5_adds_file_table_to_a_database_built_by_migration_4() {
+        let mut c = mem();
+        run(&mut c, &MIGRATIONS[..4]).unwrap();
+        c.execute(
+            "INSERT INTO note (id, created_at, updated_at, body) VALUES ('n1', ?1, ?1, 'kept')",
+            [T],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES ('theme', 'dark', ?1)",
+            [T],
+        )
+        .unwrap();
+        assert!(!table_exists(&c, "file"));
+        run(&mut c, &MIGRATIONS[..5]).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 5);
+        assert_eq!(
+            columns(&c, "file"),
+            [
+                "id",
+                "original_name",
+                "stored_name",
+                "size_bytes",
+                "mime",
+                "created_at",
+                "updated_at",
+                "deleted_at"
+            ]
+        );
+        let body: String = c
+            .query_row("SELECT body FROM note WHERE id = 'n1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(body, "kept");
+        let theme: String = c
+            .query_row("SELECT value FROM settings WHERE key = 'theme'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(theme, "dark");
+    }
+
+    #[test]
     fn all_migrations_on_a_version_2_database_keep_settings_and_add_the_tables() {
         let mut c = mem();
         run(&mut c, &MIGRATIONS[..2]).unwrap();
@@ -237,7 +285,7 @@ mod tests {
         )
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 5);
+        assert_eq!(current_version(&c).unwrap(), 7);
         for t in KINDS.iter().chain(["item_link", "settings"].iter()) {
             assert!(table_exists(&c, t), "table {t} missing");
         }
@@ -248,9 +296,11 @@ mod tests {
     }
 
     #[test]
-    fn migration_5_adds_idea_fields_and_idea_tag_and_keeps_ideas_projects_and_links() {
+    fn migration_7_adds_idea_fields_and_idea_tag_and_keeps_ideas_projects_and_links() {
         let mut c = mem();
-        run(&mut c, &MIGRATIONS[..4]).unwrap();
+        // The database of the version before: every migration up to the one before ideas.
+        let before = MIGRATIONS.len() - 1;
+        run(&mut c, &MIGRATIONS[..before]).unwrap();
         c.execute_batch(&format!(
             "INSERT INTO idea (id, created_at, updated_at, title, stage) VALUES ('i1', '{T}', '{T}', 'Garden robot', 'ready');
              INSERT INTO project (id, created_at, updated_at, title, status) VALUES ('p1', '{T}', '{T}', 'Old', 'active');
@@ -258,7 +308,7 @@ mod tests {
         ))
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 5);
+        assert_eq!(current_version(&c).unwrap(), 7);
         let cols = columns(&c, "idea");
         for col in [
             "body",

@@ -1,4 +1,4 @@
--- Migration 5: ideas with stages (#34). An idea gets a text, a source (a saved item
+-- Migration 7: ideas with stages (#34). An idea gets a text, a source (a saved item
 -- or a web link), a "why" line and an outline; its tags live in their own table.
 -- All new columns are NULL for unknown, so every idea of version 4 is kept as it is.
 -- The core checks the values and sets the stage from four plain checks (see ideas.rs).
