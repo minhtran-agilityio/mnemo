@@ -11,5 +11,5 @@
 /* The tree example that holds a node menu open: room for the menu under the tree. */
 .ui-catalog .lst-menu-room {
   width: 100%;
-  min-height: calc(var(--size-row-menu) * 8);
+  min-height: calc(var(--size-row-menu) * 11);
 }
