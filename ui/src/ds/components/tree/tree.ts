@@ -35,9 +35,9 @@ export interface TreeNode {
   readonly current?: boolean;
   /**
    * Names the node in a TreeActionEvent. Ids must be unique in the tree. Without one the tree
-   * uses the path of labels from the top ("Work/Notes"), so two labels called "Notes" under
-   * different parents stay apart; give a real id (the database id) when labels can repeat in a
-   * path or can be renamed between draws.
+   * uses the path of labels from the top as JSON (["Work","Notes"]), so two labels called "Notes"
+   * under different parents stay apart and a "/" in a label is safe; give a real id (the database
+   * id) when labels can repeat in a path.
    */
   readonly id?: string;
   /** An action the screen refuses for this node, with the reason. It stays in the menu, disabled. */
@@ -65,26 +65,17 @@ export interface TreeForcedState {
 
 export interface TreeActionsOptions {
   /**
-   * The screen does the work. For "rename" and "create" it may refuse: return a message (or a
-   * promise of one) and the tree reverts the name and shows the message at the field, with the
-   * typed name kept. A rejected promise shows "Could not save. Try again." Return nothing when the
-   * work is done. The tree also checks names it has seen since it was drawn (renames and creates),
-   * but the screen should still re-render the tree from its own data after each change.
+   * The screen does the work. For "rename" and "create" it may refuse at once: return a non-empty
+   * message and the tree keeps the field open with the message and the typed name. Return nothing
+   * when the work is done. A handler that throws shows "Could not save. Try again." at the field.
+   * On any failure the screen re-renders the tree from its own data; the tree does not undo.
    */
-  readonly onAction: (
-    event: TreeActionEvent,
-  ) => void | string | Promise<string | undefined | void>;
+  readonly onAction: (event: TreeActionEvent) => void | string;
   /** An extra rule for a name. Return the message to show at the field, or nothing. */
   readonly validateName?: (
     name: string,
     action: "create" | "rename",
   ) => string | undefined;
-  /**
-   * Called when a refusal that came late (a promise) cannot be shown at the field, because another
-   * field is open or the row is gone. Without it the tree shows the reason as a note under the
-   * node, when the node is still on the page.
-   */
-  readonly onRefused?: (event: TreeActionEvent, message: string) => void;
   readonly forced?: TreeForcedState;
   /** When it aborts, an open menu closes and its document listener goes. */
   readonly signal?: AbortSignal;
@@ -105,6 +96,7 @@ interface Meta {
   readonly siblings: readonly TreeNode[];
   /** The node's id as reported, fixed when the tree is drawn. */
   readonly id: string;
+  readonly path: readonly string[];
   readonly parent: Meta | null;
 }
 
@@ -113,6 +105,8 @@ type Run = (action: TreeAction, node: TreeNode, btn: HTMLButtonElement) => void;
 interface Build {
   readonly meta: WeakMap<HTMLElement, Meta>;
   readonly menus: WeakMap<HTMLElement, Popover>;
+  /** Every node menu, so opening one can close the rest. */
+  readonly all: Popover[];
   readonly actions?: TreeActionsOptions;
   readonly run: Run;
   /** Names the owner saved by rename. The tree keeps them, so F2 again, the duplicate check and
@@ -197,6 +191,7 @@ function menuFor(
     if (event.key === "Escape") btn.focus();
   });
   build.menus.set(btn, pop);
+  build.all.push(pop);
   return pop.anchor;
 }
 
@@ -233,10 +228,12 @@ function buildNodes(
       cnt.textContent = String(node.count);
       btn.append(cnt);
     }
+    const path = [...(parent?.path ?? []), node.label];
     const meta: Meta = {
       node,
       siblings: nodes,
-      id: node.id ?? (parent ? `${parent.id}/${node.label}` : node.label),
+      id: node.id ?? JSON.stringify(path),
+      path,
       parent,
     };
     build.meta.set(btn, meta);
@@ -302,6 +299,7 @@ export function createTree(
   const build: Build = {
     meta: new WeakMap(),
     menus: new WeakMap(),
+    all: [],
     names: new Map(),
     actions,
     run: (action, node, btn) => {
@@ -315,7 +313,7 @@ export function createTree(
       else
         actions?.onAction({
           action,
-          id: build.meta.get(btn)?.id ?? node.label,
+          id: build.meta.get(btn)?.id ?? JSON.stringify([node.label]),
           label: labelOf(build, node),
         });
     },
@@ -331,6 +329,12 @@ export function createTree(
     [...(btn.closest("li")?.children ?? [])].find(
       (c): c is HTMLElement => c.tagName === "UL",
     ) ?? null;
+  // One node menu at a time: opening one closes the others.
+  const openMenu = (btn: HTMLElement) => {
+    const pop = build.menus.get(btn);
+    for (const other of build.all) if (other !== pop) other.close(false);
+    pop?.open();
+  };
   const setOpen = (btn: HTMLElement, open: boolean) => {
     btn.setAttribute("aria-expanded", String(open));
     const sub = subOf(btn);
@@ -383,7 +387,7 @@ export function createTree(
       e.preventDefault();
       // A refused action opens the menu, which shows the reason.
       if (key === "menu" || meta.node.refused?.[key] !== undefined)
-        build.menus.get(btn)?.open();
+        openMenu(btn);
       else build.run(key, meta.node, btn);
     }
   });
@@ -416,10 +420,9 @@ export function createTree(
 
   tree.addEventListener("contextmenu", (e) => {
     const btn = (e.target as Element).closest<HTMLButtonElement>(".tnode");
-    const pop = btn ? build.menus.get(btn) : undefined;
-    if (!pop) return;
+    if (!btn || !build.menus.has(btn)) return;
     e.preventDefault();
-    pop.open();
+    openMenu(btn);
   });
 
   /** The field of an inline rename or create. Enter saves; Escape or leaving the field cancels. */
@@ -431,9 +434,6 @@ export function createTree(
     }
     const meta = target ? build.meta.get(target) : undefined;
     if (mode === "rename" && (!target || !meta)) return false;
-    // The row was taken out of the page (the screen drew the tree again): nothing to edit.
-    // (A held catalog example is built before it is on the page.)
-    if (target && !target.isConnected && !options.held) return false;
     const current = mode === "rename" && meta ? labelOf(build, meta.node) : "";
     const siblings: readonly TreeNode[] =
       mode === "rename"
@@ -445,6 +445,7 @@ export function createTree(
     let row: HTMLElement | null = null;
     let list: HTMLElement | null = null;
     let createdList = false;
+    let wasClosed = false; // the parent was collapsed before this create opened it
     if (mode === "create") {
       const parentLi = target?.closest("li") ?? null;
       list = parentLi && target ? subOf(target) : tree;
@@ -454,7 +455,10 @@ export function createTree(
         createdList = true;
       }
       if (!list) return false;
-      if (target?.hasAttribute("aria-expanded")) setOpen(target, true);
+      if (target?.getAttribute("aria-expanded") === "false") {
+        wasClosed = true;
+        setOpen(target, true);
+      }
       list.hidden = false;
       row = doc.createElement("li");
       list.append(row);
@@ -500,8 +504,8 @@ export function createTree(
         mode === "create" ? (meta?.node ?? null) : (meta?.parent?.node ?? null);
       const taken = [
         ...siblings
-          .map((s) => labelOf(build, s))
-          .filter((label) => label !== current),
+          .filter((s) => s !== meta?.node)
+          .map((s) => labelOf(build, s)),
         ...(created.get(parentNode) ?? []),
       ];
       if (taken.some((label) => nameKey(label) === nameKey(name)))
@@ -509,9 +513,11 @@ export function createTree(
       return actions.validateName?.(name, mode);
     };
     let closed = false;
-    const close = (returnFocus: boolean) => {
+    const close = (returnFocus: boolean, saved = false) => {
       if (closed) return;
       closed = true;
+      // Nothing was saved: put the parent back as it was.
+      if (wasClosed && !saved && target) setOpen(target, false);
       openField = null;
       newLabel.disabled = false;
       edit.remove();
@@ -530,15 +536,16 @@ export function createTree(
         )?.focus();
     };
     const save = () => {
+      const name = input.value.trim();
+      // The node's own name, unchanged: nothing to save, nothing to check.
+      if (mode === "rename" && name === current) {
+        close(true);
+        return;
+      }
       const found = problem(input.value);
       if (found !== undefined) {
         showError(found);
         input.focus();
-        return;
-      }
-      const name = input.value.trim();
-      if (mode === "rename" && name === current) {
-        close(true);
         return;
       }
       // Keep the tree's own state in step: the shown name, the menu names and later checks.
@@ -567,55 +574,22 @@ export function createTree(
               label: meta ? labelOf(build, meta.node) : "",
               name,
             };
-      const outcome = actions.onAction(event);
-      // The screen refused at once: nothing changes, the message shows at the field.
-      if (typeof outcome === "string") {
+      let outcome: void | string;
+      try {
+        outcome = actions.onAction(event);
+      } catch {
+        // A handler that throws is a failed save, never a frozen field.
+        outcome = "Could not save. Try again.";
+      }
+      // The screen refused: nothing changes, the message shows at the field.
+      if (typeof outcome === "string" && outcome !== "") {
         showError(outcome);
         input.focus();
         return;
       }
       if (mode === "rename") showName(name);
       else created.set(parent, [...(created.get(parent) ?? []), name]);
-      close(true);
-      // The screen refused later (a promise): undo the change and give the field back, with the
-      // typed name and the reason.
-      if (outcome instanceof Promise) {
-        const undo = (reason: string) => {
-          if (mode === "rename") showName(current);
-          else {
-            // Remove one occurrence only: another create may have used the same name.
-            const names = [...(created.get(parent) ?? [])];
-            const at = names.indexOf(name);
-            if (at >= 0) names.splice(at, 1);
-            created.set(parent, names);
-          }
-          if (startEdit(mode, target, { value: name, error: reason })) return;
-          // The field cannot reopen (another field is open, or the row is gone): never silent.
-          if (actions.onRefused) {
-            actions.onRefused(event, reason);
-            return;
-          }
-          const row = target?.isConnected ? target.closest(".trow") : null;
-          if (!row) return;
-          const note = doc.createElement("span");
-          note.className = "err-text tnote";
-          note.setAttribute("role", "alert");
-          note.append(
-            createIcon(CircleAlert),
-            doc.createTextNode(`${name}: ${reason}`),
-          );
-          row.after(note);
-          const drop = () => note.remove();
-          tree.addEventListener("click", drop, { once: true });
-          tree.addEventListener("keydown", drop, { once: true });
-        };
-        outcome.then(
-          (reason) => {
-            if (typeof reason === "string") undo(reason);
-          },
-          () => undo("Could not save. Try again."),
-        );
-      }
+      close(true, true);
     };
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {

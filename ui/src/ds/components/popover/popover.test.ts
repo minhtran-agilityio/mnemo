@@ -40,6 +40,30 @@ test("a held panel stays open on an outside click, and its trigger still closes 
   pop.open();
   document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
   expect(panel.hidden).toBe(true);
+  pop.open();
+  // An Escape that came from a field, or that another part already used, is not for the panel.
+  const field = document.createElement("input");
+  document.body.append(field);
+  field.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  expect(panel.hidden).toBe(false);
+  const used = new KeyboardEvent("keydown", {
+    key: "Escape",
+    bubbles: true,
+    cancelable: true,
+  });
+  document.addEventListener("keydown", (e) => e.preventDefault(), {
+    once: true,
+    capture: true,
+  });
+  document.body.dispatchEvent(used);
+  expect(panel.hidden).toBe(false);
+  document.body.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  expect(panel.hidden).toBe(true);
+  field.remove();
   pop.anchor.remove();
 });
 
