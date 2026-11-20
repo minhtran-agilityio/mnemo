@@ -482,6 +482,15 @@ mod tests {
         }
     }
 
+    /// Not a check by itself: prints the real start check for the environment it runs in, so
+    /// tests/ai-health.test.mjs can run it with a controlled PATH, HOME and fake `claude`.
+    /// Run with `-- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn probe_state_from_env() {
+        println!("AI_HEALTH_STATE={:?}", check_system().state);
+    }
+
     #[cfg(unix)]
     mod system {
         use super::super::*;

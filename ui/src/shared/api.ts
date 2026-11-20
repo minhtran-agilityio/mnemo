@@ -38,3 +38,27 @@ export async function getSetting(key: string): Promise<string | null> {
 export async function setSetting(key: string, value: string): Promise<void> {
   await invoke<void>("set_setting", { key, value });
 }
+
+/** The four results of the Claude Code check. */
+export type AiState =
+  | "ready"
+  | "not_installed"
+  | "not_signed_in"
+  | "version_problem";
+
+/** The check result: a state and a fixed plain message. It never holds output from Claude Code. */
+export interface AiHealth {
+  state: AiState;
+  message: string;
+}
+
+/** The latest Claude Code check, or null while the first one is still running. */
+export async function getAiHealth(): Promise<AiHealth | null> {
+  const value = await invoke<AiHealth | null | undefined>("get_ai_health");
+  return value ?? null;
+}
+
+/** Checks Claude Code again and returns the new result. */
+export function checkAiHealth(): Promise<AiHealth> {
+  return invoke<AiHealth>("check_ai_health");
+}
