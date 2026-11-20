@@ -424,7 +424,7 @@ pub async fn delete_file(app: tauri::AppHandle, id: String) -> Result<(), AppErr
 /// Lists files in the folder that no row owns. It deletes nothing.
 #[tauri::command]
 pub async fn file_orphan_report(app: tauri::AppHandle) -> Result<OrphanReport, AppError> {
-    off_main_thread(app, move |s| orphan_report_item(s)).await
+    off_main_thread(app, orphan_report_item).await
 }
 
 fn add_item<T: Item>(storage: &AppStorage, input: &T::Input) -> Result<T, AppError> {
