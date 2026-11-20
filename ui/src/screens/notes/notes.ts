@@ -6,9 +6,9 @@
 // A note is saved with at least one label. "New note" opens an empty note in Edit mode with the
 // current label chosen. Every part comes from ui/src/ds; notes.css lays them out. Note text always
 // goes in as text.
-//
-// The Markdown read view with its sanitiser (#128) is still queued, with no stand-in: until it
-// lands the Read mode shows nothing for the note body.
+// Read mode shows the last saved text through the Markdown view part, which builds its nodes from
+// an allow-list and never inserts the text as markup. Links are not opened: Mnemo opens nothing
+// outside itself without the owner's approval, so the view gets no click handler yet.
 import { FileText, Plus } from "lucide";
 import {
   type ButtonOptions,
@@ -26,6 +26,7 @@ import {
   createField,
   createLabelPicker,
   createListbox,
+  createMarkdownView,
   createSegmented,
   createTextarea,
   createTree,
@@ -504,7 +505,7 @@ export function renderNotes(
   const actions = doc.createElement("div");
   actions.className = "notes-actions";
   actions.append(saveButton, cancelButton);
-  // The Read mode stays empty until the Markdown read view and its sanitiser (#128) exist.
+  // The Read mode shows the last saved text (not the unsaved edit).
   const readPane = doc.createElement("div");
   readPane.className = "notes-read";
 
@@ -550,8 +551,12 @@ export function renderNotes(
   const bar = doc.createElement("div");
   bar.className = "notes-bar";
 
-  /** Edit shows the text area, the labels, Save and Cancel; Read shows the (empty) read pane. */
+  /** Edit shows the text area, the labels, Save and Cancel; Read shows the saved note. */
   function showMode(): void {
+    if (mode === "Read")
+      readPane.replaceChildren(
+        createMarkdownView(doc, { source: original, label: "Note" }),
+      );
     const body = mode === "Edit" ? [field, pickerSlot, actions] : [readPane];
     editorPane.replaceChildren(bar, bannerSlot, ...body);
   }

@@ -331,18 +331,44 @@ test("leaving the screen with unsaved changes asks; Keep editing and Escape stay
   await expect(second).resolves.toBe(true);
 });
 
-test("the Read mode shows no note content and no text area", async () => {
+test("the Read mode shows the saved note as rendered Markdown, with no text area", async () => {
   const { screen } = await opened();
   button(screen, "Read").click();
   expect(area(screen)).toBeNull();
-  expect(hasText(screen, "Buy oat milk")).toBe(false);
-  expect(hasText(screen, "bold words")).toBe(false);
-  const pane = screen.querySelector(".notes-editor") as HTMLElement;
-  expect(pane.querySelector("strong, b, h2, script")).toBeNull();
-  expect(pane.querySelector(".notes-read")?.children).toHaveLength(0);
+  const view = screen.querySelector(".notes-editor article.md") as HTMLElement;
+  expect(view.textContent).toContain("Buy oat milk");
+  expect(view.querySelector("strong")?.textContent).toBe("bold words");
   expect(button(screen, "Save")).toBeUndefined();
   button(screen, "Edit").click();
   expect(area(screen)?.value).toBe(BODY1);
+});
+
+test("the Read mode shows the saved text, not the unsaved edit", async () => {
+  const { screen } = await opened();
+  type(screen, "\nunsaved line");
+  button(screen, "Read").click();
+  const view = screen.querySelector(".notes-editor article.md") as HTMLElement;
+  expect(view.textContent).not.toContain("unsaved line");
+  expect(view.textContent).toContain("Buy oat milk");
+});
+
+test("a script tag and an onerror image in a note show as text in Read mode", async () => {
+  const body = "<script>alert(1)</script>\n\n<img src=x onerror=alert(1)>";
+  const { screen } = setup({
+    listLabelledNotes: async () => ({
+      items: [ln("note-x", body, ["lab-work"], T1)],
+      next: null,
+    }),
+  });
+  await flush();
+  options(screen)[0].click();
+  await flush();
+  button(screen, "Read").click();
+  const view = screen.querySelector(".notes-editor article.md") as HTMLElement;
+  expect(view.querySelector("script, img")).toBeNull();
+  expect(view.textContent).toContain("<script>alert(1)</script>");
+  expect(view.textContent).toContain("<img src=x onerror=alert(1)>");
+  expect(view.innerHTML).not.toContain("<script");
 });
 
 test("a note list with more pages shows more notes on request", async () => {
