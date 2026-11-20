@@ -73,9 +73,12 @@ type AiView =
   | { kind: "known"; health: AiHealth }
   | { kind: "failed"; text: string };
 
-/** How often, and how many times, the first check is asked for while it is still running. */
+/**
+ * How often, and how many times, the first check is asked for while it is still running. The
+ * core may take up to 20 seconds (two commands, 10 seconds each), so the polling lasts longer.
+ */
 const AI_POLL_MS = 1000;
-const AI_POLL_TRIES = 15;
+const AI_POLL_TRIES = 25;
 
 const HINTS: Readonly<Record<Theme, string>> = {
   system: "Matches your computer, and follows it when it changes.",
@@ -262,8 +265,14 @@ export function renderSettings(
       .getAiHealth()
       .then((health) => {
         if (health) showAi({ kind: "known", health });
-        else if (left > 0 && ai.kind === "checking" && body.isConnected)
-          setTimeout(() => readFirstCheck(left - 1), AI_POLL_MS);
+        else if (ai.kind === "checking" && body.isConnected) {
+          if (left > 0) setTimeout(() => readFirstCheck(left - 1), AI_POLL_MS);
+          else
+            showAi({
+              kind: "failed",
+              text: "Mnemo is still waiting for the Claude Code check. Choose Check again to try once more.",
+            });
+        }
       })
       .catch((error: unknown) => {
         console.error("could not read the Claude Code check:", error);

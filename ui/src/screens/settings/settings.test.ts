@@ -190,6 +190,22 @@ test("a first check that is still running shows Checking, then the result", asyn
   }
 });
 
+test("a first check that never ends stops at a plain line with Check again, not Checking", async () => {
+  vi.useFakeTimers();
+  try {
+    firstHealth = [null];
+    renderSettings(container, deps());
+    openSection("AI");
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(rowText("AI")).toBe("AI Unknown");
+    expect(aiBody()).toContain("still waiting for the Claude Code check");
+    expect(aiBody()).not.toContain("Mnemo is checking Claude Code.");
+    expect(checkAgainButton()).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("Check again asks once, shows the new state and does not double submit", async () => {
   openSection("AI");
   await tick();
