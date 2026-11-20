@@ -5,6 +5,7 @@ import "./screens/settings/settings.css";
 import { getVersion } from "@tauri-apps/api/app";
 import { createToastRegion, type ToastRegion } from "./ds";
 import { renderEmptyState } from "./frame/empty-state";
+import { keepPlace } from "./frame/keep-place";
 import { EVERYTHING_ID, isRoadmapItem, UI_CATALOG_ID } from "./frame/nav";
 import { createRouter, type Route } from "./frame/router";
 import {
@@ -26,6 +27,7 @@ import { renderNotes } from "./screens/notes/notes";
 import { renderSettings } from "./screens/settings/settings";
 import {
   checkAiHealth,
+  countLabelDeleteMoves,
   createLabel,
   deleteLabel,
   errorMessage,
@@ -178,8 +180,8 @@ async function start(): Promise<void> {
           canLeaveScreen = null;
           showRoute(route, visit);
         } else {
-          // Stay: put the address back without a hashchange, so nothing is drawn again.
-          history.replaceState(null, "", back || "#/");
+          // Stay: put the address back without a hashchange and without rewriting history.
+          keepPlace(window, back);
         }
       });
       return;
@@ -223,6 +225,7 @@ async function start(): Promise<void> {
         renameLabel,
         moveLabel,
         deleteLabel,
+        countLabelDeleteMoves,
         toast,
       });
       leaveScreen = notes.leave;

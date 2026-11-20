@@ -368,6 +368,11 @@ export function deleteLabel(id: string): Promise<DeleteLabelOutcome> {
   return invoke<DeleteLabelOutcome>("delete_label", { id });
 }
 
+/** How many notes deleting a label would move to its parent label (0 for a top label). */
+export function countLabelDeleteMoves(id: string): Promise<number> {
+  return invoke<number>("count_label_delete_moves", { id });
+}
+
 /** Every live label, flat with its parent id, ordered by name. */
 export function listLabels(): Promise<Label[]> {
   return invoke<Label[]>("list_labels");

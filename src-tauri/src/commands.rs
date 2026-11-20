@@ -632,6 +632,13 @@ fn label_delete(storage: &AppStorage, id: &str) -> Result<DeleteLabelOutcome, Ap
     storage.get()?.delete_label(id).map_err(item_failed)
 }
 
+fn label_delete_count(storage: &AppStorage, id: &str) -> Result<u32, AppError> {
+    storage
+        .get()?
+        .count_notes_moving_on_delete(id)
+        .map_err(item_failed)
+}
+
 fn label_list(storage: &AppStorage) -> Result<Vec<Label>, AppError> {
     storage.get()?.list_labels().map_err(item_failed)
 }
@@ -696,6 +703,12 @@ pub async fn delete_label(
     id: String,
 ) -> Result<DeleteLabelOutcome, AppError> {
     off_main_thread(app, move |s| label_delete(s, &id)).await
+}
+
+/// How many notes deleting a label would move to its parent label (0 for a top label).
+#[tauri::command]
+pub async fn count_label_delete_moves(app: tauri::AppHandle, id: String) -> Result<u32, AppError> {
+    off_main_thread(app, move |s| label_delete_count(s, &id)).await
 }
 
 /// Every live label, flat with its parent id.

@@ -218,6 +218,7 @@ pub fn run() {
             commands::rename_label,
             commands::move_label,
             commands::delete_label,
+            commands::count_label_delete_moves,
             commands::list_labels,
             commands::save_labelled_note,
             commands::list_labelled_notes

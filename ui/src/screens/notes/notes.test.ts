@@ -64,6 +64,7 @@ function setup(over: Partial<NotesDeps> = {}) {
       movedLabels: 0,
       parentId: "lab-work",
     })),
+    countLabelDeleteMoves: vi.fn(async () => 1),
     toast: vi.fn(),
     ...over,
   };
@@ -109,6 +110,20 @@ test("the row title is the first line with text, without heading marks", () => {
   expect(noteTitle("\n  \n## Plan  \nmore")).toBe("Plan");
   expect(noteTitle(" \n#\n")).toBe("Untitled note");
   expect(changedText(T1)).toBe("2026-11-02");
+});
+
+test("the last-changed text is the owner's local date, not the UTC date", () => {
+  const before = process.env.TZ;
+  try {
+    process.env.TZ = "Pacific/Auckland"; // UTC+13 in November
+    expect(changedText("2026-11-02T20:00:00Z")).toBe("2026-11-03");
+    process.env.TZ = "America/Los_Angeles"; // UTC-8 in November
+    expect(changedText("2026-11-02T03:00:00Z")).toBe("2026-11-01");
+  } finally {
+    if (before === undefined) delete process.env.TZ;
+    else process.env.TZ = before;
+  }
+  expect(changedText("not a date")).toBe("not a date");
 });
 
 test("while the notes load the screen shows a busy line, then the list", async () => {
@@ -529,6 +544,7 @@ test("delete asks first, names where the notes move, then calls deleteLabel", as
   expect(dialog()?.textContent).toContain(
     'Delete the label "Work / Projects"?',
   );
+  expect(deps.countLabelDeleteMoves).toHaveBeenCalledWith("lab-proj");
   expect(dialog()?.textContent).toContain('Its 1 note moves to "Work".');
   expect(deps.deleteLabel).not.toHaveBeenCalled();
   button(document, "Keep label").click();
@@ -737,5 +753,178 @@ test("New note asks before it drops unsaved changes", async () => {
   button(document, "Discard changes").click();
   await flush();
   expect(area(screen)?.value).toBe("");
+  expect(
+    hasText(screen.querySelector(".notes-bar") as HTMLElement, "New note"),
+  ).toBe(true);
+});
+
+// ---- Review fixes ----
+test("renaming a label while a note is open keeps its labels and does not mark it dirty", async () => {
+  let current = LABELS.slice();
+  const { screen } = await opened({
+    listLabels: vi.fn(async () => current.slice()),
+    renameLabel: vi.fn(async (id: string, name: string) => {
+      current = current.map((l) => (l.id === id ? { ...l, name } : l));
+      return current.find((l) => l.id === id) as Label;
+    }),
+  });
+  option(screen, "Meeting plan").click();
+  await flush();
+  expect(chips(screen)).toEqual(["Work / Projects", "Work"]);
+  press(treeNode(screen, "Projects"), "F2");
+  typeName(screen, "Plans");
+  await flush();
+  expect(chips(screen)).toEqual(["Work / Plans", "Work"]);
+  expect(hasText(screen, "Unsaved changes")).toBe(false);
+});
+
+test("deleting a label while its note is open shows the parent label and is not dirty", async () => {
+  let current = LABELS.slice();
+  const { screen } = await opened({
+    listLabels: vi.fn(async () => current.slice()),
+    deleteLabel: vi.fn(async (id: string) => {
+      current = current.filter((l) => l.id !== id);
+      return { movedNotes: 0, movedLabels: 0, parentId: "lab-work" };
+    }),
+  });
+  option(screen, "Meeting plan").click();
+  await flush();
+  press(treeNode(screen, "Projects"), "Delete");
+  await flush();
+  button(document, "Delete label").click();
+  await flush();
+  expect(chips(screen)).toEqual(["Work"]);
+  expect(hasText(screen, "Unsaved changes")).toBe(false);
+});
+
+test("a note that only had the deleted label shows the parent label, not an empty picker", async () => {
+  let current = LABELS.slice();
+  const { screen, deps } = setup({
+    listLabelledNotes: async () => ({
+      items: [ln("note-p", "Plans only", ["lab-proj"], T1)],
+      next: null,
+    }),
+    listLabels: vi.fn(async () => current.slice()),
+    deleteLabel: vi.fn(async (id: string) => {
+      current = current.filter((l) => l.id !== id);
+      return { movedNotes: 1, movedLabels: 0, parentId: "lab-work" };
+    }),
+  });
+  await flush();
+  option(screen, "Plans only").click();
+  await flush();
+  expect(chips(screen)).toEqual(["Work / Projects"]);
+  press(treeNode(screen, "Projects"), "Delete");
+  await flush();
+  button(document, "Delete label").click();
+  await flush();
+  expect(deps.deleteLabel).toHaveBeenCalled();
+  expect(chips(screen)).toEqual(["Work"]);
+  expect(hasText(screen, "Unsaved changes")).toBe(false);
+});
+
+test("while a note saves, another note and New note do not open", async () => {
+  let release: () => void = () => {};
+  const save = vi.fn(
+    (id: string | null, body: string, labelIds: string[]) =>
+      new Promise<LabelledNote>((r) => {
+        release = () => r(ln(id ?? "note-created", body, labelIds, T3));
+      }),
+  );
+  const { screen } = await opened({ saveLabelledNote: save });
+  type(screen, "!");
+  button(screen, "Save").click();
+  await flush();
+  option(screen, "Meeting plan").click();
+  button(screen, "New note").click();
+  await flush();
+  expect(dialog()?.open ?? false).toBeFalsy();
+  expect(area(screen)?.value).toBe(`${BODY1}!`);
+  expect(option(screen, "Groceries").getAttribute("aria-selected")).toBe(
+    "true",
+  );
+  expect(
+    hasText(screen.querySelector(".notes-bar") as HTMLElement, "New note"),
+  ).toBe(false);
+  release();
+  await flush();
+  expect(hasText(screen, "Unsaved changes")).toBe(false);
+});
+
+test("a slow save of a new note is applied to that note only", async () => {
+  let release: () => void = () => {};
+  const save = vi.fn(
+    (id: string | null, body: string, labelIds: string[]) =>
+      new Promise<LabelledNote>((r) => {
+        release = () => r(ln(id ?? "note-created", body, labelIds, T3));
+      }),
+  );
+  const { screen } = setup({ saveLabelledNote: save });
+  await flush();
+  treeNode(screen, "Work").click();
+  await flush();
+  button(screen, "New note").click();
+  await flush();
+  type(screen, "first");
+  button(screen, "Save").click();
+  await flush();
+  // A late result for note one must not become the open note two.
+  release();
+  await flush();
+  button(screen, "New note").click();
+  await flush();
+  expect(area(screen)?.value).toBe("");
   expect(hasText(screen, "New note")).toBe(true);
+});
+
+test("All notes moves the current mark off the old label", async () => {
+  const { screen } = setup();
+  await flush();
+  treeNode(screen, "Work").click();
+  await flush();
+  expect(treeNode(screen, "Work").getAttribute("aria-current")).toBe("true");
+  button(screen, "All notes").click();
+  await flush();
+  expect(treeNode(screen, "Work").getAttribute("aria-current")).not.toBe(
+    "true",
+  );
+});
+
+test("the delete question comes from the core's count, and 0 says no note moves", async () => {
+  const { screen, deps } = setup({ countLabelDeleteMoves: async () => 0 });
+  await flush();
+  press(treeNode(screen, "Projects"), "Delete");
+  await flush();
+  expect(dialog()?.textContent).toContain("No note needs to move.");
+  // The count is one command: the notes are not paged through.
+  expect(deps.listLabelledNotes).toHaveBeenCalledTimes(1);
+});
+
+test("a label command shows a busy line and a second action while it runs does nothing", async () => {
+  let release: () => void = () => {};
+  const rename = vi.fn(
+    (id: string, name: string) =>
+      new Promise<Label>((r) => {
+        release = () => r(label(id, name, null));
+      }),
+  );
+  const { screen, deps } = setup({ renameLabel: rename });
+  await flush();
+  press(treeNode(screen, "Projects"), "F2");
+  typeName(screen, "Plans");
+  await flush();
+  expect(
+    screen.querySelector(".notes-labels [role=status]")?.textContent,
+  ).toContain("Renaming the label");
+  press(treeNode(screen, "Work"), "F2");
+  typeName(screen, "Job");
+  press(treeNode(screen, "Work"), "Delete");
+  await flush();
+  expect(rename).toHaveBeenCalledTimes(1);
+  expect(deps.createLabel).not.toHaveBeenCalled();
+  expect(deps.countLabelDeleteMoves).not.toHaveBeenCalled();
+  release();
+  await flush();
+  expect(screen.querySelector(".notes-labels [role=status]")).toBeNull();
+  expect(deps.toast).toHaveBeenCalledWith("Label renamed.");
 });

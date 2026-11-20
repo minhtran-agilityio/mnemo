@@ -1,4 +1,4 @@
--- Migration 5: nested labels for notes (#33). A label has one optional parent label
+-- Migration 6: nested labels for notes (#33). A label has one optional parent label
 -- (NULL for a top label). A note carries one or more labels through note_label.
 -- Base fields as in migration 3: UUID text id, created_at and updated_at (UTC ISO 8601,
 -- set by the core) and the soft-delete mark deleted_at (NULL while live).

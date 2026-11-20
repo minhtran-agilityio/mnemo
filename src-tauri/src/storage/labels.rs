@@ -153,6 +153,16 @@ const LIVE_NOTES_OF_LABEL_SQL: &str = "SELECT nl.note_id FROM note_label nl
      JOIN note n ON n.id = nl.note_id AND n.deleted_at IS NULL
      WHERE nl.label_id = ?1 AND nl.deleted_at IS NULL ORDER BY nl.note_id";
 
+/// The live notes of a label (?1) that do not yet carry the parent label (?2). A delete adds
+/// the parent label to these only, so this is the number of notes it moves.
+const NOTES_TO_MOVE_SQL: &str = "SELECT count(*) FROM note_label nl
+     JOIN note n ON n.id = nl.note_id AND n.deleted_at IS NULL
+     WHERE nl.label_id = ?1 AND nl.deleted_at IS NULL
+       AND NOT EXISTS (
+           SELECT 1 FROM note_label p
+           WHERE p.note_id = nl.note_id AND p.label_id = ?2 AND p.deleted_at IS NULL
+       )";
+
 const DELETE_LABEL_SQL: &str = "UPDATE label SET deleted_at = ?2, updated_at = ?2
      WHERE id = ?1 AND deleted_at IS NULL";
 
@@ -293,6 +303,12 @@ fn upsert_link(
     Ok(())
 }
 
+/// How many live notes of label `id` a delete would give the label `parent`.
+fn notes_to_move(tx: &Transaction<'_>, id: &str, parent: &str) -> Result<u32, StorageError> {
+    let n: i64 = tx.query_row(NOTES_TO_MOVE_SQL, params![id, parent], |r| r.get(0))?;
+    Ok(n as u32)
+}
+
 impl Storage {
     fn immediate(&mut self) -> Result<Transaction<'_>, StorageError> {
         // Immediate: the checks and the writes see the same state, and a second writer
@@ -407,6 +423,17 @@ impl Storage {
         self.delete_label_at(&now_iso(), id)
     }
 
+    /// How many notes deleting this label would move to its parent label: the live notes with
+    /// the label that do not already have the parent label (0 for a top label). Reads only.
+    pub fn count_notes_moving_on_delete(&mut self, id: &str) -> Result<u32, StorageError> {
+        let tx = self.immediate()?;
+        let label = live_label(&tx, id)?;
+        match label.parent_id.as_deref() {
+            Some(p) => notes_to_move(&tx, id, p),
+            None => Ok(0),
+        }
+    }
+
     pub(crate) fn delete_label_at(
         &mut self,
         now: &str,
@@ -448,11 +475,15 @@ impl Storage {
             rows.collect::<Result<_, _>>()?
         };
         tx.execute(DELETE_LABEL_SQL, params![id, now])?;
-        let mut moved_notes = 0u32;
+        // Only a link that is added or revived counts: a note that already has the parent
+        // label keeps it and is not moved.
+        let moved_notes = match &parent {
+            Some(p) => notes_to_move(&tx, id, p)?,
+            None => 0,
+        };
         if let Some(p) = &parent {
             for note_id in &notes {
                 upsert_link(&tx, now, note_id, p)?;
-                moved_notes += 1;
             }
         }
         tx.execute(HIDE_LINKS_OF_LABEL_SQL, params![id, now])?;
@@ -908,7 +939,7 @@ mod tests {
         assert_eq!(
             out,
             DeleteLabelOutcome {
-                moved_notes: 2,
+                moved_notes: 1,
                 moved_labels: 0,
                 parent_id: Some(work.clone())
             }
@@ -958,6 +989,36 @@ mod tests {
             assert!(!labels_of(&s, n).is_empty(), "note {n} lost its labels");
         }
         assert_eq!(listed(&s, None).len(), 5);
+    }
+
+    #[test]
+    fn delete_counts_only_notes_that_did_not_have_the_parent_label() {
+        let (mut s, _d) = open_temp();
+        let work = label(&mut s, None, "Work");
+        let plans = label(&mut s, Some(&work), "Plans");
+        let both = note(&mut s, "both", &[&work, &plans]);
+        assert_eq!(s.count_notes_moving_on_delete(&plans).unwrap(), 0);
+        let out = s.delete_label_at(T2, &plans).unwrap();
+        assert_eq!(out.moved_notes, 0);
+        assert_eq!(labels_of(&s, &both), vec![work.clone()]);
+    }
+
+    #[test]
+    fn count_notes_moving_matches_what_delete_moves() {
+        let (mut s, _d) = open_temp();
+        let work = label(&mut s, None, "Work");
+        let plans = label(&mut s, Some(&work), "Plans");
+        note(&mut s, "both", &[&work, &plans]);
+        note(&mut s, "only", &[&plans]);
+        let gone = note(&mut s, "gone", &[&plans]);
+        s.delete_at::<Note>(T2, &gone).unwrap();
+        assert_eq!(s.count_notes_moving_on_delete(&plans).unwrap(), 1);
+        assert_eq!(s.count_notes_moving_on_delete(&work).unwrap(), 0);
+        assert_eq!(s.delete_label_at(T3, &plans).unwrap().moved_notes, 1);
+        assert_eq!(
+            s.count_notes_moving_on_delete(&plans).unwrap_err(),
+            LABEL_NOT_FOUND
+        );
     }
 
     #[test]

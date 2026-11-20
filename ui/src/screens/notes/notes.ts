@@ -51,9 +51,6 @@ import "./notes.css";
 /** Notes read per page. */
 export const NOTES_PAGE = 50;
 
-/** The most notes one page may hold (the core's limit), used to count a label's notes. */
-const COUNT_PAGE = 100;
-
 export interface NotesDeps {
   listLabelledNotes(
     labelId: string | null,
@@ -69,6 +66,8 @@ export interface NotesDeps {
   renameLabel(id: string, name: string): Promise<Label>;
   moveLabel(id: string, parentId: string | null): Promise<Label>;
   deleteLabel(id: string): Promise<DeleteLabelOutcome>;
+  /** How many notes deleting the label would move to its parent label (0 for a top label). */
+  countLabelDeleteMoves(id: string): Promise<number>;
   /** Shows a short message in the app's toast region. */
   toast(message: string): void;
 }
@@ -95,9 +94,12 @@ export function noteTitle(body: string): string {
   return "Untitled note";
 }
 
-/** The date part of an ISO time, for the row's last-changed text. */
+/** The owner's local date of an ISO time (YYYY-MM-DD), for the row's last-changed text. */
 export function changedText(updatedAt: string): string {
-  return updatedAt.slice(0, 10);
+  const at = new Date(updatedAt);
+  if (Number.isNaN(at.getTime())) return updatedAt.slice(0, 10);
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())}`;
 }
 
 const sameIds = (a: readonly string[], b: readonly string[]) =>
@@ -135,6 +137,10 @@ export function renderNotes(
   let originalIds: string[] = [];
   let mode: Mode = "Edit";
   let saving = false;
+  /** Counts the notes opened. A late save result is applied only to the note it was made for. */
+  let openToken = 0;
+  /** True while a label command (or the count before a delete) runs; a second one does nothing. */
+  let labelBusy = false;
   let asking: Promise<boolean> | null = null;
   let dialog: DialogHandle | null = null;
   let moveDialog: DialogHandle | null = null;
@@ -307,7 +313,10 @@ export function renderNotes(
   }
 
   /** Rereads the labels after a change, then redraws the tree, the picker and the list. */
-  async function refreshLabels(): Promise<void> {
+  async function refreshLabels(remap?: { from: string; to: string | null }) {
+    // The picker state is label ids. Read them before the maps are rebuilt, so a rename, a move
+    // or a delete cannot make a chosen label look unknown.
+    const chosen = picker ? chosenIds() : [];
     try {
       setLabels(await deps.listLabels());
     } catch (error) {
@@ -318,79 +327,112 @@ export function renderNotes(
     if (currentLabelId !== null && !labelNames.has(currentLabelId))
       currentLabelId = null;
     showTree();
-    if (picker) mountPicker(chosenIds().filter((id) => labelNames.has(id)));
+    if (remap) {
+      // A deleted label: the core gave its notes the parent label. The open note shows that
+      // label too, and is not dirty because of it.
+      const swap = (ids: string[], keep: boolean) => {
+        const out: string[] = [];
+        for (const id of ids) {
+          const to = id === remap.from ? (keep ? remap.to : null) : id;
+          if (to !== null && !out.includes(to)) out.push(to);
+        }
+        return out;
+      };
+      const wasSaved = originalIds.includes(remap.from);
+      originalIds = swap(originalIds, true);
+      if (picker) mountPicker(swap(chosen, wasSaved));
+    } else if (picker) {
+      mountPicker(chosen.filter((id) => labelNames.has(id)));
+    }
     showDirty();
     await loadNotes();
   }
 
+  /** Runs one label action with a visible busy line. A second action while one runs does nothing. */
+  async function guarded<T>(
+    busy: string,
+    run: () => Promise<T>,
+  ): Promise<T | undefined> {
+    if (labelBusy) return undefined;
+    labelBusy = true;
+    const line = buildBusyLine(busy);
+    labelBanner.replaceChildren(line);
+    try {
+      return await run();
+    } finally {
+      labelBusy = false;
+      line.remove();
+    }
+  }
+
   async function labelWork(
     lead: string,
+    busy: string,
     done: string,
-    work: () => Promise<unknown>,
+    work: () => Promise<{ from: string; to: string | null } | undefined | void>,
   ): Promise<void> {
-    labelBanner.replaceChildren();
-    try {
-      await work();
-    } catch (error) {
-      showLabelProblem(lead, error);
-      return;
-    }
-    if (left) return;
-    deps.toast(done);
-    await refreshLabels();
+    await guarded(busy, async () => {
+      let remap: { from: string; to: string | null } | undefined;
+      try {
+        remap = (await work()) ?? undefined;
+      } catch (error) {
+        showLabelProblem(lead, error);
+        return;
+      }
+      if (left) return;
+      deps.toast(done);
+      await refreshLabels(remap);
+    });
   }
 
   /** What the tree reports. Each action settles in the screen; nothing rejects. */
   function treeAction(event: TreeActionEvent): Promise<void> | undefined {
     const { action, id, name } = event;
     if (action === "create")
-      return labelWork("The label was not created.", "Label created.", () =>
-        deps.createLabel(id, name ?? ""),
+      return labelWork(
+        "The label was not created.",
+        "Creating the label…",
+        "Label created.",
+        async () => {
+          await deps.createLabel(id, name ?? "");
+        },
       );
     if (action === "rename" && id !== null)
-      return labelWork("The label was not renamed.", "Label renamed.", () =>
-        deps.renameLabel(id, name ?? ""),
+      return labelWork(
+        "The label was not renamed.",
+        "Renaming the label…",
+        "Label renamed.",
+        async () => {
+          await deps.renameLabel(id, name ?? "");
+        },
       );
     if (action === "move" && id !== null) openMove(id);
     if (action === "delete" && id !== null) return askDelete(id);
     return undefined;
   }
 
-  /** The notes that have this label itself (the list of a label also holds its children's). */
-  async function countNotesOf(id: string): Promise<number> {
-    let count = 0;
-    let after: ChangeCursor | null = null;
-    do {
-      const page: LabelledNotePage = await deps.listLabelledNotes(id, {
-        limit: COUNT_PAGE,
-        ...(after ? { after } : {}),
-      });
-      count += page.items.filter((n) => n.labelIds.includes(id)).length;
-      after = page.next;
-    } while (after && !left);
-    return count;
-  }
-
   async function askDelete(id: string): Promise<void> {
     const label = labels.find((l) => l.id === id);
     if (!label) return;
-    labelBanner.replaceChildren();
     const opener =
       doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
-    let count: number;
-    try {
-      count = await countNotesOf(id);
-    } catch (error) {
-      showLabelProblem("The label was not deleted.", error);
-      return;
-    }
-    if (left) return;
+    // The core counts the notes that would move, in one query (a note that already has the
+    // parent label is not moved).
+    const count = await guarded("Counting the notes…", async () => {
+      try {
+        return await deps.countLabelDeleteMoves(id);
+      } catch (error) {
+        showLabelProblem("The label was not deleted.", error);
+        return null;
+      }
+    });
+    if (count === undefined || count === null || left) return;
     const parentPath = label.parentId ? labelPath(label.parentId) : "";
     const here = labelPath(id);
     const where = label.parentId
       ? count > 0
         ? `Its ${noteCount(count)} ${count === 1 ? "moves" : "move"} to "${parentPath}".`
-        : "It holds no notes."
+        : "No note needs to move."
       : "Its notes keep their other labels. A note with no other label stops the delete.";
     const kids = childrenOf(id).length
       ? ` Its child labels move ${label.parentId ? `to "${parentPath}"` : "to the top level"}.`
@@ -405,11 +447,13 @@ export function renderNotes(
       onConfirm: () => {
         void labelWork(
           "The label was not deleted.",
+          "Deleting the label…",
           "Label deleted.",
           async () => {
             await deps.deleteLabel(id);
             if (currentLabelId !== null && subtreeIds(id).has(currentLabelId))
               currentLabelId = label.parentId;
+            return { from: id, to: label.parentId };
           },
         );
       },
@@ -436,13 +480,13 @@ export function renderNotes(
       value: [parentPath],
       onChange: () => chooser.setError(null),
     });
-    let moving = false;
+    const status = doc.createElement("div");
     const handle = createDialog({
       doc,
       title: `Move the label "${labelPath(id)}"`,
-      children: [chooser.element],
+      children: [chooser.element, status],
       actions: (close) => {
-        const move = createDialogButton(
+        const move: HTMLButtonElement = createDialogButton(
           "Move",
           "primary",
           () => {
@@ -453,22 +497,23 @@ export function renderNotes(
               close();
               return;
             }
-            if (moving) return;
-            moving = true;
-            void (async () => {
+            void guarded("Moving the label…", async () => {
+              status.replaceChildren(buildBusyLine("Moving the label…"));
+              move.setAttribute("aria-disabled", "true");
               try {
                 await deps.moveLabel(id, parentId);
               } catch (error) {
                 console.error("could not move the label:", error);
                 chooser.setError(errorMessage(error));
-                moving = false;
+                status.replaceChildren();
+                move.removeAttribute("aria-disabled");
                 return;
               }
               close();
               if (left) return;
               deps.toast("Label moved.");
               await refreshLabels();
-            })();
+            });
           },
           doc,
         );
@@ -485,7 +530,10 @@ export function renderNotes(
   function selectLabel(id: string | null): void {
     if (id === currentLabelId) return;
     currentLabelId = id;
-    allNotes.hidden = id === null;
+    const hadFocus = treeSlot.contains(doc.activeElement);
+    showTree();
+    if (hadFocus)
+      treeSlot.querySelector<HTMLElement>('[aria-current="true"]')?.focus();
     void loadNotes();
   }
 
@@ -601,6 +649,7 @@ export function renderNotes(
   function openNote(id: string): void {
     const found = notes.find((n) => n.note.id === id);
     if (!found) return;
+    openToken++;
     openId = id;
     isNew = false;
     original = found.note.body;
@@ -615,6 +664,7 @@ export function renderNotes(
 
   /** A new note: empty, in Edit mode, with the current label chosen. */
   function openNew(): void {
+    openToken++;
     openId = null;
     isNew = true;
     original = "";
@@ -645,6 +695,7 @@ export function renderNotes(
   async function save(): Promise<void> {
     if (saving || !isEditing()) return;
     const id = openId;
+    const token = openToken;
     const ids = chosenIds();
     if (ids.length === 0) {
       picker?.setError(NO_LABEL);
@@ -661,7 +712,7 @@ export function renderNotes(
         ...(inList(saved) ? [saved] : []),
         ...notes.filter((n) => n.note.id !== saved.note.id),
       ];
-      if (openId === id) {
+      if (token === openToken) {
         openId = saved.note.id;
         isNew = false;
         original = saved.note.body;
@@ -672,7 +723,7 @@ export function renderNotes(
       deps.toast("Note saved.");
     } catch (error) {
       console.error("could not save the note:", error);
-      if (left || openId !== id) return;
+      if (left || token !== openToken) return;
       bannerSlot.replaceChildren(
         buildBanner({
           tone: "bad",
@@ -715,6 +766,11 @@ export function renderNotes(
   }
 
   async function requestOpen(id: string, row: HTMLElement): Promise<void> {
+    // A save is running: switching waits for it (the Save button shows the busy state).
+    if (saving) {
+      if (!left) showList();
+      return;
+    }
     if (id === openId) return;
     if (isDirty() && !(await askDiscard(row))) {
       // Keep editing: the open note stays the selected row.
@@ -725,6 +781,7 @@ export function renderNotes(
   }
 
   async function requestNew(): Promise<void> {
+    if (saving) return;
     if (isDirty() && !(await askDiscard(newNote))) return;
     if (!left) openNew();
   }
