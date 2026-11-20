@@ -12,6 +12,11 @@ pub enum StorageError {
     SchemaTooNew { found: u32, supported: u32 },
     /// Any other database error.
     Database(String),
+    /// The record does not exist or was deleted. `kind` names its type, for example "note".
+    NotFound { kind: &'static str },
+    /// The input was refused before anything was written. The text says why and is
+    /// safe to show: it never names a file path or SQL.
+    Invalid(String),
 }
 
 impl fmt::Display for StorageError {
@@ -30,6 +35,10 @@ impl fmt::Display for StorageError {
                 "The data file is from a newer Mnemo (version {found}; this app supports up to {supported}). Update Mnemo."
             ),
             StorageError::Database(why) => write!(f, "Database error: {why}"),
+            StorageError::NotFound { kind } => {
+                write!(f, "There is no such {kind}. It may have been deleted.")
+            }
+            StorageError::Invalid(why) => write!(f, "{why}"),
         }
     }
 }

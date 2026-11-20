@@ -1,12 +1,18 @@
 //! The shared base of every record: UUID id, UTC ISO 8601 times set by the core,
-//! and a soft-delete mark. Item tables (#14) build on it.
-#![allow(dead_code)] // First user is the item tables in #14.
+//! and a soft-delete mark. Also the paging types every list function uses.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use super::error::StorageError;
+
+/// The largest page a list function returns.
+pub const MAX_PAGE: u32 = 100;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecordBase {
     pub id: String,
     pub created_at: String,
@@ -29,15 +35,18 @@ impl RecordBase {
         }
     }
 
+    #[allow(dead_code)] // Item updates set updated_at in SQL; kept for in-memory records.
     pub fn touch_at(&mut self, now: &str) {
         self.updated_at = now.to_string();
     }
 
+    #[allow(dead_code)] // Item deletes set deleted_at in SQL; kept for in-memory records.
     pub fn soft_delete_at(&mut self, now: &str) {
         self.deleted_at = Some(now.to_string());
         self.updated_at = now.to_string();
     }
 
+    #[allow(dead_code)] // Kept for in-memory records.
     pub fn is_deleted(&self) -> bool {
         self.deleted_at.is_some()
     }
@@ -47,6 +56,50 @@ impl Default for RecordBase {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Where a page starts: the `created_at` and `id` of the last record of the page before.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Cursor {
+    pub created_at: String,
+    pub id: String,
+}
+
+/// Which page to read: at most `limit` records (1 to 100), after `after` when given.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageRequest {
+    pub limit: u32,
+    #[serde(default)]
+    pub after: Option<Cursor>,
+}
+
+impl PageRequest {
+    /// The first page of `limit` records.
+    #[cfg(test)]
+    pub fn first(limit: u32) -> Self {
+        PageRequest { limit, after: None }
+    }
+
+    /// Refuses a limit outside 1 to 100.
+    pub fn validate(&self) -> Result<(), StorageError> {
+        if (1..=MAX_PAGE).contains(&self.limit) {
+            Ok(())
+        } else {
+            Err(StorageError::Invalid(format!(
+                "A page holds 1 to {MAX_PAGE} records."
+            )))
+        }
+    }
+}
+
+/// One page of records, newest first. `next` is set when more records follow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Page<T> {
+    pub items: Vec<T>,
+    pub next: Option<Cursor>,
 }
 
 /// The current time as UTC ISO 8601, for example `2026-11-18T08:30:00Z`.
@@ -82,6 +135,18 @@ pub fn format_utc(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_limit_must_be_1_to_100() {
+        assert!(PageRequest::first(1).validate().is_ok());
+        assert!(PageRequest::first(100).validate().is_ok());
+        for bad in [0, 101] {
+            assert!(matches!(
+                PageRequest::first(bad).validate(),
+                Err(StorageError::Invalid(_))
+            ));
+        }
+    }
 
     #[test]
     fn formats_known_instants() {
