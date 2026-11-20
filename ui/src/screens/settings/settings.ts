@@ -1,7 +1,15 @@
 // The Settings screen: a title, a list of sections on the left (each row shows its current value)
 // and the open section on the right. Only Appearance has content so far; AI and Data are empty
-// until their own tickets. All text goes in as text, never as markup.
+// until their own tickets. All text goes in as text, never as markup. Every part comes from
+// ui/src/ds (section list, card, choice list, text); settings.css lays them out.
 
+import {
+  buildText,
+  type ChoiceList,
+  createCard,
+  createChoiceList,
+  createSectionList,
+} from "../../ds";
 import { findItem } from "../../frame/nav";
 import { THEME_LABELS, THEMES, type Theme } from "../../frame/theme";
 import { errorMessage } from "../../shared/api";
@@ -47,18 +55,6 @@ const HINTS: Readonly<Record<Theme, string>> = {
 // screen, so a save that started before the owner left Settings still finishes in order.
 let saving: Promise<void> = Promise.resolve();
 
-function el<K extends keyof HTMLElementTagNameMap>(
-  doc: Document,
-  tag: K,
-  className?: string,
-  text?: string,
-): HTMLElementTagNameMap[K] {
-  const node = doc.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
 /** Fills `container` with the Settings screen. */
 export function renderSettings(
   container: HTMLElement,
@@ -67,52 +63,57 @@ export function renderSettings(
   const doc = container.ownerDocument;
   let open: SectionId = "appearance";
 
-  const title = el(doc, "h1", undefined, "Settings");
-  const note = el(doc, "p", "settings-note", "Changes are saved at once.");
-  const header = el(doc, "header", "settings-head");
+  const title = doc.createElement("h1");
+  title.textContent = "Settings";
+  const header = doc.createElement("header");
+  header.className = "settings-head";
+  header.append(
+    title,
+    buildText(doc, {
+      tone: "muted",
+      size: "base",
+      content: "Changes are saved at once.",
+    }),
+  );
   const phase = findItem("settings")?.phase;
-  header.append(title, note);
   if (phase !== undefined)
-    header.append(el(doc, "p", "settings-phase", `Phase ${phase}`));
-
-  const list = el(doc, "nav", "settings-sections");
-  list.setAttribute("aria-label", "Settings sections");
-  const body = el(doc, "div", "settings-body");
-  const layout = el(doc, "div", "settings-layout");
-  layout.append(list, body);
-  container.replaceChildren(header, layout);
+    header.append(
+      buildText(doc, {
+        tone: "muted",
+        size: "base",
+        content: `Phase ${phase}`,
+      }),
+    );
 
   const currentValue = (id: SectionId): string =>
     id === "appearance" ? THEME_LABELS[deps.getTheme()] : EMPTY_VALUE;
 
-  // The rows are built once and updated in place, so the row that has keyboard focus keeps it.
-  const values = new Map<SectionId, HTMLElement>();
-  const rows = new Map<SectionId, HTMLButtonElement>();
-  for (const section of SECTIONS) {
-    const row = el(doc, "button", "settings-row");
-    row.type = "button";
-    row.addEventListener("click", () => {
-      open = section.id;
+  // The section list builds its rows once and updates them in place, so the row that has
+  // keyboard focus keeps it.
+  const list = createSectionList(doc, {
+    label: "Settings sections",
+    sections: SECTIONS.map((section) => ({
+      ...section,
+      value: currentValue(section.id),
+    })),
+    current: open,
+    onSelect: (id) => {
+      open = id as SectionId;
       renderList();
       renderBody();
-    });
-    const value = el(doc, "span", "settings-row-value");
-    values.set(section.id, value);
-    rows.set(section.id, row);
-    // The plain space keeps the name and the value apart for a screen reader and for copy.
-    row.append(el(doc, "span", "settings-row-name", section.label), " ", value);
-    list.append(row);
-  }
+    },
+  });
+  const body = doc.createElement("div");
+  body.className = "settings-body";
+  const layout = doc.createElement("div");
+  layout.className = "settings-layout";
+  layout.append(list.element, body);
+  container.replaceChildren(header, layout);
 
   function renderList(): void {
-    for (const section of SECTIONS) {
-      const row = rows.get(section.id);
-      const value = values.get(section.id);
-      if (!row || !value) continue;
-      value.textContent = currentValue(section.id);
-      if (section.id === open) row.setAttribute("aria-current", "true");
-      else row.removeAttribute("aria-current");
-    }
+    for (const section of SECTIONS)
+      list.setValue(section.id, currentValue(section.id));
+    list.setCurrent(open);
   }
 
   function renderBody(): void {
@@ -120,73 +121,59 @@ export function renderSettings(
     else body.replaceChildren(emptySection(open));
   }
 
+  function card(label: string, children: Node[]): HTMLElement {
+    const section = createCard({
+      doc,
+      element: "section",
+      label,
+      title: label,
+      level: 2,
+      children,
+    });
+    section.classList.add("settings-card");
+    return section;
+  }
+
   function emptySection(id: SectionId): HTMLElement {
     const label = SECTIONS.find((s) => s.id === id)?.label ?? "";
-    const section = el(doc, "section", "card settings-card");
-    section.setAttribute("aria-label", label);
-    section.append(
-      el(doc, "h2", undefined, label),
-      el(doc, "p", "settings-empty", "Nothing to set here yet."),
-    );
-    return section;
+    return card(label, [
+      buildText(doc, { tone: "muted", content: "Nothing to set here yet." }),
+    ]);
   }
 
   function appearance(): HTMLElement {
-    const section = el(doc, "section", "card settings-card");
-    section.setAttribute("aria-label", "Appearance");
-
-    const status = el(doc, "p", "settings-status");
-    status.setAttribute("role", "status");
-    status.hidden = true;
-
-    const group = el(doc, "fieldset", "settings-choices");
-    group.append(el(doc, "legend", "settings-legend", "Colours"));
-    for (const theme of THEMES) {
-      const id = `theme-${theme}`;
-      const input = el(doc, "input");
-      input.type = "radio";
-      input.name = "theme";
-      input.id = id;
-      input.value = theme;
-      input.checked = deps.getTheme() === theme;
-      input.setAttribute("aria-describedby", `${id}-hint`);
-      input.addEventListener("change", () => {
-        if (input.checked) choose(theme, status);
-      });
-      const label = el(doc, "label", undefined, THEME_LABELS[theme]);
-      label.htmlFor = id;
-      const hint = el(doc, "span", "settings-hint", HINTS[theme]);
-      hint.id = `${id}-hint`;
-      const choice = el(doc, "div", "settings-choice");
-      choice.append(input, label, hint);
-      group.append(choice);
-    }
-
-    section.append(el(doc, "h2", undefined, "Appearance"), group, status);
-    return section;
+    const choices: ChoiceList<Theme> = createChoiceList<Theme>(doc, {
+      legend: "Colours",
+      name: "theme",
+      choices: THEMES.map((theme) => ({
+        value: theme,
+        label: THEME_LABELS[theme],
+        hint: HINTS[theme],
+      })),
+      value: deps.getTheme(),
+      onChange: (theme) => choose(theme, choices),
+    });
+    return card("Appearance", [choices.element]);
   }
 
-  function choose(theme: Theme, status: HTMLElement): void {
+  function choose(theme: Theme, choices: ChoiceList<Theme>): void {
     deps.applyTheme(theme);
     renderList();
     saving = saving.then(async () => {
       try {
         await deps.saveTheme(theme);
-        status.hidden = true;
-        status.textContent = "";
+        choices.setError(null);
         // A failure shown after the owner left Settings is cleared by any later good save.
         deps.onDetachedSave?.(null);
       } catch (error) {
         console.error("could not save the theme:", error);
         const text = `Mnemo could not save the theme, so it applies only until Mnemo quits. ${errorMessage(error)}`;
-        status.textContent = text;
-        status.hidden = false;
+        choices.setError(text);
         // The owner may have left Settings, so this line would be on a screen nobody sees.
-        if (!status.isConnected) deps.onDetachedSave?.(text);
+        if (!choices.element.isConnected) deps.onDetachedSave?.(text);
       }
     });
   }
 
-  renderList();
   renderBody();
 }

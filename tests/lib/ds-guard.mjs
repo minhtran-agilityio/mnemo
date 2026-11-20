@@ -65,13 +65,6 @@ export const readRepo = (path) => readFileSync(join(ROOT, path), "utf8");
  */
 export const KNOWN_EXCEPTIONS = [
   {
-    path: "ui/src/screens/settings/",
-    guards: ["css", "elements"],
-    removedBy: 111,
-    reason:
-      "The Settings screen shipped before the design system. settings.css holds its own look and settings.ts creates raw buttons and inputs.",
-  },
-  {
     path: "ui/src/screens/kanban/",
     guards: ["css"],
     removedBy: 111,
