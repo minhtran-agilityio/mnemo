@@ -1,0 +1,211 @@
+/* Label picker: a tree of labels to choose from, with chosen chips. Tokens only. */
+.label-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  min-width: 0;
+  max-width: var(--size-tags-max);
+}
+
+.label-picker-label {
+  color: var(--ink2);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.label-picker-tree {
+  display: flex;
+  flex-direction: column;
+  max-height: var(--size-label-picker-max);
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: var(--border-1) solid var(--control-edge);
+  border-radius: var(--radius-md);
+  background: var(--card);
+}
+
+.label-picker.is-error .label-picker-tree {
+  border-color: var(--bad);
+}
+
+.label-picker-item {
+  flex: none;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-2);
+  min-height: var(--control-height);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-lg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.label-picker-item[data-level="1"] {
+  padding-left: calc(var(--space-2) + var(--space-4));
+}
+
+.label-picker-item[data-level="2"] {
+  padding-left: calc(var(--space-2) + 2 * var(--space-4));
+}
+
+.label-picker-item[data-level="3"] {
+  padding-left: calc(var(--space-2) + 3 * var(--space-4));
+}
+
+.label-picker-item[data-level="4"] {
+  padding-left: calc(var(--space-2) + 4 * var(--space-4));
+}
+
+.label-picker-item:not([aria-disabled="true"]):hover,
+.label-picker-item.is-hover:not([aria-disabled="true"]) {
+  background: var(--accent-soft);
+}
+
+.label-picker-item:not([aria-disabled="true"]):active,
+.label-picker-item.is-active:not([aria-disabled="true"]) {
+  background: var(--tint-info);
+}
+
+.label-picker-item:focus-visible,
+.label-picker-item.is-focus {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: calc(var(--border-2) * -1);
+}
+
+.label-picker-item.is-selected:not([aria-disabled="true"]) {
+  background: var(--tint-info);
+  color: var(--chip-ink);
+  font-weight: var(--weight-semibold);
+}
+
+.label-picker-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.label-picker-notes {
+  display: flex;
+  grid-column: 2;
+  flex-direction: column;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+}
+
+.label-picker-notes:empty {
+  display: none;
+}
+
+.label-picker-current {
+  color: var(--chip-ink);
+  font-weight: var(--weight-semibold);
+}
+
+.label-picker-reason {
+  color: var(--muted);
+}
+
+.label-picker-mark {
+  display: none;
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.label-picker-item.is-selected .label-picker-mark {
+  display: inline-flex;
+}
+
+.label-picker-item[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.label-picker-item[aria-disabled="true"].is-selected {
+  font-weight: var(--weight-semibold);
+}
+
+.label-picker.is-disabled .label-picker-chip {
+  color: var(--muted);
+}
+
+.label-picker-chosen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.label-picker-chosen[hidden] {
+  display: none;
+}
+
+.label-picker-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: 100%;
+  padding-left: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--tint-info);
+  color: var(--chip-ink);
+  font-size: var(--text-md);
+}
+
+.label-picker-chip-text {
+  min-width: 0;
+  padding-block: var(--space-1);
+  line-height: var(--leading-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.label-picker-chip-remove {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-tap-min);
+  height: var(--size-tap-min);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.label-picker-chip-remove:hover {
+  background: var(--accent-soft);
+}
+
+.label-picker-chip-remove:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: calc(var(--border-2) * -1);
+}
+
+.label-picker-chip-remove:disabled {
+  cursor: not-allowed;
+}
+
+.label-picker-empty {
+  margin: 0;
+  padding: var(--space-3);
+  border: var(--border-1) dashed var(--control-edge);
+  border-radius: var(--radius-md);
+  color: var(--ink2);
+  font-size: var(--text-md);
+}
+
+/* No error: the live region stays but takes no room (it cancels the column gap). */
+.label-picker-error:empty {
+  margin-top: calc(var(--space-2) * -1);
+}

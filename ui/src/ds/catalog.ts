@@ -293,6 +293,7 @@ export const TOKEN_GROUPS: readonly TokenGroup[] = [
       "--size-field-max",
       "--size-textarea-min",
       "--size-tags-max",
+      "--size-label-picker-max",
       "--size-tag-input-min",
       "--size-menu-min",
       "--size-menu-max",
