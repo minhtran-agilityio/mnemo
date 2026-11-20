@@ -8,7 +8,7 @@ mod system;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
 
-use commands::{AiHealthState, AppStorage, StartupError};
+use commands::{AiHealthState, AiRunnerState, AppStorage, StartupError};
 use storage::StorageError;
 
 /// The stable code for a storage error. Only this code reaches the UI; the full
@@ -94,6 +94,15 @@ pub fn run() {
             app.manage(AppStorage::new(opened));
             app.manage(StartupFailed(error_code.is_some()));
 
+            // MNEMO_FAKE_AI=1 starts the whole app with the fake AI runner (fixed test answers).
+            let fake =
+                ai::runner::fake_requested(std::env::var_os(ai::runner::FAKE_AI_ENV).as_deref());
+            log::info!("AI runner: {}", if fake { "fake" } else { "real" });
+            app.manage(AiRunnerState {
+                runner: ai::runner::select_runner(fake),
+                fake,
+            });
+
             // The Claude Code check runs off the main thread, so the window never waits for
             // it. Saving and reading do not depend on its result.
             app.manage(AiHealthState::default());
@@ -162,6 +171,7 @@ pub fn run() {
             commands::set_setting,
             commands::get_ai_health,
             commands::check_ai_health,
+            commands::get_ai_mode,
             commands::add_bookmark,
             commands::get_bookmark,
             commands::list_bookmarks,

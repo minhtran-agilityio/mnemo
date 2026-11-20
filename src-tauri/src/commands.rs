@@ -1,11 +1,12 @@
 // Commands the UI can call through Tauri's invoke bridge, and the state they share.
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
 use crate::ai::health::{self, AiHealth};
+use crate::ai::runner::AiRunner;
 use crate::storage::items::{
     Bookmark, BookmarkInput, Event, EventInput, Idea, IdeaInput, Memory, MemoryInput, Note,
     NoteInput, Project, ProjectInput, Run, RunInput, Task, TaskInput,
@@ -64,6 +65,39 @@ impl AppStorage {
             }),
         }
     }
+}
+
+/// Whether AI answers come from the real `claude -p` runner or from the fake test runner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AiMode {
+    Real,
+    Fake,
+}
+
+/// The runner every AI feature uses, and which kind it is. Chosen once at start from
+/// `MNEMO_FAKE_AI`.
+pub struct AiRunnerState {
+    // Read by the AI features of issue #19 and later; today only the mode is read.
+    #[allow(dead_code)]
+    pub runner: Arc<dyn AiRunner>,
+    pub fake: bool,
+}
+
+impl AiRunnerState {
+    pub fn mode(&self) -> AiMode {
+        if self.fake {
+            AiMode::Fake
+        } else {
+            AiMode::Real
+        }
+    }
+}
+
+/// Says whether AI is fake, so Settings can show it.
+#[tauri::command]
+pub fn get_ai_mode(state: tauri::State<'_, AiRunnerState>) -> AiMode {
+    state.mode()
 }
 
 /// Returns a fixed reply so the UI can prove the Rust core is reachable.
@@ -582,6 +616,22 @@ mod tests {
         );
         assert_eq!(read_setting(&state, "k").unwrap(), None);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ai_mode_serialises_as_fake_or_real_and_follows_the_state() {
+        assert_eq!(serde_json::to_string(&AiMode::Fake).unwrap(), "\"fake\"");
+        assert_eq!(serde_json::to_string(&AiMode::Real).unwrap(), "\"real\"");
+        let fake = AiRunnerState {
+            runner: crate::ai::runner::select_runner(true),
+            fake: true,
+        };
+        let real = AiRunnerState {
+            runner: crate::ai::runner::select_runner(false),
+            fake: false,
+        };
+        assert_eq!(fake.mode(), AiMode::Fake);
+        assert_eq!(real.mode(), AiMode::Real);
     }
 
     #[test]
