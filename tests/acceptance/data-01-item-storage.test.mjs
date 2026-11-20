@@ -150,7 +150,7 @@ test('AC1: required fields and CHECKs of each type are enforced by the database'
   assert.equal(ok(db, "SELECT duration_ms IS NULL AND outcome IS NULL AND error IS NULL FROM run WHERE id='r-ok';"), '1');
   rejects(db, ins('run', 'r-neg', ', duration_ms', ',-1'), 'negative duration');
   rejects(db, ins('run', 'r-out', ', outcome', ",'weird'"), 'bad outcome');
-  for (const o of ['ok', 'failed', 'cancelled']) ok(db, ins('run', `r-${o}`, ', outcome', `,'${o}'`));
+  for (const o of ['ok', 'failed', 'cancelled']) ok(db, ins('run', `r-out-${o}`, ', outcome', `,'${o}'`));
   rejects(db, `INSERT INTO event(id,created_at,updated_at,title) VALUES('e','${U}','${U}','t');`, 'event without times');
   rejects(db, `INSERT INTO project(id,created_at,updated_at,title) VALUES('p','${U}','${U}','t');`, 'project without status');
 }));
