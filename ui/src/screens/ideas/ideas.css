@@ -10,6 +10,12 @@
   display: none;
 }
 
+/* main is full width on this screen (data-layout="wide") so the four columns fit; the editor
+   keeps the reading width. */
+.ideas-editor {
+  max-width: var(--measure-intro);
+}
+
 .ideas-editor,
 .idea-fields,
 .idea-source {

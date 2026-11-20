@@ -25,6 +25,12 @@ main {
   padding: var(--space-5) var(--space-4);
 }
 
+/* A screen that needs the whole width (the Ideas board, #34) sets data-layout="wide" on main while
+   it is open and removes it when the owner leaves. Every other screen keeps the reading width. */
+main[data-layout="wide"] {
+  max-width: none;
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;

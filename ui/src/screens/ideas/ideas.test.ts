@@ -264,3 +264,13 @@ test("a refused save keeps what the owner typed", async () => {
   );
   box.remove();
 });
+
+test("the screen asks main for the whole width and gives it back on leave", async () => {
+  const box = document.createElement("main");
+  document.body.append(box);
+  const leave = renderIdeas(box, deps());
+  expect(box.dataset.layout).toBe("wide");
+  leave();
+  expect(box.dataset.layout).toBeUndefined();
+  box.remove();
+});

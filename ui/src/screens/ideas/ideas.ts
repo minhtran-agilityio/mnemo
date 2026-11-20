@@ -128,6 +128,8 @@ export function renderIdeas(
   editorSlot.className = "ideas-editor";
   body.append(board, editorSlot);
   container.replaceChildren(header, body, toasts.element);
+  // The board needs the whole width; main.ts calls the cleanup below before the next screen opens.
+  container.dataset.layout = "wide";
 
   const open = (): Idea | null =>
     state.ideas.find((i) => i.id === state.openId) ?? null;
@@ -276,5 +278,6 @@ export function renderIdeas(
   void load();
   return () => {
     left = true;
+    delete container.dataset.layout;
   };
 }
