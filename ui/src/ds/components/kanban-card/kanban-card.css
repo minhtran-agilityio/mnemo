@@ -59,23 +59,26 @@
   cursor: pointer;
 }
 
-.kcard-button:active {
-  background: var(--head);
-}
-
 .kcard.is-current {
   border-color: var(--accent);
   border-inline-start-width: var(--border-2);
   background: var(--accent-soft);
 }
 
+.kcard-button:active,
+.kcard-button.is-current:active {
+  background: var(--head);
+}
+
 .kcard .k-head {
   display: flex;
+  min-width: 0;
+  overflow-wrap: anywhere;
   align-items: flex-start;
   gap: var(--space-2);
 }
 
 .kcard .k-mark {
-  margin-block-start: var(--border-2);
+  margin-block-start: var(--space-1);
   color: var(--accent);
 }

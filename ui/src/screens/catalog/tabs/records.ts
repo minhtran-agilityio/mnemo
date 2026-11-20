@@ -243,6 +243,15 @@ export const renderRecords: TabRenderer = (panel, ctx) => {
           },
           "button focus",
         ),
+        k(
+          {
+            title: "x".repeat(60),
+            meta: ["3 of 4 checks", "2 tags"],
+            onOpen: () => {},
+            current: true,
+          },
+          "open, long unbroken title",
+        ),
       ];
     },
     citation: () => {

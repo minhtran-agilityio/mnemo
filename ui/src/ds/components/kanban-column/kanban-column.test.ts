@@ -171,7 +171,13 @@ test("a pointer drop on the same column or a cancel moves nothing", () => {
 test("a no-move board never moves a card, by key or pointer, and cards open", () => {
   let opened = "";
   const idea = (t: string) =>
-    createKanbanCard(document, { title: t, onOpen: () => (opened = t) });
+    createKanbanCard(document, {
+      title: t,
+      current: true,
+      onOpen: () => {
+        opened = t;
+      },
+    });
   const wrap = createKanbanBoard(
     document,
     "Ideas",
@@ -179,7 +185,7 @@ test("a no-move board never moves a card, by key or pointer, and cards open", ()
       { name: "Spark", cards: [idea("A")], emptyText: "No idea here yet." },
       { name: "Shape", cards: [], emptyText: "No idea here yet." },
     ],
-    { move: false, drag: true },
+    { move: false },
   );
   document.body.append(wrap);
   const a = wrap.querySelector(".kcard") as HTMLElement;
@@ -202,6 +208,7 @@ test("a no-move board never moves a card, by key or pointer, and cards open", ()
   expect(cols[1].querySelector(".empty")?.textContent).toBe(
     "No idea here yet.",
   );
+  expect(a.getAttribute("aria-current")).toBe("true");
   a.click();
   expect(opened).toBe("A");
   wrap.remove();

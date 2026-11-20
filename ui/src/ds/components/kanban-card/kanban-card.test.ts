@@ -66,3 +66,40 @@ test("a long title stays in the card as text", () => {
   const card = createKanbanCard(document, { title: long, onOpen: () => {} });
   expect(card.querySelector(".k-title")?.textContent).toBe(long);
 });
+
+test("Enter and Space are left to the button and click opens once", () => {
+  let opened = 0;
+  const card = createKanbanCard(document, {
+    title: "A",
+    onOpen: () => {
+      opened += 1;
+    },
+  });
+  document.body.append(card);
+  for (const key of ["Enter", " "]) {
+    const e = new KeyboardEvent("keydown", {
+      key,
+      bubbles: true,
+      cancelable: true,
+    });
+    card.dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(false);
+  }
+  expect(opened).toBe(0);
+  card.focus();
+  expect(document.activeElement).toBe(card);
+  card.click();
+  expect(opened).toBe(1);
+  card.remove();
+});
+
+test("an open card with a 60-character unbroken title keeps it as text", () => {
+  const long = "x".repeat(60);
+  const card = createKanbanCard(document, {
+    title: long,
+    onOpen: () => {},
+    current: true,
+  });
+  expect(card.querySelector(".k-head .k-title")?.textContent).toBe(long);
+  expect(card.querySelector<HTMLElement>(".k-title")?.title).toBe(long);
+});

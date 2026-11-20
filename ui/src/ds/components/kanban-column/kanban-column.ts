@@ -53,12 +53,18 @@ function syncColumn(col: Element) {
   if (empty) empty.hidden = n > 0;
 }
 
-export interface KanbanBoardOptions {
-  /** Adds pointer drag between columns and the plain Left and Right arrows. Alt+Arrow always works. */
-  readonly drag?: boolean;
-  /** `false` is the no-move board: no drag, no Alt+Arrow, no Arrow move. Cards only open. */
-  readonly move?: boolean;
-}
+/** Alt+Arrow always moves cards, plus the pointer and plain arrows with `drag`. `move: false` is the no-move board and cannot take `drag`. */
+export type KanbanBoardOptions =
+  | {
+      /** Adds pointer drag between columns and the plain Left and Right arrows. Alt+Arrow always works. */
+      readonly drag?: boolean;
+      readonly move?: true;
+    }
+  | {
+      /** The no-move board: no drag, no Alt+Arrow, no Arrow move. Cards only open. */
+      readonly move: false;
+      readonly drag?: never;
+    };
 
 export function createKanbanBoard(
   doc: Document,

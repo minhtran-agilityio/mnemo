@@ -7,20 +7,34 @@ import { createMetaLine } from "../metadata-line/metadata-line";
 import { buildSpinner } from "../spinner/spinner";
 import "./kanban-card.css";
 
-export interface KanbanCardOptions {
+interface KanbanCardBase {
   readonly title: string;
   readonly meta?: readonly string[];
   /** Shows "AI working" with a spinner. */
   readonly working?: boolean;
+}
+
+/** A card that moves with the keys (see kanban-column): a focusable div. */
+export interface KanbanMovableCardOptions extends KanbanCardBase {
   readonly forceState?: "hover" | "focus" | "dragging";
-  /**
-   * Makes the card a real button that opens the item: click, Enter or Space call `onOpen`. Such a
-   * card never moves (no grab cursor). Use it in a board with `move: false`.
-   */
-  readonly onOpen?: () => void;
-  /** The item that is open now (button card only): aria-current and a check mark, not colour alone. */
+  readonly onOpen?: undefined;
+  readonly current?: never;
+}
+
+/**
+ * A real button that opens the item: click, Enter or Space call `onOpen`. It never moves, so it
+ * has no dragging state. Use it in a board with `move: false`.
+ */
+export interface KanbanButtonCardOptions extends KanbanCardBase {
+  readonly forceState?: "hover" | "focus";
+  readonly onOpen: () => void;
+  /** The item that is open now: aria-current and a check mark, not colour alone. */
   readonly current?: boolean;
 }
+
+export type KanbanCardOptions =
+  | KanbanMovableCardOptions
+  | KanbanButtonCardOptions;
 
 export function createKanbanCard(
   doc: Document,
