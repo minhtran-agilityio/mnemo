@@ -111,9 +111,11 @@ test("collapsed icons keep their name, and get it as a tooltip", () => {
     "Today",
   );
   build(false);
+  // Open, a long label is cut with an ellipsis, so the full name stays as the title.
   expect(
-    sidebar.element.querySelector("a[data-item=today]")?.hasAttribute("title"),
-  ).toBe(false);
+    sidebar.element.querySelector<HTMLAnchorElement>("a[data-item=today]")
+      ?.title,
+  ).toBe("Today");
 });
 
 test("a collapsed Later item keeps its Later status in the tooltip", () => {

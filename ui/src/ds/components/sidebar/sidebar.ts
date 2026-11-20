@@ -207,10 +207,10 @@ export function createSidebar(doc: Document, options: SidebarOptions): Sidebar {
     toggle.setAttribute("aria-label", name);
     toggle.title = name;
     toggle.setAttribute("aria-expanded", String(!next));
-    // Collapsed items show only an icon, so each one gets its name as a tooltip.
+    // Collapsed items show only an icon, and a long label is cut when open, so each item always
+    // carries its full name as a tooltip.
     for (const a of nav.querySelectorAll<HTMLAnchorElement>("a[data-label]"))
-      if (next) a.title = a.dataset.label ?? "";
-      else a.removeAttribute("title");
+      a.title = a.dataset.label ?? "";
     for (const b of [bottomToggle, searchButton])
       if (next) b.title = b.textContent?.trim() ?? "";
       else b.removeAttribute("title");

@@ -119,7 +119,7 @@ test("the toggle collapses and opens, says what it will do, and tells the caller
   expect(toggled).toEqual([true, false]);
 });
 
-test("collapsed, every item keeps its name and gets it as a tooltip, Later included", () => {
+test("every item keeps its full name as a tooltip, collapsed or open, Later included", () => {
   build({ collapsed: true });
   expect(q<HTMLAnchorElement>("a[data-item=notes]").title).toBe("Notes");
   expect(q<HTMLAnchorElement>("a[data-item=videos]").title).toBe(
@@ -129,7 +129,11 @@ test("collapsed, every item keeps its name and gets it as a tooltip, Later inclu
     "Apps and settings",
   );
   sidebar.setCollapsed(false);
-  expect(q("a[data-item=notes]").hasAttribute("title")).toBe(false);
+  // Open, a long label ends in an ellipsis, so the full name stays as the title.
+  expect(q<HTMLAnchorElement>("a[data-item=notes]").title).toBe("Notes");
+  expect(q<HTMLAnchorElement>("a[data-item=videos]").title).toBe(
+    "Videos (Later)",
+  );
   expect(toggled).toEqual([]);
 });
 

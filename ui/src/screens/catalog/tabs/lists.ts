@@ -112,25 +112,30 @@ export const renderLists: TabRenderer = (panel, ctx) => {
       "kanban column": () => {
         const c = (title: string, ref: string) =>
           createKanbanCard(doc, { title, meta: [ref] });
-        const board = createKanbanBoard(doc, "Board example", [
-          {
-            name: "To do",
-            cards: [
-              c("Pick an icon set", ref(104)),
-              c("Contrast test", ref(104)),
-            ],
-          },
-          {
-            name: "Doing",
-            cards: [c("Write DESIGN.md", ref(112))],
-            over: true,
-          },
-          {
-            name: "Done",
-            cards: [],
-            emptyText: "Nothing done yet. Drag a card here.",
-          },
-        ]);
+        const board = createKanbanBoard(
+          doc,
+          "Board example",
+          [
+            {
+              name: "To do",
+              cards: [
+                c("Pick an icon set", ref(104)),
+                c("Contrast test", ref(104)),
+              ],
+            },
+            {
+              name: "Doing",
+              cards: [c("Write DESIGN.md", ref(112))],
+              over: true,
+            },
+            {
+              name: "Done",
+              cards: [],
+              emptyText: "Nothing done yet. Drag a card here.",
+            },
+          ],
+          { drag: true },
+        );
         return {
           nodes: [
             board,
@@ -138,7 +143,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
               doc,
               "p",
               "cat-note",
-              '"Doing" shows the drop-target state, "Done" the empty state.',
+              '"Doing" shows the drop-target state, "Done" the empty state. This board has the drag option: drag a card, or press Left or Right.',
             ),
           ],
           column: true,

@@ -1,6 +1,6 @@
 // Proof screen for the UI approach (#7): a sample board drawn with the kanban parts of the
 // design system (ui/src/ds: createKanbanBoard and createKanbanCard). It is not mounted in the app.
-// Focus a card, then Alt+Left or Alt+Right moves it to the next column. Hard-coded sample data:
+// Drag a card to another column, or focus it and press Left or Right (Alt+Left and Alt+Right work too). Hard-coded sample data:
 // no storage, no network.
 import { createKanbanBoard, createKanbanCard } from "../../ds";
 import "./kanban.css";
@@ -50,13 +50,17 @@ export function mountKanban(boardEl: HTMLElement, statusEl: HTMLElement): void {
         createKanbanCard(doc, { title: card.title, meta: [card.meta] }),
       ),
     })),
+    { drag: true },
   );
   boardEl.classList.add("kanban-proof");
   boardEl.replaceChildren(board);
   statusEl.textContent = "";
-  // The board handles the key first (it is inside boardEl), then this copies its message.
-  boardEl.addEventListener("keydown", () => {
-    statusEl.textContent =
-      board.querySelector(".board-live")?.textContent ?? "";
-  });
+  // The board's own live region is the one that is announced. This copy is for sighted users and is
+  // hidden from screen readers, and it follows that region only when its text changes.
+  statusEl.setAttribute("aria-hidden", "true");
+  const live = board.querySelector(".board-live");
+  if (live)
+    new MutationObserver(() => {
+      statusEl.textContent = live.textContent ?? "";
+    }).observe(live, { childList: true, characterData: true, subtree: true });
 }

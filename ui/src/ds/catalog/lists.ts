@@ -28,12 +28,12 @@ export const LISTS = [
   {
     name: "kanban column",
     tab: "Lists",
-    variants: ["default"],
+    variants: ["default", "drag"],
     states: ["default", "empty", "drop over"],
     source: "ds",
     className: "kcol",
     notes:
-      'Focus a card, then Alt+← / Alt+→ to move it. "Doing" shows the drop-target state.',
+      'Focus a card, then Alt+← / Alt+→ to move it. The drag option adds pointer drag and the plain ← / →. "Doing" shows the drop-target state.',
   },
   {
     name: "table",

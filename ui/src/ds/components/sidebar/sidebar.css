@@ -197,7 +197,15 @@
 }
 
 .sidebar-item .ic {
+  flex: none;
   color: var(--muted);
+}
+
+/* A long label ends in an ellipsis; the full name is the title of the item. */
+.sidebar-item .sidebar-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-item:hover,
@@ -229,6 +237,7 @@
 }
 
 .sidebar-item .later-mark {
+  flex: none;
   margin-left: var(--space-1);
 }
 
