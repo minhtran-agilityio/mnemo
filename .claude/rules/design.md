@@ -13,7 +13,7 @@ paths:
 - Pick-only: UI comes from `ui/src/ds` only. Look the part up in the UI Catalog (`#/ui-catalog`) and import it from `ui/src/ds`. Never define a new part, variant or style in a screen.
 - A missing part goes through a UI component request (DESIGN.md §8, template `.github/ISSUE_TEMPLATE/ui-component-request.md`). The feature agent stops its UI work, files the request, and continues after the design pull request merges. It adds no temporary style.
 - Only the ui-designer agent (`.claude/agents/ui-designer.md`) edits `ui/src/ds/**`, in its own pull request with the label `design-system`. CI fails a pull request that changes `ui/src/ds/**` without that label.
-- CSS outside `ui/src/ds` sets layout only (display, grid, flex, gap, padding, margin, sizes, position, overflow) with token values; colour, font, border, radius and shadow fail `tests/ds-screen-css.test.mjs`. Known exceptions are listed once, in `tests/lib/ds-guard.mjs`.
+- CSS outside `ui/src/ds` sets layout only (display, grid, flex, gap, padding, margin, sizes, position, overflow) with token values; colour, font, border, radius and shadow fail `tests/ds-screen-css.test.mjs`. There are no known exceptions (#111 moved the old screens into `ui/src/ds`); only the UI Catalog dev tool files are listed in `tests/lib/ds-guard.mjs`.
 
 ## Desktop app conventions
 - Mnemo is a desktop app with a tray. Closing the window does not quit; say so the first time the owner closes it.

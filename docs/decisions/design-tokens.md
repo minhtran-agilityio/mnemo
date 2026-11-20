@@ -20,5 +20,11 @@ Source: the hub prototype's default pair, light (`.th.s-v1`) and dark (`.th.s-v1
 ## Moved in #104
 
 - Tokens and base styles now live in `ui/src/ds/` (`tokens.css`, `base.css`, loaded by `ui/src/ds/index.ts`). Values are unchanged.
-- New tokens: `--control-height-primary`, `--control-edge`, `--on-bad`, `--scrim`, motion (`--dur-*`), layers (`--z-*`), icon sizes (`--icon-*`), border widths (`--border-*`). The sidebar widths moved in from `ui/src/frame/sidebar.css`.
+- New tokens: `--control-height-primary`, `--control-edge`, `--on-bad`, `--scrim`, motion (`--dur-*`), layers (`--z-*`), icon sizes (`--icon-*`), border widths (`--border-*`). The sidebar widths moved in from the old frame style sheet of the sidebar.
 - `--scrim` has a plain `rgba()` fallback and an `@supports not` rule. `color-mix()` in WebKitGTK on Ubuntu 22.04 is **Unverified**.
+
+## Moved in #111
+
+- The old screens take their look from `ui/src/ds/` only. The app sidebar is the `sidebar` part (`ui/src/ds/components/sidebar/`); the frame, Settings and the empty state use the `text`, `later-mark`, `section-list`, `choice-list` and `card` parts. `ui/src/style.css`, `ui/src/screens/settings/settings.css` and `ui/src/screens/kanban/kanban.css` hold layout only, with token values. There are no known exceptions to the design-system guards; only the UI Catalog dev tool files keep theirs.
+- New tokens: `--icon-nav` (18px) and `--icon-stroke-nav` (1.8), the sidebar's icon size and stroke; `--dur-nav` (150ms), the sidebar's fold and chevron motion; `--size-frame-height` (100vh), the height of the frame and the sticky sidebar; `--size-section-list-max` (14rem), the widest the Settings section list grows. Values are the ones the screens shipped with, so nothing looks different.
+- The root theme write (the `data-theme` attribute and the inline `color-scheme`) lives in `ui/src/ds/theme-root.ts`; `ui/src/frame/theme.ts` decides the choice and calls it.
