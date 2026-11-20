@@ -510,7 +510,7 @@ test('AC8: the page renders the frame and not the proof (built page, no kanban o
   }));
 
 test('AC8: the kanban and catalog source files and their tests stay', () => {
-  for (const f of [['screens', 'kanban', 'kanban.ts'], ['screens', 'kanban', 'kanban.css'], ['screens', 'catalog', 'catalog.ts'], ['screens', 'catalog', 'catalog.css'], ['shared', 'card.ts'], ['shared', 'card.test.ts'], ['shared', 'store.ts'], ['shared', 'store.test.ts']])
+  for (const f of [['screens', 'kanban', 'kanban.ts'], ['screens', 'kanban', 'kanban.css'], ['screens', 'catalog', 'catalog.ts'], ['screens', 'catalog', 'catalog.css'], ['ds', 'components', 'kanban-card', 'kanban-card.ts'], ['ds', 'components', 'kanban-card', 'kanban-card.test.ts'], ['shared', 'store.ts'], ['shared', 'store.test.ts']])
     assert.ok(existsSync(p('ui', 'src', ...f)), `ui/src/${f.join('/')} is gone`);
 });
 
