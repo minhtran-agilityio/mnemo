@@ -417,6 +417,31 @@ test("a handler that throws shows a plain line and keeps the field open", () => 
   t.remove();
 });
 
+test("the follow-up contextmenu from a menu item or the ... button is ours, not the browser's; a field keeps the native menu", () => {
+  const { t } = withActions();
+  const mnemo = node(t, "Mnemo");
+  key(mnemo, "ContextMenu");
+  const item = menuItem(t, "Mnemo", "Rename");
+  const fire = (el: Element) => {
+    const ev = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+    });
+    el.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  };
+  expect(fire(item)).toBe(true);
+  expect(
+    mnemo.closest(".trow")?.querySelector<HTMLElement>(".tmenu")?.hidden,
+  ).toBe(false);
+  expect(fire(mnemo.closest(".trow")?.querySelector(".tmore") as Element)).toBe(
+    true,
+  );
+  key(node(t, "Design notes"), "F2");
+  expect(fire(field(t))).toBe(false);
+  t.remove();
+});
+
 test("an empty string from the handler counts as success", () => {
   const { t } = withActions(actionNodes, { onAction: () => "" });
   key(node(t, "Mnemo"), "F2");
