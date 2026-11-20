@@ -101,6 +101,7 @@
 .ui-catalog .cov-bar {
   display: inline-flex;
   width: var(--size-cov-bar);
+  max-width: 100%;
   height: var(--space-2);
   overflow: hidden;
   border: var(--border-1) solid var(--line);
@@ -343,6 +344,25 @@
 .ui-catalog .cat-meta .cat-states {
   color: var(--muted);
   font-size: var(--text-sm);
+}
+
+/* A wide sample (a menu, a card, a board) scrolls in its own box and never widens the page. */
+.ui-catalog .cat-ex {
+  padding-block: var(--space-2);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+/* A clamped title keeps its hidden lines below the card, so a box that clips would flag them: the
+   cards shrink to the column instead and need no scroll box. */
+.ui-catalog .cat-ex:has(.views) {
+  padding-block: 0;
+  overflow: visible;
+}
+
+.ui-catalog .cat-ex .seg {
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 
 /* One state of an example: the live part, and under it a caption in mono type */

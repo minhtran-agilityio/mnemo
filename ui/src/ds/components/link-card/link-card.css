@@ -71,6 +71,8 @@
 
 .lcard .trust {
   align-self: flex-start;
+  max-width: 100%;
+  white-space: normal;
 }
 
 .views {
@@ -82,7 +84,7 @@
 .views.cards {
   grid-template-columns: repeat(
       auto-fill,
-      minmax(var(--size-basis-column), 1fr)
+      minmax(min(var(--size-basis-column), 100%), 1fr)
     );
 }
 
