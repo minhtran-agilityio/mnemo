@@ -111,15 +111,16 @@ test("error shows the text and marks the tree invalid", () => {
   });
   document.body.append(p.element);
   const err = p.element.querySelector<HTMLElement>(".label-picker-error");
-  expect(err?.hidden).toBe(true);
+  expect(err?.textContent).toBe("");
+  expect(err?.getAttribute("role")).toBe("status");
   p.setError("Choose at least one label before saving");
-  expect(err?.hidden).toBe(false);
   expect(err?.textContent).toContain("Choose at least one label before saving");
   expect(
     p.element.querySelector("[role=tree]")?.getAttribute("aria-invalid"),
   ).toBe("true");
   p.setError(null);
-  expect(err?.hidden).toBe(true);
+  expect(err?.textContent).toBe("");
+  expect(err?.isConnected).toBe(true);
 });
 
 test("empty says how to create a label", () => {
@@ -187,4 +188,92 @@ test("long and Vietnamese names go in as text and keep the full path", () => {
   expect(
     cssRule(import.meta.dirname, "label-picker.css", ".label-picker-name"),
   ).toMatchObject({ "overflow-wrap": "anywhere" });
+});
+
+test("duplicate paths and empty names are left out, so each path has one button", () => {
+  const p = createLabelPicker(document, {
+    label: "Labels",
+    mode: "single",
+    topLevel: true,
+    nodes: [
+      { name: "Work", children: [{ name: "Mnemo" }] },
+      { name: "Work" },
+      { name: "Work / Mnemo" },
+      { name: "" },
+      { name: "  " },
+    ],
+  });
+  document.body.append(p.element);
+  expect(items(p.element).map((b) => b.dataset.path)).toEqual([
+    "",
+    "Work",
+    "Work / Mnemo",
+  ]);
+  const ids = [...p.element.querySelectorAll("[id]")].map((n) => n.id);
+  expect(new Set(ids).size).toBe(ids.length);
+});
+
+test("the Current marker is announced with the item", () => {
+  const p = createLabelPicker(document, {
+    label: "Move under",
+    mode: "single",
+    nodes: [
+      {
+        name: "Work",
+        children: [{ name: "Mnemo", current: true, disabled: "No." }],
+      },
+    ],
+  });
+  document.body.append(p.element);
+  const btn = item(p.element, "Work / Mnemo");
+  const text = (btn.getAttribute("aria-describedby") ?? "")
+    .split(" ")
+    .map((i) => document.getElementById(i)?.textContent)
+    .join(" ");
+  expect(text).toBe("Current No.");
+});
+
+test("a disabled node does not take the chosen look from a forced state", () => {
+  const css = cssRule(
+    import.meta.dirname,
+    "label-picker.css",
+    '.label-picker-item[aria-disabled="true"]',
+  );
+  expect(css.cursor).toBe("not-allowed");
+});
+
+test("removing a chip moves focus to the next chip, then the previous, then the tree", () => {
+  const p = createLabelPicker(document, {
+    label: "Labels",
+    mode: "multiple",
+    nodes: TREE,
+    value: ["Work", "Personal", "Cá nhân"],
+  });
+  document.body.append(p.element);
+  const remove = (path: string) =>
+    p.element
+      .querySelector<HTMLButtonElement>(`[aria-label='Remove label ${path}']`)
+      ?.click();
+  remove("Personal");
+  expect(document.activeElement?.getAttribute("aria-label")).toBe(
+    "Remove label Cá nhân",
+  );
+  remove("Cá nhân");
+  expect(document.activeElement?.getAttribute("aria-label")).toBe(
+    "Remove label Work",
+  );
+  remove("Work");
+  expect(document.activeElement?.getAttribute("role")).toBe("treeitem");
+});
+
+test("an error on an empty picker marks the empty box", () => {
+  const p = createLabelPicker(document, {
+    label: "L",
+    mode: "multiple",
+    nodes: [],
+  });
+  p.setError("Choose at least one label before saving");
+  expect(
+    p.element.querySelector(".is-empty")?.getAttribute("aria-invalid"),
+  ).toBe("true");
 });

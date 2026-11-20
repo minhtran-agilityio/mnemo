@@ -3,7 +3,9 @@
 // labels and shows each as a removable chip with its path. A node can be disabled with a reason
 // that stays visible. The tree is a role=tree of treeitems; Arrow Up and Down, Home and End move
 // between them, Enter and Space choose. Escape and the focus trap belong to the Dialog the picker
-// sits in. Every name goes in as text.
+// sits in. Every name goes in as text. Two nodes with the same path ("Work / Mnemo" twice, a name
+// that holds " / ") would name the same place, so the first one stays and later ones are left
+// out; a node with an empty name is left out too (its path would be the top level's).
 import { Check, CircleAlert, Tag, X } from "lucide";
 import { createIcon } from "../../icon";
 import { nextControlId } from "../field/id";
@@ -63,11 +65,15 @@ function flatten(
   parent: string,
   level: number,
   out: Flat[],
+  seen: Set<string>,
 ): Flat[] {
   for (const node of nodes) {
+    if (node.name.trim() === "") continue;
     const path = parent ? `${parent}${PATH_SEPARATOR}${node.name}` : node.name;
+    if (seen.has(path)) continue;
+    seen.add(path);
     out.push({ path, name: node.name, level, node });
-    flatten(node.children ?? [], path, level + 1, out);
+    flatten(node.children ?? [], path, level + 1, out, seen);
   }
   return out;
 }
@@ -90,7 +96,7 @@ export function createLabelPicker(
   const flat: Flat[] = [];
   if (options.topLevel && !multiple)
     flat.push({ path: "", name: TOP_LEVEL_LABEL, level: 0, node: null });
-  flatten(options.nodes, "", 0, flat);
+  flatten(options.nodes, "", 0, flat, new Set(flat.map((f) => f.path)));
 
   let chosen: string[] = [...(options.value ?? [])];
   if (!multiple) chosen = chosen.slice(0, 1);
@@ -107,10 +113,12 @@ export function createLabelPicker(
   const error = doc.createElement("span");
   error.className = "err-text label-picker-error";
   error.id = `${id}-error`;
+  // The live region stays in the page, so a change of its text is announced; only the text changes.
   error.setAttribute("role", "status");
-  error.hidden = true;
 
+  // Keyed by path: flatten() keeps each path once, so a path names one button.
   const items = new Map<string, HTMLButtonElement>();
+  let serial = 0;
   const isDisabled = (f: Flat) => Boolean(options.disabled || f.node?.disabled);
 
   const choose = (path: string) => {
@@ -142,21 +150,27 @@ export function createLabelPicker(
     btn.append(createIcon(Tag, "sm", "ic-muted"), name);
     const notes = doc.createElement("span");
     notes.className = "label-picker-notes";
+    const describedBy: string[] = [];
+    serial += 1;
     if (f.node?.current) {
       const cur = doc.createElement("span");
       cur.className = "label-picker-current";
+      cur.id = `${id}-current-${serial}`;
       cur.textContent = "Current";
       notes.append(cur);
+      describedBy.push(cur.id);
     }
     const reason = f.node?.disabled;
     if (reason) {
       const why = doc.createElement("span");
       why.className = "label-picker-reason";
-      why.id = `${id}-why-${items.size}`;
+      why.id = `${id}-why-${serial}`;
       why.textContent = reason;
       notes.append(why);
-      btn.setAttribute("aria-describedby", why.id);
+      describedBy.push(why.id);
     }
+    if (describedBy.length > 0)
+      btn.setAttribute("aria-describedby", describedBy.join(" "));
     btn.append(notes, mark);
     if (isDisabled(f)) btn.setAttribute("aria-disabled", "true");
     if (options.forceState?.path === f.path)
@@ -184,8 +198,14 @@ export function createLabelPicker(
     remove.disabled = options.disabled ?? false;
     remove.append(createIcon(X));
     remove.addEventListener("click", () => {
+      const at = chosen.indexOf(path);
       choose(path);
-      tree.querySelector<HTMLElement>("[tabindex='0']")?.focus();
+      // Focus goes to the next chip's remove button, else the previous one, else the tree.
+      const buttons = chips.querySelectorAll<HTMLElement>(
+        ".label-picker-chip-remove",
+      );
+      const next = buttons[Math.min(at, buttons.length - 1)];
+      (next ?? tree.querySelector<HTMLElement>("[tabindex='0']"))?.focus();
     });
     li.append(text, remove);
     return li;
@@ -223,13 +243,14 @@ export function createLabelPicker(
     list[to].focus();
   });
 
+  const emptyBox = doc.createElement("p");
   if (multiple) wrap.append(chips);
   if (flat.length === 0) {
-    const box = doc.createElement("p");
-    box.className = "label-picker-empty is-empty";
-    box.textContent = options.emptyText ?? EMPTY_TEXT;
-    wrap.append(box);
+    emptyBox.className = "label-picker-empty is-empty";
+    emptyBox.textContent = options.emptyText ?? EMPTY_TEXT;
+    wrap.append(emptyBox);
   } else wrap.append(tree);
+  const errorTarget: HTMLElement = flat.length === 0 ? emptyBox : tree;
   wrap.append(error);
   wrap.classList.toggle("is-disabled", options.disabled ?? false);
   render();
@@ -238,15 +259,14 @@ export function createLabelPicker(
     element: wrap,
     value: () => [...chosen],
     setError(text) {
-      error.hidden = text === null;
       error.replaceChildren();
       if (text !== null) {
         error.append(createIcon(CircleAlert), doc.createTextNode(text));
-        tree.setAttribute("aria-invalid", "true");
-        tree.setAttribute("aria-describedby", error.id);
+        errorTarget.setAttribute("aria-invalid", "true");
+        errorTarget.setAttribute("aria-describedby", error.id);
       } else {
-        tree.removeAttribute("aria-invalid");
-        tree.removeAttribute("aria-describedby");
+        errorTarget.removeAttribute("aria-invalid");
+        errorTarget.removeAttribute("aria-describedby");
       }
       wrap.classList.toggle("is-error", text !== null);
     },

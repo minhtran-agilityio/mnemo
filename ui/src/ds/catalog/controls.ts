@@ -183,6 +183,6 @@ export const CONTROLS = [
       "overflow",
     ],
     source: "ds",
-    notes: `Chooses from the nested label tree with full paths. Single mode moves a label (top level choice, current parent marked, disabled nodes show their reason); multiple mode picks labels for a note and shows removable chips. Loading, success, partial and AI off do not apply. Escape and the focus trap come from the dialog it sits in (${ref(127)}).`,
+    notes: `Chooses from the nested label tree with full paths. Single mode moves a label (top level choice, current parent marked, disabled nodes show their reason); multiple mode picks labels for a note and shows removable chips. Loading, success, partial and AI off do not apply. Escape and the focus trap come from the dialog part it sits in. Asked for in ${ref(127)}.`,
   },
 ] as const satisfies readonly CatalogEntry[];

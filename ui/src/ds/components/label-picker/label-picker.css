@@ -3,6 +3,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  width: 100%;
   min-width: 0;
   max-width: var(--size-tags-max);
 }
@@ -62,13 +63,13 @@
   padding-left: calc(var(--space-2) + 4 * var(--space-4));
 }
 
-.label-picker-item:hover,
-.label-picker-item.is-hover {
+.label-picker-item:not([aria-disabled="true"]):hover,
+.label-picker-item.is-hover:not([aria-disabled="true"]) {
   background: var(--accent-soft);
 }
 
-.label-picker-item:active,
-.label-picker-item.is-active {
+.label-picker-item:not([aria-disabled="true"]):active,
+.label-picker-item.is-active:not([aria-disabled="true"]) {
   background: var(--tint-info);
 }
 
@@ -78,7 +79,7 @@
   outline-offset: calc(var(--border-2) * -1);
 }
 
-.label-picker-item.is-selected {
+.label-picker-item.is-selected:not([aria-disabled="true"]) {
   background: var(--tint-info);
   color: var(--chip-ink);
   font-weight: var(--weight-semibold);
@@ -125,8 +126,8 @@
   cursor: not-allowed;
 }
 
-.label-picker-item[aria-disabled="true"]:hover {
-  background: transparent;
+.label-picker-item[aria-disabled="true"].is-selected {
+  font-weight: var(--weight-semibold);
 }
 
 .label-picker.is-disabled .label-picker-chip {
@@ -149,7 +150,7 @@
 .label-picker-chip {
   display: inline-flex;
   align-items: center;
-  gap: var(--border-2);
+  gap: var(--space-1);
   min-width: 0;
   max-width: 100%;
   padding-left: var(--space-2);
@@ -161,6 +162,8 @@
 
 .label-picker-chip-text {
   min-width: 0;
+  padding-block: var(--space-1);
+  line-height: var(--leading-body);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -202,6 +205,7 @@
   font-size: var(--text-md);
 }
 
-.label-picker-error[hidden] {
-  display: none;
+/* No error: the live region stays but takes no room (it cancels the column gap). */
+.label-picker-error:empty {
+  margin-top: calc(var(--space-2) * -1);
 }
