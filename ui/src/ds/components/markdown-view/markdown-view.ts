@@ -45,9 +45,9 @@ const MAX_DEPTH = 8;
 /** A paragraph, heading or item longer than this shows as plain text. */
 const MAX_INLINE = 10000;
 const SAFE_HREF = /^(https?:\/\/|mailto:)[^\s]+$/i;
-const LIST_ITEM = /^([ \t]*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
-const FENCE_LINE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-const HEADING = /^ {0,3}(#{1,6})\s+(.*)$/;
+const LIST_ITEM = /^([ \t]*)([-*+]|\d{1,9}[.)])\s+([\s\S]*)$/;
+const FENCE_LINE = /^ {0,3}(`{3,}|~{3,})([\s\S]*)$/;
+const HEADING = /^ {0,3}(#{1,6})\s+([\s\S]*)$/;
 const RULE = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const QUOTE = /^ {0,3}>/;
 // An address may hold one level of balanced parentheses (Wikipedia style). The two alternatives
@@ -59,6 +59,9 @@ const LINK = new RegExp(
 );
 const URL_PART = new RegExp(`\\(${URL_BODY}\\)`, "y");
 const ALNUM = /[\p{L}\p{N}]/u;
+
+/** A list item line. A thematic break such as "- - -" is not an item. */
+const isItem = (line: string) => LIST_ITEM.test(line) && !RULE.test(line);
 
 /** The width of the leading spaces and tabs of a line, a tab going to the next multiple of 4. */
 function leadW(line: string): number {
@@ -197,29 +200,57 @@ function inline(
       continue;
     }
     if (c === "`") {
-      const j = s.indexOf("`", i + 1);
-      if (j > i + 1 && j < hi) {
+      // A code span opens with a run of backticks and closes on a run of the same length.
+      let n = 1;
+      while (s[i + n] === "`") n += 1;
+      let k = i + n;
+      let close = -1;
+      while (k < hi) {
+        const j = s.indexOf("`", k);
+        if (j === -1 || j >= hi) break;
+        let run = 1;
+        while (s[j + run] === "`") run += 1;
+        if (run === n && j > i + n) {
+          close = j;
+          break;
+        }
+        k = j + run;
+      }
+      if (close !== -1) {
         flush();
+        let text = s.slice(i + n, close);
+        if (
+          text.length > 2 &&
+          text.startsWith(" ") &&
+          text.endsWith(" ") &&
+          text.trim()
+        )
+          text = text.slice(1, -1);
         const code = make(doc, "code", "md-code");
-        code.textContent = s.slice(i + 1, j);
+        code.textContent = text;
         out.push(code);
-        i = j + 1;
+        i = close + n;
         continue;
       }
+      buf += s.slice(i, i + n);
+      i += n;
+      continue;
     }
     // A badge: [![alt](image)](page). The image never loads; its alt text is the link label.
     if (!inLink && c === "[" && s[i + 1] === "!" && s[i + 2] === "[") {
       LINK.lastIndex = i + 2;
       const img = LINK.exec(s);
-      if (img && s[LINK.lastIndex] === "]" && s[LINK.lastIndex + 1] === "(") {
-        URL_PART.lastIndex = LINK.lastIndex + 1;
+      const imgEnd = LINK.lastIndex;
+      if (img && s[imgEnd] === "]" && s[imgEnd + 1] === "(") {
+        URL_PART.lastIndex = imgEnd + 1;
         const page = URL_PART.exec(s);
-        if (page && URL_PART.lastIndex <= hi) {
+        const pageEnd = URL_PART.lastIndex;
+        if (page && pageEnd <= hi) {
           flush();
           out.push(
             ...linkNode(ctx, [doc.createTextNode(img[1] || "image")], page[1]),
           );
-          i = URL_PART.lastIndex;
+          i = pageEnd;
           continue;
         }
       }
@@ -228,7 +259,8 @@ function inline(
     if ((c === "[" && !inLink) || image) {
       LINK.lastIndex = image ? i + 1 : i;
       const m = LINK.exec(s);
-      if (m && LINK.lastIndex <= hi) {
+      const end = LINK.lastIndex;
+      if (m && end <= hi) {
         flush();
         if (image) {
           const alt = make(doc, "span", "md-image");
@@ -244,14 +276,38 @@ function inline(
             ),
           );
         }
-        i = LINK.lastIndex;
+        i = end;
         continue;
       }
     }
     if (depth < MAX_DEPTH) {
+      if (c === "*" && s.startsWith("***", i)) {
+        const j = s.indexOf("***", i + 3);
+        if (j > i + 3 && j + 3 <= hi) {
+          flush();
+          const strong = make(doc, "strong", "md-strong");
+          const em = make(doc, "em", "md-em");
+          put(em, inline(ctx, s, i + 3, j, depth + 1, inLink));
+          strong.append(em);
+          out.push(strong);
+          i = j + 3;
+          continue;
+        }
+      }
       const two = s.slice(i, i + 2);
-      if (two === "**" || two === "__") {
-        const j = s.indexOf(two, i + 2);
+      if (
+        (two === "**" || two === "__") &&
+        (two === "**" || !ALNUM.test(s[i - 1] ?? " "))
+      ) {
+        let j = s.indexOf(two, i + 2);
+        // A double underscore inside a word (my__var__name) is not bold.
+        while (
+          j !== -1 &&
+          j + 2 <= hi &&
+          two === "__" &&
+          ALNUM.test(s[j + 2] ?? " ")
+        )
+          j = s.indexOf(two, j + 2);
         if (j > i + 2 && j + 2 <= hi) {
           flush();
           const strong = make(doc, "strong", "md-strong");
@@ -264,11 +320,19 @@ function inline(
       if (
         (c === "*" || c === "_") &&
         s[i + 1] !== " " &&
-        (c === "*" || !ALNUM.test(s[i - 1] ?? " "))
+        (c === "*" ||
+          (!ALNUM.test(s[i - 1] ?? " ") &&
+            s[i - 1] !== "_" &&
+            s[i + 1] !== "_"))
       ) {
         let j = s.indexOf(c, i + 1);
         // An underscore inside a word (snake_case_name) never closes an emphasis.
-        while (j !== -1 && j < hi && c === "_" && ALNUM.test(s[j + 1] ?? " "))
+        while (
+          j !== -1 &&
+          j < hi &&
+          c === "_" &&
+          (ALNUM.test(s[j + 1] ?? " ") || s[j + 1] === "_" || s[j - 1] === "_")
+        )
           j = s.indexOf(c, j + 1);
         if (j > i + 1 && j < hi && s[j - 1] !== " ") {
           flush();
@@ -328,9 +392,9 @@ function list(
       while (j < lines.length && !lines[j].trim()) j += 1;
       if (j >= lines.length) break;
       const next = lines[j];
-      const item = LIST_ITEM.exec(next);
+      const item = RULE.test(next) ? null : LIST_ITEM.exec(next);
       const continues = item
-        ? leadW(item[1]) >= indent && !RULE.test(next)
+        ? leadW(item[1]) >= indent
         : !!last && leadW(next) >= inner;
       if (!continues) break;
       i = j;
@@ -339,11 +403,12 @@ function list(
     }
     // A rule ends the list: "- - -" is a rule, not a nested item.
     if (leadW(line) < inner && RULE.test(line)) break;
-    const m = LIST_ITEM.exec(line);
+    const m = RULE.test(line) ? null : LIST_ITEM.exec(line);
     if (!m) {
       if (!last || leadW(line) < inner) break;
       // Lines indented under the item: more of its text, or a code block or quote inside it.
       const chunk: string[] = [];
+      const startChunk = i;
       let fence: Fence | null = null;
       while (i < lines.length) {
         const l = lines[i];
@@ -362,20 +427,21 @@ function list(
           if (
             j < lines.length &&
             leadW(lines[j]) >= inner &&
-            !LIST_ITEM.test(lines[j])
+            !isItem(lines[j])
           ) {
             chunk.push("");
-            i += 1;
+            i = j;
             continue;
           }
           break;
         }
-        if (leadW(l) < inner || LIST_ITEM.test(l)) break;
+        if (leadW(l) < inner || isItem(l)) break;
         const cut = dedent(l, content);
         fence = matchFence(cut);
         chunk.push(cut);
         i += 1;
       }
+      if (i === startChunk) i += 1; // always move on
       const parts = blocks(ctx, chunk, depth + 1);
       const head = parts[0];
       if (!afterBlank && head && head.tagName === "P") {
@@ -390,17 +456,18 @@ function list(
     }
     const ind = leadW(m[1]);
     if (ind < indent) break;
-    if (ind > indent && last && depth < MAX_DEPTH) {
+    if (ind >= inner && last && depth < MAX_DEPTH) {
       const nested = list(ctx, lines, i, ind, depth + 1);
       last.append(nested.node);
-      i = nested.next;
+      i = nested.next > i ? nested.next : i + 1; // always move on
+
       afterBlank = false;
       continue;
     }
     if (/\d/.test(m[2]) !== ordered) break;
     const li = make(ctx.doc, "li", "md-item");
     let text = m[3];
-    const box = /^\[( |x|X)\](?:\s+(.*))?$/.exec(text);
+    const box = /^\[( |x|X)\](?:\s+([\s\S]*))?$/.exec(text);
     if (box) {
       const done = box[1] !== " ";
       const mark = make(ctx.doc, "span", "md-check");

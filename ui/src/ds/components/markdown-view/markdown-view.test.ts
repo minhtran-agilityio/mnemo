@@ -372,3 +372,117 @@ test("a task with no text is still a task", () => {
     "Not done",
   );
 });
+
+test("a thematic break under an item ends cleanly and sits inside the item", () => {
+  for (const rule of ["  - - -", "  * * *"]) {
+    const v = view(`- a\n${rule}`);
+    expect(v.querySelectorAll("li")).toHaveLength(1);
+    expect(v.querySelector("li hr")).not.toBeNull();
+  }
+});
+
+test("many blank lines inside an item are read in one pass", () => {
+  const v = view(`- a\n  b${"\n".repeat(100000)}  x`);
+  const items = v.querySelectorAll("li");
+  expect(items).toHaveLength(1);
+  expect(items[0].textContent).toContain("a b");
+  expect(items[0].textContent).toContain("x");
+});
+
+test("a line separator inside an item or heading keeps its text", () => {
+  expect(view("- a b").querySelector("li")?.textContent).toBe("a b");
+  expect(view("# h i").querySelector("h2")?.textContent).toBe("h i");
+});
+
+test("triple marks nest and a double underscore inside a word is plain", () => {
+  const v = view("***bold italic*** and my__var__name and __bold__");
+  expect(v.querySelector("strong em")?.textContent).toBe("bold italic");
+  expect(v.textContent).not.toContain("*");
+  expect(v.textContent).toContain("my__var__name");
+  expect(v.querySelectorAll("strong")).toHaveLength(2);
+});
+
+test("a code span closes on a run of the same length", () => {
+  expect(view("``a`b``").querySelector("code")?.textContent).toBe("a`b");
+  expect(view("`` ` ``").querySelector("code")?.textContent).toBe("`");
+  expect(view("``a`").querySelector("code")).toBeNull();
+});
+
+test("an item indented by one space is a sibling, not a nested item", () => {
+  const v = view("- a\n - b");
+  expect(v.querySelectorAll("ul")).toHaveLength(1);
+  expect(v.querySelectorAll("li")).toHaveLength(2);
+});
+
+test("a link whose label holds an image still ends where it should", () => {
+  const v = view("[x ![alt](https://i.test/p.png)](https://y.test) tail");
+  expect(v.querySelector("img")).toBeNull();
+  expect(v.textContent).toContain("tail");
+});
+
+test("fuzz: fixed-seed sources always return and never produce script, img or on* attributes", () => {
+  const fragments = [
+    "- a",
+    "  - b",
+    "  * * *",
+    "  - - -",
+    "> q",
+    "```",
+    "",
+    "1. x",
+    "  continuation",
+    "# h",
+    "\t- t",
+    "\tcode\ttab",
+    "- [x]",
+    "---",
+    "[l](https://a.test/b_(c))",
+    "![i](http://e.test/p.png)",
+    "<script>alert(1)</script> <img src=x onerror=alert(1)>",
+    "***a*** __b__ `c` ``d`e``",
+    "  ```ts",
+    "    - deep",
+  ];
+  let seed = 12345;
+  const next = () => {
+    seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff;
+    return seed;
+  };
+  const allowed = new Set([
+    "ARTICLE",
+    "P",
+    "A",
+    "SPAN",
+    "PRE",
+    "CODE",
+    "BLOCKQUOTE",
+    "STRONG",
+    "EM",
+    "UL",
+    "OL",
+    "LI",
+    "HR",
+    "H2",
+    "H3",
+    "H4",
+    "H5",
+    "H6",
+  ]);
+  for (let n = 0; n < 3000; n++) {
+    const count = 1 + (next() % 8);
+    const lines: string[] = [];
+    for (let k = 0; k < count; k++)
+      lines.push(fragments[next() % fragments.length]);
+    const v = view(lines.join("\n"));
+    expect(v.tagName).toBe("ARTICLE");
+    for (const node of v.querySelectorAll("*")) {
+      // The icon the link part draws beside an external link is its own svg; it holds no note text.
+      if (node.closest("svg")) continue;
+      expect(`${node.tagName} in ${JSON.stringify(lines)}`).toSatisfy(() =>
+        allowed.has(node.tagName),
+      );
+      for (const a of Array.from(node.attributes))
+        expect(a.name.startsWith("on")).toBe(false);
+    }
+  }
+}, 60000);
