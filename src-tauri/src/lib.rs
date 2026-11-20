@@ -156,6 +156,24 @@ mod tests {
     use super::{keeps_running_in_tray, start_url, startup_code, StorageError};
     use tauri::WebviewUrl;
 
+    // The window is built from this config entry (create: false), so the minimum here is the minimum
+    // of the real window. 800 x 560 is the smallest size every screen is designed and checked for.
+    #[test]
+    fn main_window_has_a_minimum_of_800_by_560_and_starts_at_900_by_640() {
+        // No JSON crate is a dependency, so the compact text of the config is checked.
+        let conf: String = include_str!("../tauri.conf.json")
+            .split_whitespace()
+            .collect();
+        for want in [
+            "\"minWidth\":800",
+            "\"minHeight\":560",
+            "\"width\":900",
+            "\"height\":640",
+        ] {
+            assert!(conf.contains(want), "tauri.conf.json lacks {want}");
+        }
+    }
+
     #[test]
     fn no_tray_on_the_error_page() {
         assert!(keeps_running_in_tray(false, true));
