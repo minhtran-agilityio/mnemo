@@ -192,8 +192,8 @@ test('AC6: screens never call invoke directly', () => {
 });
 
 // ================================================================ AC10: static rules for the Notes screen code
-// AC10: "No label tree, label picker, Markdown renderer or sanitiser, temporary style, own element or stand-in text is
-// added; the Read segment shows nothing until #128; screen CSS is layout only and the ds guard tests pass; no 'sqlite'
+// AC10: "No Markdown renderer or sanitiser, temporary style, own element or stand-in text is added (the label tree and
+// the label picker are the ds parts of #126 and #127); the Read segment shows nothing until #128; screen CSS is layout only and the ds guard tests pass; no 'sqlite'
 // or 'sign in' text and issue numbers via ref(n)/planned(n) in ui .ts."
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 test("AC10: the Notes editor code renders no HTML, has no 'sqlite' or 'sign in' text, no raw issue numbers, and the ds guards pass", () => {
@@ -577,9 +577,9 @@ test('AC9: a note with no changes is left without asking', UI, () =>
     assert.equal(await app.h(`__h.find('Discard changes').length`), 0, 'asked although nothing changed');
   }));
 
-// AC10: "No label tree, label picker, Markdown renderer or sanitiser, temporary style, own element or stand-in text is
-// added; the Read segment shows nothing until #128; ..."
-test('AC10: the Read segment shows nothing, and the screen has no label tree, picker or stand-in text', UI, () =>
+// AC10: "No Markdown renderer or sanitiser, temporary style, own element or stand-in text is added (the label tree and
+// the label picker are the ds parts of #126 and #127); the Read segment shows nothing until #128; ..."
+test('AC10: the Read segment shows nothing: no note text, no rendered Markdown, no picker in the note pane and no stand-in text', UI, () =>
   withApp('ok', async (app) => {
     await openNotesList(app);
     await openNote(app, 'Groceries', BODY1);
@@ -587,21 +587,24 @@ test('AC10: the Read segment shows nothing, and the screen has no label tree, pi
     await sleep(300);
     const r = await app.h(`(() => {
       const m = __h.main();
+      const pane = m.querySelector('.notes-editor') || m;
       const leaves = [...m.querySelectorAll('*')].filter((e) => e.children.length === 0 && __h.shown(e) && e.tagName !== 'TEXTAREA').map((e) => __h.norm(e.textContent));
       return {
         body: leaves.filter((t) => t.includes('Buy oat milk') || t.includes('bold words')),
         area: !!__h.area(),
         rendered: [...m.querySelectorAll('strong, b, h1, script')].filter((e) => /bold words|Groceries/.test(e.textContent) || e.tagName === 'SCRIPT').length,
-        tree: [...m.querySelectorAll('[role=tree], [role=treeitem]')].length,
-        combo: [...m.querySelectorAll('[role=combobox]')].filter(__h.shown).length,
+        labelTree: !!m.querySelector('nav[aria-label=Labels] .tree'),
+        tree: [...pane.querySelectorAll('[role=tree], [role=treeitem]')].length,
+        combo: [...pane.querySelectorAll('[role=combobox]')].filter(__h.shown).length,
         soon: /coming soon|\\bsoon\\b/i.test(m.innerText),
       };
     })()`);
     assert.deepEqual(r.body, [], 'the Read segment shows the note text');
     assert.equal(r.area, false, 'the text area is still shown in Read mode');
     assert.equal(r.rendered, 0, 'the note Markdown was rendered');
-    assert.equal(r.tree, 0, 'a label tree is on the screen');
-    assert.equal(r.combo, 0, 'a label picker is on the screen');
+    assert.equal(r.labelTree, true, 'the label tree is not in the left pane');
+    assert.equal(r.tree, 0, 'a label picker is shown in the Read segment');
+    assert.equal(r.combo, 0, 'a combobox is shown in the Read segment');
     assert.equal(r.soon, false, 'the screen has stand-in text');
     assert.ok(await app.click('Edit'), 'no Edit choice');
     await app.until(`__h.area() && __h.area().value === ${JSON.stringify(BODY1)}`, 'Edit to show the text again');
@@ -612,15 +615,15 @@ const NESTED = process.env.MNEMO_NESTED ? 'nested run (inside npm test; run this
 const BRANCH = 'feat/33-note-01-notes-with-nested-labels';
 
 // AC11: the pull request text. Owner-confirmed for #33: "record in the PR exactly which acceptance criteria wait
-// for #126, #127 and #128 (no label tree, no label picker on save, Read mode shows nothing until #128)".
-test('AC11: the pull request names the criteria that wait for #126, #127 and #128', { timeout: 120000, skip: NESTED }, () => {
+// for #128 (Read mode shows nothing until #128; the label tree #126 and label picker #127 are now wired in)".
+test('AC11: the pull request names the criteria that wait for #128', { timeout: 120000, skip: NESTED }, () => {
   const r = spawnSync('gh', ['pr', 'list', '--head', BRANCH, '--state', 'all', '--json', 'body', '--limit', '1'], { cwd: ROOT, encoding: 'utf8', timeout: 60000 });
   assert.equal(r.status, 0, `gh pr list failed: ${r.stderr}`);
   const prs = JSON.parse(r.stdout || '[]');
   assert.equal(prs.length, 1, `no pull request for ${BRANCH}`);
   const body = prs[0].body || '';
   assert.match(body, /acceptance criteri/i, 'the pull request does not talk about acceptance criteria');
-  for (const [n, what] of [['126', /label tree/i], ['127', /label picker|picker/i], ['128', /\bRead\b/]]) {
+  for (const [n, what] of [['128', /\bRead\b/]]) {
     assert.match(body, new RegExp(`#${n}\\b`), `the pull request does not name #${n}`);
     assert.match(body, what, `the pull request does not say what waits for #${n}`);
   }

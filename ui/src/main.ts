@@ -26,12 +26,16 @@ import { renderNotes } from "./screens/notes/notes";
 import { renderSettings } from "./screens/settings/settings";
 import {
   checkAiHealth,
+  createLabel,
+  deleteLabel,
   errorMessage,
   getAiHealth,
   getSetting,
   listLabelledNotes,
   listLabels,
+  moveLabel,
   ping,
+  renameLabel,
   saveLabelledNote,
   setSetting,
 } from "./shared/api";
@@ -215,6 +219,10 @@ async function start(): Promise<void> {
         listLabelledNotes,
         listLabels,
         saveLabelledNote,
+        createLabel,
+        renameLabel,
+        moveLabel,
+        deleteLabel,
         toast,
       });
       leaveScreen = notes.leave;

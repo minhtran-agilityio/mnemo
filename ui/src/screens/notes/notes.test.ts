@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-// The Notes screen with fake data functions: states, the editor (dirty mark, Cancel, Save) and
-// the question before unsaved changes are lost.
+// The Notes screen with fake data functions: states, the label tree (open, create, rename, move,
+// delete), the editor (label picker, dirty mark, Cancel, Save), a new note and the question before
+// unsaved changes are lost.
 import { afterEach, expect, test, vi } from "vitest";
 import type { Label, LabelledNote, LabelledNotePage } from "../../shared/api";
 import { changedText, type NotesDeps, noteTitle, renderNotes } from "./notes";
@@ -53,6 +54,16 @@ function setup(over: Partial<NotesDeps> = {}) {
     saveLabelledNote: vi.fn(async (id, body, labelIds) =>
       ln(id ?? "note-new", body, labelIds, T3),
     ),
+    createLabel: vi.fn(async (parentId, name) =>
+      label("lab-new", name, parentId),
+    ),
+    renameLabel: vi.fn(async (id, name) => label(id, name, null)),
+    moveLabel: vi.fn(async (id, parentId) => label(id, "Moved", parentId)),
+    deleteLabel: vi.fn(async () => ({
+      movedNotes: 1,
+      movedLabels: 0,
+      parentId: "lab-work",
+    })),
     toast: vi.fn(),
     ...over,
   };
@@ -326,7 +337,9 @@ test("the Read mode shows no note content and no text area", async () => {
   expect(area(screen)).toBeNull();
   expect(hasText(screen, "Buy oat milk")).toBe(false);
   expect(hasText(screen, "bold words")).toBe(false);
-  expect(screen.querySelector("strong, b, h2, script")).toBeNull();
+  const pane = screen.querySelector(".notes-editor") as HTMLElement;
+  expect(pane.querySelector("strong, b, h2, script")).toBeNull();
+  expect(pane.querySelector(".notes-read")?.children).toHaveLength(0);
   expect(button(screen, "Save")).toBeUndefined();
   button(screen, "Edit").click();
   expect(area(screen)?.value).toBe(BODY1);
@@ -370,4 +383,333 @@ test("after leave, a late list result draws nothing", async () => {
   release({ items: NOTES.slice(), next: null });
   await flush();
   expect(options(screen)).toHaveLength(0);
+});
+
+// ---- The label tree ----
+const treeNode = (root: ParentNode, name: string) =>
+  [...root.querySelectorAll<HTMLElement>(".tnode")].find(
+    (n) => n.querySelector(".tname")?.textContent === name,
+  ) as HTMLElement;
+const typeName = (root: ParentNode, text: string) => {
+  const input = root.querySelector(".tedit input") as HTMLInputElement;
+  input.value = text;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+  );
+};
+const press = (el: HTMLElement, key: string) =>
+  el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+const chips = (root: ParentNode) =>
+  [...root.querySelectorAll(".label-picker-chip-text")].map(
+    (c) => c.textContent,
+  );
+const pickerItem = (root: ParentNode, path: string) =>
+  root.querySelector(`[role=treeitem][data-path="${path}"]`) as HTMLElement;
+
+test("the left pane shows the label tree with the nested label", async () => {
+  const { screen } = setup();
+  await flush();
+  const tree = screen.querySelector(".notes-labels") as HTMLElement;
+  expect(treeNode(tree, "Work")).toBeTruthy();
+  expect(treeNode(tree, "Projects")).toBeTruthy();
+  expect(tree.querySelector("li li .tname")?.textContent).toBe("Projects");
+});
+
+test("choosing a label lists its notes (with its child labels) and All notes goes back", async () => {
+  const { screen, deps } = setup();
+  await flush();
+  expect(hasText(screen, "All notes")).toBe(true);
+  treeNode(screen, "Work").click();
+  await flush();
+  expect(deps.listLabelledNotes).toHaveBeenLastCalledWith("lab-work", {
+    limit: 50,
+  });
+  expect(treeNode(screen, "Work").getAttribute("aria-current")).toBe("true");
+  expect(hasText(screen, "with the notes of its child labels")).toBe(true);
+  treeNode(screen, "Projects").click();
+  await flush();
+  expect(deps.listLabelledNotes).toHaveBeenLastCalledWith("lab-proj", {
+    limit: 50,
+  });
+  button(screen, "All notes").click();
+  await flush();
+  expect(deps.listLabelledNotes).toHaveBeenLastCalledWith(null, { limit: 50 });
+  expect(button(screen, "All notes")?.hidden).toBe(true);
+});
+
+test("a label with no notes shows an empty state naming the label", async () => {
+  const { screen } = setup({
+    listLabelledNotes: vi.fn(async (labelId: string | null) => ({
+      items: labelId ? [] : NOTES.slice(),
+      next: null,
+    })),
+  });
+  await flush();
+  treeNode(screen, "Projects").click();
+  await flush();
+  expect(hasText(screen, "Notes in Work / Projects")).toBe(true);
+  expect(hasText(screen, "No note has this label")).toBe(true);
+});
+
+test("with no labels the tree shows its empty state with one action", async () => {
+  const { screen } = setup({ listLabels: async () => [] });
+  await flush();
+  const tree = screen.querySelector(".notes-labels") as HTMLElement;
+  expect(hasText(tree, "No labels yet")).toBe(true);
+  expect(treeNode(tree, "Work")).toBeUndefined();
+});
+
+test("a new label from the tree calls createLabel at the top and redraws", async () => {
+  const { screen, deps } = setup();
+  await flush();
+  const tree = screen.querySelector(".notes-labels") as HTMLElement;
+  (tree.querySelector(".tree-new") as HTMLButtonElement).click();
+  typeName(tree, "Home");
+  await flush();
+  expect(deps.createLabel).toHaveBeenCalledWith(null, "Home");
+  expect(deps.toast).toHaveBeenCalledWith("Label created.");
+  expect(deps.listLabels).toHaveBeenCalledTimes(2);
+});
+
+test("rename with F2 calls renameLabel; a refused command shows its message", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const { screen, deps } = setup({
+    renameLabel: vi.fn(async () => {
+      throw { code: "invalid_input", message: "That name is taken." };
+    }),
+  });
+  await flush();
+  press(treeNode(screen, "Projects"), "F2");
+  typeName(screen, "Plans");
+  await flush();
+  expect(deps.renameLabel).toHaveBeenCalledWith("lab-proj", "Plans");
+  const alert = screen.querySelector(".notes-labels [role=alert]");
+  expect(alert?.textContent).toContain("The label was not renamed.");
+  expect(alert?.textContent).toContain("That name is taken.");
+  expect(deps.toast).not.toHaveBeenCalled();
+});
+
+test("delete asks first, names where the notes move, then calls deleteLabel", async () => {
+  const { screen, deps } = setup({
+    listLabelledNotes: vi.fn(async (labelId: string | null) => ({
+      items: labelId === "lab-proj" ? [NOTES[1]] : NOTES.slice(),
+      next: null,
+    })),
+  });
+  await flush();
+  press(treeNode(screen, "Projects"), "Delete");
+  await flush();
+  expect(dialog()?.textContent).toContain(
+    'Delete the label "Work / Projects"?',
+  );
+  expect(dialog()?.textContent).toContain('Its 1 note moves to "Work".');
+  expect(deps.deleteLabel).not.toHaveBeenCalled();
+  button(document, "Keep label").click();
+  await flush();
+  expect(deps.deleteLabel).not.toHaveBeenCalled();
+  press(treeNode(screen, "Projects"), "Delete");
+  await flush();
+  button(document, "Delete label").click();
+  await flush();
+  expect(deps.deleteLabel).toHaveBeenCalledWith("lab-proj");
+  expect(deps.toast).toHaveBeenCalledWith("Label deleted.");
+});
+
+test("a refused delete shows the reason from the command", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const { screen } = setup({
+    deleteLabel: async () => {
+      throw {
+        code: "invalid_input",
+        message: "This top label still holds notes with no other label.",
+      };
+    },
+  });
+  await flush();
+  press(treeNode(screen, "Work"), "Delete");
+  await flush();
+  button(document, "Delete label").click();
+  await flush();
+  expect(
+    screen.querySelector(".notes-labels [role=alert]")?.textContent,
+  ).toContain("This top label still holds notes with no other label.");
+});
+
+test("deleting the open label goes back to its parent's notes", async () => {
+  const { screen, deps } = setup();
+  await flush();
+  treeNode(screen, "Projects").click();
+  await flush();
+  press(treeNode(screen, "Projects"), "Delete");
+  await flush();
+  button(document, "Delete label").click();
+  await flush();
+  expect(deps.listLabelledNotes).toHaveBeenLastCalledWith("lab-work", {
+    limit: 50,
+  });
+});
+
+// Every node has its own menu in the page; the later menu belongs to the nested label.
+const moveItemOfProjects = () =>
+  [...document.querySelectorAll<HTMLElement>("[role=menuitem]")]
+    .filter((i) => i.textContent?.includes("Move to"))
+    .pop() as HTMLElement;
+
+async function openMoveDialog() {
+  const s = setup();
+  await flush();
+  (
+    s.screen.querySelector(
+      '[aria-label="Actions for Projects"]',
+    ) as HTMLButtonElement
+  ).click();
+  moveItemOfProjects().click();
+  await flush();
+  return s;
+}
+
+test("Move opens a single picker: the moved label is disabled with a reason, the parent is current", async () => {
+  await openMoveDialog();
+  const box = dialog() as HTMLDialogElement;
+  expect(box.textContent).toContain("(Top level)");
+  expect(pickerItem(box, "Work / Projects").getAttribute("aria-disabled")).toBe(
+    "true",
+  );
+  expect(box.textContent).toContain("A label cannot go under itself.");
+  expect(pickerItem(box, "Work").textContent).toContain("Current");
+});
+
+test("Move to the top level calls moveLabel with no parent", async () => {
+  const { deps } = await openMoveDialog();
+  const box = dialog() as HTMLDialogElement;
+  pickerItem(box, "").click();
+  button(box, "Move").click();
+  await flush();
+  expect(deps.moveLabel).toHaveBeenCalledWith("lab-proj", null);
+  expect(deps.toast).toHaveBeenCalledWith("Label moved.");
+  expect(dialog()?.open ?? false).toBeFalsy();
+});
+
+test("a refused move keeps the dialog open with the message at the picker", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  const s = setup({
+    moveLabel: async () => {
+      throw {
+        code: "invalid_input",
+        message: "A label named Projects is already there.",
+      };
+    },
+  });
+  await flush();
+  (
+    s.screen.querySelector(
+      '[aria-label="Actions for Projects"]',
+    ) as HTMLButtonElement
+  ).click();
+  moveItemOfProjects().click();
+  await flush();
+  const box = dialog() as HTMLDialogElement;
+  pickerItem(box, "").click();
+  button(box, "Move").click();
+  await flush();
+  expect(box.textContent).toContain("A label named Projects is already there.");
+  expect(s.deps.toast).not.toHaveBeenCalled();
+});
+
+// ---- The label picker and a new note ----
+test("the editor shows the note's labels as chips with full paths", async () => {
+  const { screen } = await opened();
+  expect(chips(screen)).toEqual(["Work"]);
+  option(screen, "Meeting plan").click();
+  await flush();
+  expect(chips(screen)).toEqual(["Work / Projects", "Work"]);
+});
+
+test("Save is refused with a message when no label is chosen", async () => {
+  const { screen, deps } = await opened();
+  (
+    screen.querySelector(".label-picker-chip-remove") as HTMLButtonElement
+  ).click();
+  expect(hasText(screen, "Unsaved changes")).toBe(true);
+  button(screen, "Save").click();
+  await flush();
+  expect(deps.saveLabelledNote).not.toHaveBeenCalled();
+  expect(screen.querySelector(".label-picker-error")?.textContent).toContain(
+    "Choose at least one label before saving",
+  );
+});
+
+test("Save sends the chosen label ids", async () => {
+  const { screen, deps } = await opened();
+  pickerItem(screen, "Work / Projects").click();
+  expect(chips(screen)).toEqual(["Work", "Work / Projects"]);
+  button(screen, "Save").click();
+  await flush();
+  expect(deps.saveLabelledNote).toHaveBeenCalledWith("note-1", BODY1, [
+    "lab-work",
+    "lab-proj",
+  ]);
+});
+
+test("Cancel puts the labels back as they were", async () => {
+  const { screen } = await opened();
+  pickerItem(screen, "Work / Projects").click();
+  expect(hasText(screen, "Unsaved changes")).toBe(true);
+  button(screen, "Cancel").click();
+  expect(chips(screen)).toEqual(["Work"]);
+  expect(hasText(screen, "Unsaved changes")).toBe(false);
+});
+
+test("New note opens an empty note in Edit mode with the current label chosen", async () => {
+  const { screen, deps } = setup();
+  await flush();
+  treeNode(screen, "Projects").click();
+  await flush();
+  button(screen, "New note").click();
+  await flush();
+  expect(area(screen)?.value).toBe("");
+  expect(chips(screen)).toEqual(["Work / Projects"]);
+  expect(hasText(screen, "Unsaved changes")).toBe(false);
+  type(screen, "Fresh idea");
+  button(screen, "Save").click();
+  await flush();
+  expect(deps.saveLabelledNote).toHaveBeenCalledWith(null, "Fresh idea", [
+    "lab-proj",
+  ]);
+  expect(options(screen)[0].textContent).toContain("Fresh idea");
+  // The saved note is now an open note: a second save updates it.
+  type(screen, "!");
+  button(screen, "Save").click();
+  await flush();
+  expect(deps.saveLabelledNote).toHaveBeenLastCalledWith(
+    "note-new",
+    "Fresh idea!",
+    ["lab-proj"],
+  );
+});
+
+test("a new note with no label chosen is not saved", async () => {
+  const { screen, deps } = setup();
+  await flush();
+  button(screen, "New note").click();
+  await flush();
+  expect(chips(screen)).toEqual([]);
+  type(screen, "No place yet");
+  button(screen, "Save").click();
+  await flush();
+  expect(deps.saveLabelledNote).not.toHaveBeenCalled();
+  expect(hasText(screen, "Choose at least one label before saving")).toBe(true);
+});
+
+test("New note asks before it drops unsaved changes", async () => {
+  const { screen } = await opened();
+  type(screen, "\nand bread");
+  button(screen, "New note").click();
+  await flush();
+  expect(dialog()?.textContent).toContain("Discard your changes");
+  button(document, "Discard changes").click();
+  await flush();
+  expect(area(screen)?.value).toBe("");
+  expect(hasText(screen, "New note")).toBe(true);
 });
