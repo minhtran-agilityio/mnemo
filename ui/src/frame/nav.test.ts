@@ -2,10 +2,13 @@ import { expect, test } from "vitest";
 import {
   ALL_ITEMS,
   APPS_ITEMS,
+  DEV_GROUPS,
+  DEV_ITEMS,
   findItem,
   GROUPS,
+  isRoadmapItem,
   SAVE_OR_ASK,
-  STOREHOUSE_GROUP,
+  SIDEBAR_GROUPS,
 } from "./nav";
 
 const labels = (id: string) =>
@@ -79,14 +82,21 @@ test("there is no Tags group and no count or badge in the data", () => {
     );
 });
 
-test("the dev-only Storehouse group has one UI Catalog item, and its id is unique", () => {
-  expect(STOREHOUSE_GROUP?.label).toBe("Storehouse");
-  expect(STOREHOUSE_GROUP?.items.map((i) => i.label)).toEqual(["UI Catalog"]);
-  const ids = [
-    ...ALL_ITEMS.map((i) => i.id),
-    ...(STOREHOUSE_GROUP?.items.map((i) => i.id) ?? []),
-  ];
+test("the dev-only Storehouse group has one UI Catalog item, with no phase and a unique id", () => {
+  // Vitest runs in dev mode, so the dev-only groups are present here.
+  expect(DEV_GROUPS.map((g) => g.label)).toEqual(["Storehouse"]);
+  expect(DEV_ITEMS.map((i) => i.label)).toEqual(["UI Catalog"]);
+  for (const item of DEV_ITEMS) {
+    expect(isRoadmapItem(item)).toBe(false);
+    expect(Object.keys(item).sort()).toEqual(["icon", "id", "label"]);
+  }
+  const ids = [...ALL_ITEMS, ...DEV_ITEMS].map((i) => i.id);
   expect(new Set(ids).size).toBe(ids.length);
-  // The router does not own the catalog, so an unknown-address fallback still applies.
+  // ALL_ITEMS holds roadmap screens only, so findItem never returns a dev-only tool.
   expect(findItem("ui-catalog")).toBeUndefined();
+  for (const item of ALL_ITEMS) expect(isRoadmapItem(item)).toBe(true);
+});
+
+test("the sidebar shows the roadmap groups, then the dev-only groups", () => {
+  expect(SIDEBAR_GROUPS).toEqual([...GROUPS, ...DEV_GROUPS]);
 });

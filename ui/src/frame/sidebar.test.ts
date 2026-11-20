@@ -1,12 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, test, vi } from "vitest";
-import {
-  ALL_ITEMS,
-  APPS_ITEMS,
-  GROUPS,
-  STOREHOUSE_GROUP,
-  UI_CATALOG_ID,
-} from "./nav";
+import { ALL_ITEMS, APPS_ITEMS, SIDEBAR_GROUPS, UI_CATALOG_ID } from "./nav";
 import {
   createSidebar,
   createSidebarFromSaved,
@@ -62,10 +56,12 @@ test("every item is a link with its name, and there is no Tags group, count or b
   const all = names(sidebar.element);
   for (const item of ALL_ITEMS)
     expect(all.some((n) => n.startsWith(item.label))).toBe(true);
-  // Vitest runs in dev mode, so the dev-only Storehouse group is the one extra heading.
-  expect(sidebar.element.querySelectorAll(".sb-label").length).toBe(
-    GROUPS.length + 1,
-  );
+  // One heading per group, the dev-only Storehouse group included (Vitest runs in dev mode).
+  expect(
+    [...sidebar.element.querySelectorAll(".sb-label")].map(
+      (h) => h.textContent,
+    ),
+  ).toEqual(SIDEBAR_GROUPS.map((g) => g.label));
   expect(sidebar.element.textContent).not.toMatch(/tags/i);
   expect(sidebar.element.textContent).not.toMatch(/\d/);
   expect(
@@ -266,8 +262,4 @@ test("setCurrent marks the UI Catalog item current and clears the others", () =>
   const current = sidebar.element.querySelectorAll("[aria-current=page]");
   expect(current.length).toBe(1);
   expect((current[0] as HTMLElement).dataset.item).toBe("ui-catalog");
-});
-
-test("the Storehouse group is the dev-only data", () => {
-  expect(STOREHOUSE_GROUP?.items.map((i) => i.id)).toEqual(["ui-catalog"]);
 });

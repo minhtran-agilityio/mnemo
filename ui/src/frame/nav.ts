@@ -9,19 +9,30 @@ export type IconShape = readonly [
   attrs: Readonly<Record<string, string>>,
 ];
 
-export interface NavItem {
+/** A link in the sidebar: its name and icon, and a Later mark for a roadmap feature. */
+export interface SidebarItem {
   id: string;
   label: string;
-  /** The roadmap phase that builds this screen. */
-  phase: number;
   /** True when the roadmap marks the feature Later. */
   later?: boolean;
   icon: readonly IconShape[];
 }
 
-export interface NavGroup {
+/** A roadmap screen: a sidebar item plus the roadmap phase that builds it. */
+export interface NavItem extends SidebarItem {
+  /** The roadmap phase that builds this screen. */
+  phase: number;
+}
+
+/** A titled list of sidebar items. */
+export interface SidebarGroup {
   id: string;
   label: string;
+  items: readonly SidebarItem[];
+}
+
+/** A group of roadmap screens. */
+export interface NavGroup extends SidebarGroup {
   items: readonly NavItem[];
 }
 
@@ -327,30 +338,34 @@ export const GROUPS: readonly NavGroup[] = [
 export const UI_CATALOG_ID = "ui-catalog";
 
 /**
- * The dev-only Storehouse group, with one item that opens the UI Catalog. It is null in a
- * release build: the `import.meta.env.DEV` test is replaced by `false` there, so the group,
- * its label and its item are dropped from the bundle. It is not in ALL_ITEMS, because the
- * router does not own the catalog; main.ts opens it.
+ * The dev-only groups: tools for building Mnemo, not roadmap screens, so their items have no
+ * phase. Today that is Storehouse, with one item that opens the UI Catalog. The list is empty in
+ * a release build: the `import.meta.env.DEV` test is replaced by `false` there, so the groups,
+ * their labels and their items are dropped from the bundle.
  */
-export const STOREHOUSE_GROUP: NavGroup | null = import.meta.env.DEV
-  ? {
-      id: "storehouse",
-      label: "Storehouse",
-      items: [
-        {
-          id: UI_CATALOG_ID,
-          label: "UI Catalog",
-          phase: 1,
-          icon: [
-            ["rect", { x: "3", y: "3", width: "7", height: "7", rx: "1.5" }],
-            ["rect", { x: "14", y: "3", width: "7", height: "7", rx: "1.5" }],
-            ["rect", { x: "3", y: "14", width: "7", height: "7", rx: "1.5" }],
-            ["rect", { x: "14", y: "14", width: "7", height: "7", rx: "1.5" }],
-          ],
-        },
-      ],
-    }
-  : null;
+export const DEV_GROUPS: readonly SidebarGroup[] = import.meta.env.DEV
+  ? [
+      {
+        id: "storehouse",
+        label: "Storehouse",
+        items: [
+          {
+            id: UI_CATALOG_ID,
+            label: "UI Catalog",
+            icon: [
+              ["rect", { x: "3", y: "3", width: "7", height: "7", rx: "1.5" }],
+              ["rect", { x: "14", y: "3", width: "7", height: "7", rx: "1.5" }],
+              ["rect", { x: "3", y: "14", width: "7", height: "7", rx: "1.5" }],
+              [
+                "rect",
+                { x: "14", y: "14", width: "7", height: "7", rx: "1.5" },
+              ],
+            ],
+          },
+        ],
+      },
+    ]
+  : [];
 
 /** The list that opens and closes at the bottom of the sidebar. */
 export const APPS_LABEL = "Apps and settings";
@@ -401,6 +416,22 @@ export const ALL_ITEMS: readonly NavItem[] = [
 
 export function findItem(id: string): NavItem | undefined {
   return ALL_ITEMS.find((item) => item.id === id);
+}
+
+/** Every group the sidebar shows, in order: the roadmap groups, then the dev-only ones. */
+export const SIDEBAR_GROUPS: readonly SidebarGroup[] = [
+  ...GROUPS,
+  ...DEV_GROUPS,
+];
+
+/** The dev-only items. The router opens them too. A release build has none. */
+export const DEV_ITEMS: readonly SidebarItem[] = DEV_GROUPS.flatMap(
+  (g) => g.items,
+);
+
+/** True for a roadmap screen, which has a phase. False for a dev-only tool. */
+export function isRoadmapItem(item: SidebarItem): item is NavItem {
+  return "phase" in item;
 }
 
 /** The address that opens an item. The router reads it back. */

@@ -1,15 +1,19 @@
 // A hash router: the address is `#/<item id>`, and `#/everything?q=<word>` carries a search.
-// An unknown address opens Today, so the window is never blank.
+// An unknown address opens Today, so the window is never blank. A dev-only item's address
+// opens it in a dev build; a release build has no dev-only items, so it opens Today.
 import {
+  DEV_ITEMS,
   EVERYTHING_ID,
   findItem,
   HOME_ID,
   hashItemPath,
   type NavItem,
+  type SidebarItem,
 } from "./nav";
 
 export interface Route {
-  item: NavItem;
+  /** A roadmap screen, or a dev-only tool such as the UI Catalog (dev builds only). */
+  item: SidebarItem;
   /** The searched text, only on the Everything screen. Null when there is none. */
   query: string | null;
 }
@@ -25,7 +29,7 @@ export function splitHash(hash: string): { path: string; search: string } {
 
 export function parseHash(hash: string): Route {
   const { path, search } = splitHash(hash);
-  const item = findItem(path) ?? HOME;
+  const item = findItem(path) ?? DEV_ITEMS.find((i) => i.id === path) ?? HOME;
   if (item.id !== EVERYTHING_ID) return { item, query: null };
   const query = new URLSearchParams(search).get("q");
   return { item, query: query?.trim() ? query : null };

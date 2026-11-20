@@ -5,8 +5,8 @@ import "./frame/sidebar.css";
 import "./screens/settings/settings.css";
 import { getVersion } from "@tauri-apps/api/app";
 import { renderEmptyState } from "./frame/empty-state";
-import { EVERYTHING_ID, UI_CATALOG_ID } from "./frame/nav";
-import { createRouter, splitHash } from "./frame/router";
+import { EVERYTHING_ID, isRoadmapItem, UI_CATALOG_ID } from "./frame/nav";
+import { createRouter } from "./frame/router";
 import {
   createSidebarFromSaved,
   ReadTimeoutError,
@@ -135,13 +135,11 @@ async function start(): Promise<void> {
     const visit = ++routeCount;
     leaveScreen?.();
     leaveScreen = null;
-    // The UI Catalog is dev only: a release build drops this branch and the catalog code with it.
-    // Its Storehouse sidebar item is marked current while it is open.
-    if (
-      import.meta.env.DEV &&
-      splitHash(window.location.hash).path === UI_CATALOG_ID
-    ) {
-      sidebar.setCurrent(UI_CATALOG_ID);
+    const { item } = route;
+    sidebar.setCurrent(item.id);
+    // The UI Catalog is dev only: a release build drops this branch and the catalog code with it,
+    // and its router never returns the catalog item.
+    if (import.meta.env.DEV && item.id === UI_CATALOG_ID) {
       document.title = "UI Catalog - Mnemo";
       screen.textContent = "Loading the UI Catalog...";
       import("./screens/catalog/catalog")
@@ -158,8 +156,7 @@ async function start(): Promise<void> {
         });
       return;
     }
-    sidebar.setCurrent(route.item.id);
-    if (route.item.id === SETTINGS_ID) {
+    if (item.id === SETTINGS_ID) {
       renderSettings(screen, {
         getTheme: () => currentTheme,
         applyTheme: useTheme,
@@ -171,10 +168,13 @@ async function start(): Promise<void> {
           ),
         onDetachedSave: (failure) => showNote(themeSaveNote, failure),
       });
+    } else if (isRoadmapItem(item)) {
+      renderEmptyState(screen, { item, query: route.query });
     } else {
-      renderEmptyState(screen, route);
+      // A dev-only tool with no screen of its own yet.
+      screen.textContent = `${item.label} has no screen yet.`;
     }
-    document.title = `${route.item.label} - Mnemo`;
+    document.title = `${item.label} - Mnemo`;
   });
   // The theme and the sidebar state are read first, so the frame is built in its final state
   // and never shows in the wrong theme.
