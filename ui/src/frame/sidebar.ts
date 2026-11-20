@@ -11,11 +11,11 @@ import {
 import {
   APPS_ITEMS,
   APPS_LABEL,
-  GROUPS,
   hashItemPath,
   type IconShape,
-  type NavItem,
   SAVE_OR_ASK,
+  SIDEBAR_GROUPS,
+  type SidebarItem,
 } from "./nav";
 
 export type { Sidebar };
@@ -33,7 +33,7 @@ function iconNode(shapes: readonly IconShape[]): IconNode {
   return shapes.map(([tag, attrs]) => [tag, { ...attrs }]);
 }
 
-function toLink(item: NavItem): SidebarLink {
+function toLink(item: SidebarItem): SidebarLink {
   return {
     id: item.id,
     label: item.label,
@@ -50,7 +50,7 @@ export function createSidebar(doc: Document, options: SidebarOptions): Sidebar {
     brandMark: "M",
     quick: toLink(SAVE_OR_ASK),
     searchLabel: "Search everything",
-    groups: GROUPS.map((group) => ({
+    groups: SIDEBAR_GROUPS.map((group) => ({
       id: group.id,
       label: group.label,
       items: group.items.map(toLink),
