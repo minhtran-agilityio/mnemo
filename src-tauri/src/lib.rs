@@ -205,6 +205,11 @@ pub fn run() {
             commands::list_memories,
             commands::update_memory,
             commands::delete_memory,
+            commands::add_file,
+            commands::get_file,
+            commands::read_file,
+            commands::delete_file,
+            commands::file_orphan_report,
             commands::add_link,
             commands::list_links,
             commands::remove_link
