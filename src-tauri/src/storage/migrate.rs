@@ -29,6 +29,10 @@ pub const MIGRATIONS: &[Migration] = &[
         number: 4,
         sql: include_str!("../../migrations/0004_item_links.sql"),
     },
+    Migration {
+        number: 5,
+        sql: include_str!("../../migrations/0005_files.sql"),
+    },
 ];
 
 /// Reads the schema version stored in the database (0 for a new file).
@@ -87,7 +91,7 @@ mod tests {
     fn real_migrations_set_the_version() {
         let mut c = mem();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 4);
+        assert_eq!(current_version(&c).unwrap(), 5);
     }
 
     #[test]
@@ -158,7 +162,7 @@ mod tests {
             err,
             StorageError::SchemaTooNew {
                 found: 99,
-                supported: 4
+                supported: 5
             }
         );
     }
@@ -214,13 +218,55 @@ mod tests {
             [T],
         )
         .unwrap();
-        run(&mut c, MIGRATIONS).unwrap();
+        run(&mut c, &MIGRATIONS[..4]).unwrap();
         assert_eq!(current_version(&c).unwrap(), 4);
         assert!(table_exists(&c, "item_link"));
         let body: String = c
             .query_row("SELECT body FROM note WHERE id = 'n1'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(body, "kept");
+    }
+
+    #[test]
+    fn migration_5_adds_file_table_to_a_database_built_by_migration_4() {
+        let mut c = mem();
+        run(&mut c, &MIGRATIONS[..4]).unwrap();
+        c.execute(
+            "INSERT INTO note (id, created_at, updated_at, body) VALUES ('n1', ?1, ?1, 'kept')",
+            [T],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES ('theme', 'dark', ?1)",
+            [T],
+        )
+        .unwrap();
+        assert!(!table_exists(&c, "file"));
+        run(&mut c, MIGRATIONS).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 5);
+        assert_eq!(
+            columns(&c, "file"),
+            [
+                "id",
+                "original_name",
+                "stored_name",
+                "size_bytes",
+                "mime",
+                "created_at",
+                "updated_at",
+                "deleted_at"
+            ]
+        );
+        let body: String = c
+            .query_row("SELECT body FROM note WHERE id = 'n1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(body, "kept");
+        let theme: String = c
+            .query_row("SELECT value FROM settings WHERE key = 'theme'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(theme, "dark");
     }
 
     #[test]
@@ -233,7 +279,7 @@ mod tests {
         )
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 4);
+        assert_eq!(current_version(&c).unwrap(), 5);
         for t in KINDS.iter().chain(["item_link", "settings"].iter()) {
             assert!(table_exists(&c, t), "table {t} missing");
         }
