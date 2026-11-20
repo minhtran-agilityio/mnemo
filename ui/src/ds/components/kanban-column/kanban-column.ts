@@ -53,10 +53,18 @@ function syncColumn(col: Element) {
   if (empty) empty.hidden = n > 0;
 }
 
-export interface KanbanBoardOptions {
-  /** Adds pointer drag between columns and the plain Left and Right arrows. Alt+Arrow always works. */
-  readonly drag?: boolean;
-}
+/** Alt+Arrow always moves cards, plus the pointer and plain arrows with `drag`. `move: false` is the no-move board and cannot take `drag`. */
+export type KanbanBoardOptions =
+  | {
+      /** Adds pointer drag between columns and the plain Left and Right arrows. Alt+Arrow always works. */
+      readonly drag?: boolean;
+      readonly move?: true;
+    }
+  | {
+      /** The no-move board: no drag, no Alt+Arrow, no Arrow move. Cards only open. */
+      readonly move: false;
+      readonly drag?: never;
+    };
 
 export function createKanbanBoard(
   doc: Document,
@@ -70,12 +78,15 @@ export function createKanbanBoard(
   board.className = "board";
   board.setAttribute("role", "group");
   board.setAttribute("aria-label", label);
+  const movable = options.move !== false;
+  if (!movable) wrap.classList.add("board-fixed");
   const cols = columns.map((c) => createKanbanColumn(doc, c));
   board.append(...cols);
   const live = doc.createElement("p");
   live.className = "board-live";
   live.setAttribute("aria-live", "polite");
-  wrap.append(board, live);
+  if (movable) wrap.append(board, live);
+  else wrap.append(board);
 
   const colOf = (card: Element) =>
     cols.indexOf(card.closest(".kcol") as HTMLElement);
@@ -89,6 +100,7 @@ export function createKanbanBoard(
   };
 
   board.addEventListener("keydown", (e) => {
+    if (!movable) return;
     const card = (e.target as Element).closest<HTMLElement>(".kcard");
     if (!card) return;
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
@@ -101,7 +113,7 @@ export function createKanbanBoard(
     move(card, to);
   });
 
-  if (options.drag) {
+  if (options.drag && movable) {
     board.addEventListener("pointerdown", (e) => {
       const card = (e.target as Element).closest<HTMLElement>(".kcard");
       if (!card || e.button !== 0) return;

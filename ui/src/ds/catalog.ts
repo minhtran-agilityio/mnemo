@@ -318,6 +318,7 @@ export const TOKEN_GROUPS: readonly TokenGroup[] = [
       "--size-dialog-width",
       "--size-dialog-static-max",
       "--size-kcard-width",
+      "--size-column-max",
       "--size-table-min",
       "--size-tree-max",
       "--leading-chip-sm",

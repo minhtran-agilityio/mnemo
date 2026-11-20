@@ -239,6 +239,7 @@
   --size-dialog-static-max: 440px;
   /* Records and Lists */
   --size-kcard-width: 240px;
+  --size-column-max: 320px;
   --size-table-min: 560px;
   --size-tree-max: 360px;
   --leading-chip-sm: 16px;

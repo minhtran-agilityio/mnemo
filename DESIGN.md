@@ -120,6 +120,7 @@ The UI Catalog tabs need fixed lengths that no token covered (prototype v3 uses 
 | `--size-dialog-width` | 480px |
 | `--size-dialog-static-max` | 440px |
 | `--size-kcard-width` | 240px |
+| `--size-column-max` | 320px |
 | `--size-table-min` | 560px |
 | `--size-tree-max` | 360px |
 | `--leading-chip-sm` | 16px |
