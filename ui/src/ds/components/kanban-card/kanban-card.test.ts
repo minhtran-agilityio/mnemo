@@ -29,3 +29,40 @@ test("a working card says so as a status", () => {
   const card = createKanbanCard(document, { title: "A", working: true });
   expect(card.querySelector('[role="status"]')?.textContent).toBe("AI working");
 });
+
+test("a button card is a real button that opens on click and is not a grab target", () => {
+  let opened = 0;
+  const card = createKanbanCard(document, {
+    title: "Garden robot that waters by soil moisture",
+    meta: ["3 of 4 checks", "2 tags"],
+    onOpen: () => {
+      opened += 1;
+    },
+  });
+  expect(card.tagName).toBe("BUTTON");
+  expect((card as HTMLButtonElement).type).toBe("button");
+  expect(card.hasAttribute("aria-current")).toBe(false);
+  expect(card.textContent).toContain("Garden robot");
+  expect(card.querySelector<HTMLElement>(".k-title")?.title).toContain(
+    "Garden robot",
+  );
+  card.click();
+  expect(opened).toBe(1);
+});
+
+test("the open card has aria-current and a check mark, not colour alone", () => {
+  const card = createKanbanCard(document, {
+    title: "A",
+    onOpen: () => {},
+    current: true,
+  });
+  expect(card.getAttribute("aria-current")).toBe("true");
+  expect(card.classList).toContain("is-current");
+  expect(card.querySelector("svg.k-mark")).not.toBeNull();
+});
+
+test("a long title stays in the card as text", () => {
+  const long = "word ".repeat(80).trim();
+  const card = createKanbanCard(document, { title: long, onOpen: () => {} });
+  expect(card.querySelector(".k-title")?.textContent).toBe(long);
+});

@@ -217,6 +217,32 @@ export const renderRecords: TabRenderer = (panel, ctx) => {
           { title: "Summarise the WebKitGTK notes", working: true },
           "AI running",
         ),
+        k(
+          {
+            title: "Garden robot that waters by soil moisture",
+            meta: ["3 of 4 checks", "2 tags"],
+            onOpen: () => {},
+          },
+          "button",
+        ),
+        k(
+          {
+            title: "Garden robot that waters by soil moisture",
+            meta: ["3 of 4 checks", "2 tags"],
+            onOpen: () => {},
+            current: true,
+          },
+          "open now",
+        ),
+        k(
+          {
+            title: "Garden robot that waters by soil moisture",
+            meta: ["3 of 4 checks", "2 tags"],
+            onOpen: () => {},
+            forceState: "focus",
+          },
+          "button focus",
+        ),
       ];
     },
     citation: () => {

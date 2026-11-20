@@ -167,3 +167,42 @@ test("a pointer drop on the same column or a cancel moves nothing", () => {
   expect(a.classList.contains("is-dragging")).toBe(false);
   board.remove();
 });
+
+test("a no-move board never moves a card, by key or pointer, and cards open", () => {
+  let opened = "";
+  const idea = (t: string) =>
+    createKanbanCard(document, { title: t, onOpen: () => (opened = t) });
+  const wrap = createKanbanBoard(
+    document,
+    "Ideas",
+    [
+      { name: "Spark", cards: [idea("A")], emptyText: "No idea here yet." },
+      { name: "Shape", cards: [], emptyText: "No idea here yet." },
+    ],
+    { move: false, drag: true },
+  );
+  document.body.append(wrap);
+  const a = wrap.querySelector(".kcard") as HTMLElement;
+  const cols = wrap.querySelectorAll<HTMLElement>(".kcol");
+  for (const init of [{ altKey: true }, {}]) {
+    a.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowRight",
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      }),
+    );
+  }
+  a.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+  expect(a.classList.contains("is-dragging")).toBe(false);
+  expect(cols[0].contains(a)).toBe(true);
+  expect(wrap.querySelector(".board-live")).toBeNull();
+  expect(wrap.classList).toContain("board-fixed");
+  expect(cols[1].querySelector(".empty")?.textContent).toBe(
+    "No idea here yet.",
+  );
+  a.click();
+  expect(opened).toBe("A");
+  wrap.remove();
+});
