@@ -1,5 +1,6 @@
 // A release `vite build` must hold no Storehouse section and no UI Catalog item (#119 [DS-11]).
-// Run: MNEMO_NESTED=1 node --test --test-isolation=none tests/storehouse-release-build.test.mjs
+// It runs inside `npm test` on purpose: ds-03 AC5, the other release-build check, skips in nested
+// runs, so without this test CI would not catch the dev-only section leaking into a release.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -33,8 +34,8 @@ test("a release build has no Storehouse section and no UI Catalog item", { timeo
     assert.ok(sidebar.length > 0, "the sidebar code is not in the build, so the check proves nothing");
     for (const file of built) {
       const text = readFileSync(file, "utf8");
-      assert.ok(!text.includes("Storehouse"), `Storehouse found in ${file}`);
-      assert.ok(!text.includes("sb-group-storehouse"), `storehouse group found in ${file}`);
+      // Case-insensitive, so the group id "storehouse" is caught as well as its label.
+      assert.ok(!/storehouse/i.test(text), `Storehouse found in ${file}`);
       assert.ok(!text.includes("UI Catalog"), `UI Catalog found in ${file}`);
       assert.ok(!text.includes("ui-catalog"), `ui-catalog found in ${file}`);
     }
