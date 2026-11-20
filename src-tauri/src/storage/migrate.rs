@@ -21,6 +21,14 @@ pub const MIGRATIONS: &[Migration] = &[
         number: 2,
         sql: include_str!("../../migrations/0002_settings.sql"),
     },
+    Migration {
+        number: 3,
+        sql: include_str!("../../migrations/0003_items.sql"),
+    },
+    Migration {
+        number: 4,
+        sql: include_str!("../../migrations/0004_item_links.sql"),
+    },
 ];
 
 /// Reads the schema version stored in the database (0 for a new file).
@@ -79,7 +87,7 @@ mod tests {
     fn real_migrations_set_the_version() {
         let mut c = mem();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 2);
+        assert_eq!(current_version(&c).unwrap(), 4);
     }
 
     #[test]
@@ -88,10 +96,10 @@ mod tests {
         run(&mut c, &MIGRATIONS[..1]).unwrap();
         assert_eq!(current_version(&c).unwrap(), 1);
         assert!(!table_exists(&c, "settings"));
-        run(&mut c, MIGRATIONS).unwrap();
+        run(&mut c, &MIGRATIONS[..2]).unwrap();
         assert_eq!(current_version(&c).unwrap(), 2);
         assert!(table_exists(&c, "settings"));
-        run(&mut c, MIGRATIONS).unwrap();
+        run(&mut c, &MIGRATIONS[..2]).unwrap();
         assert_eq!(current_version(&c).unwrap(), 2);
     }
 
@@ -150,8 +158,125 @@ mod tests {
             err,
             StorageError::SchemaTooNew {
                 found: 99,
-                supported: 2
+                supported: 4
             }
         );
+    }
+
+    const KINDS: [&str; 8] = [
+        "bookmark", "note", "idea", "project", "task", "event", "run", "memory",
+    ];
+    const T: &str = "2026-01-01T00:00:00Z";
+
+    fn columns(c: &Connection, table: &str) -> Vec<String> {
+        let mut st = c
+            .prepare("SELECT name FROM pragma_table_info(?1) ORDER BY cid")
+            .unwrap();
+        st.query_map([table], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn migration_3_adds_item_tables_to_a_database_built_by_migration_2() {
+        let mut c = mem();
+        run(&mut c, &MIGRATIONS[..2]).unwrap();
+        c.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES ('theme', 'dark', ?1)",
+            [T],
+        )
+        .unwrap();
+        run(&mut c, &MIGRATIONS[..3]).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 3);
+        for k in KINDS {
+            assert!(table_exists(&c, k), "table {k} missing");
+            let cols = columns(&c, k);
+            for base in ["id", "created_at", "updated_at", "deleted_at"] {
+                assert!(cols.iter().any(|n| n == base), "{k} lacks {base}");
+            }
+        }
+        assert!(!table_exists(&c, "item_link"));
+        let theme: String = c
+            .query_row("SELECT value FROM settings WHERE key = 'theme'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(theme, "dark");
+    }
+
+    #[test]
+    fn migration_4_adds_item_link_to_a_database_built_by_migration_3() {
+        let mut c = mem();
+        run(&mut c, &MIGRATIONS[..3]).unwrap();
+        c.execute(
+            "INSERT INTO note (id, created_at, updated_at, body) VALUES ('n1', ?1, ?1, 'kept')",
+            [T],
+        )
+        .unwrap();
+        run(&mut c, MIGRATIONS).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 4);
+        assert!(table_exists(&c, "item_link"));
+        let body: String = c
+            .query_row("SELECT body FROM note WHERE id = 'n1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(body, "kept");
+    }
+
+    #[test]
+    fn all_migrations_on_a_version_2_database_keep_settings_and_add_9_tables() {
+        let mut c = mem();
+        run(&mut c, &MIGRATIONS[..2]).unwrap();
+        c.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES ('theme', 'dark', ?1)",
+            [T],
+        )
+        .unwrap();
+        run(&mut c, MIGRATIONS).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 4);
+        for t in KINDS.iter().chain(["item_link", "settings"].iter()) {
+            assert!(table_exists(&c, t), "table {t} missing");
+        }
+        let n: i64 = c
+            .query_row("SELECT count(*) FROM settings", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn memory_table_has_only_the_base_fields_and_a_body() {
+        let mut c = mem();
+        run(&mut c, MIGRATIONS).unwrap();
+        assert_eq!(
+            columns(&c, "memory"),
+            ["id", "created_at", "updated_at", "deleted_at", "body"]
+        );
+    }
+
+    #[test]
+    fn item_table_checks_refuse_bad_rows() {
+        let mut c = mem();
+        run(&mut c, MIGRATIONS).unwrap();
+        let bad = [
+            "INSERT INTO idea (id, created_at, updated_at, title, stage) VALUES ('i', ?1, ?1, 't', 'nonsense')",
+            "INSERT INTO run (id, created_at, updated_at, task_type, started_at, outcome) VALUES ('r', ?1, ?1, 'x', ?1, 'weird')",
+            "INSERT INTO run (id, created_at, updated_at, task_type, started_at, duration_ms) VALUES ('r', ?1, ?1, 'x', ?1, -1)",
+            "INSERT INTO bookmark (id, created_at, updated_at, url, reason_is_guess) VALUES ('b', ?1, ?1, 'https://a.b', 2)",
+            "INSERT INTO item_link (id, a_kind, a_id, b_kind, b_id, created_at, updated_at) VALUES ('l', 'folder', 'f', 'note', 'n', ?1, ?1)",
+            "INSERT INTO item_link (id, a_kind, a_id, b_kind, b_id, created_at, updated_at) VALUES ('l', 'note', 'n', 'note', 'n', ?1, ?1)",
+        ];
+        for sql in bad {
+            assert!(c.execute(sql, [T]).is_err(), "accepted: {sql}");
+        }
+        // The same rows with good values are accepted.
+        let good = [
+            "INSERT INTO idea (id, created_at, updated_at, title, stage) VALUES ('i', ?1, ?1, 't', 'ready')",
+            "INSERT INTO run (id, created_at, updated_at, task_type, started_at, duration_ms, outcome) VALUES ('r', ?1, ?1, 'x', ?1, 0, 'ok')",
+            "INSERT INTO bookmark (id, created_at, updated_at, url, reason_is_guess) VALUES ('b', ?1, ?1, 'https://a.b', 1)",
+            "INSERT INTO item_link (id, a_kind, a_id, b_kind, b_id, created_at, updated_at) VALUES ('l', 'note', 'n', 'task', 'n', ?1, ?1)",
+        ];
+        for sql in good {
+            c.execute(sql, [T]).unwrap();
+        }
     }
 }

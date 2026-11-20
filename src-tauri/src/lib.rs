@@ -19,6 +19,9 @@ fn startup_code(e: &StorageError) -> &'static str {
         StorageError::MigrationFailed { .. } => "migration",
         StorageError::SchemaTooNew { .. } => "too_new",
         StorageError::Database(_) => "database",
+        // Item errors cannot happen while opening; they get the generic code.
+        StorageError::NotFound { .. } => "database",
+        StorageError::Invalid(_) => "database",
     }
 }
 
@@ -151,7 +154,50 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             commands::get_setting,
-            commands::set_setting
+            commands::set_setting,
+            commands::add_bookmark,
+            commands::get_bookmark,
+            commands::list_bookmarks,
+            commands::update_bookmark,
+            commands::delete_bookmark,
+            commands::add_note,
+            commands::get_note,
+            commands::list_notes,
+            commands::update_note,
+            commands::delete_note,
+            commands::add_idea,
+            commands::get_idea,
+            commands::list_ideas,
+            commands::update_idea,
+            commands::delete_idea,
+            commands::add_project,
+            commands::get_project,
+            commands::list_projects,
+            commands::update_project,
+            commands::delete_project,
+            commands::add_task,
+            commands::get_task,
+            commands::list_tasks,
+            commands::update_task,
+            commands::delete_task,
+            commands::add_event,
+            commands::get_event,
+            commands::list_events,
+            commands::update_event,
+            commands::delete_event,
+            commands::add_run,
+            commands::get_run,
+            commands::list_runs,
+            commands::update_run,
+            commands::delete_run,
+            commands::add_memory,
+            commands::get_memory,
+            commands::list_memories,
+            commands::update_memory,
+            commands::delete_memory,
+            commands::add_link,
+            commands::list_links,
+            commands::remove_link
         ])
         .build(tauri::generate_context!())
         .expect("error while building Mnemo")
@@ -227,5 +273,10 @@ mod tests {
             startup_code(&StorageError::Database("x".into())),
             "database"
         );
+        assert_eq!(
+            startup_code(&StorageError::NotFound { kind: "note" }),
+            "database"
+        );
+        assert_eq!(startup_code(&StorageError::Invalid("x".into())), "database");
     }
 }
