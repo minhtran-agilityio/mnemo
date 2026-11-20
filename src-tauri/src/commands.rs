@@ -205,7 +205,8 @@ impl AiHealthState {
         true
     }
 
-    pub fn set(&self, value: AiHealth) {
+    #[cfg(test)]
+    fn set(&self, value: AiHealth) {
         let seq = self.begin();
         self.finish(seq, value);
     }
