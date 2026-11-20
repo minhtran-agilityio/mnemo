@@ -201,11 +201,15 @@
   color: var(--muted);
 }
 
-/* A long label ends in an ellipsis; the full name is the title of the item. */
+/* A long label ends in an ellipsis; the full name is the title of the item. The inline padding,
+   taken back by the margin, keeps the clip box from cutting the edges of the first and last
+   glyphs, so a short label draws exactly as before. */
 .sidebar-item .sidebar-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding-inline: var(--border-2);
+  margin-inline: calc(-1 * var(--border-2));
 }
 
 .sidebar-item:hover,
