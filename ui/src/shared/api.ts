@@ -392,3 +392,59 @@ export function listLabelledNotes(
     page: { limit: page.limit, after: page.after ?? null },
   });
 }
+
+// ---- Images and attached files (#16) ----
+// Files live in one folder beside the database. The UI never sees a path: it sends
+// bytes and gets a file id, and reads a file by that id only.
+
+/** What the core knows about a saved file. The disk name is never sent. */
+export interface FileRecord {
+  id: string;
+  originalName: string;
+  sizeBytes: number;
+  mime: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A file in the files folder that no row owns. */
+export interface OrphanFile {
+  name: string;
+  sizeBytes: number;
+}
+
+/** The clean-up report. It only lists; nothing is deleted. */
+export interface OrphanReport {
+  files: OrphanFile[];
+  truncated: boolean;
+}
+
+/** Saves a file. The core checks the size limit and rejects with `file_too_large`. */
+export async function addFile(file: File): Promise<FileRecord> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  return invoke<FileRecord>("add_file", bytes, {
+    headers: { "x-mnemo-file-name": encodeURIComponent(file.name) },
+  });
+}
+
+/** The details of a saved file. */
+export function getFile(id: string): Promise<FileRecord> {
+  return invoke<FileRecord>("get_file", { id });
+}
+
+/** A saved file as a Blob with its stored type, ready for `URL.createObjectURL`. */
+export async function readFileBlob(id: string): Promise<Blob> {
+  const record = await getFile(id);
+  const bytes = await invoke<ArrayBuffer>("read_file", { id });
+  return new Blob([bytes], record.mime ? { type: record.mime } : undefined);
+}
+
+/** Removes a file from view. The file stays on disk until the owner removes it. */
+export async function deleteFile(id: string): Promise<void> {
+  await invoke<void>("delete_file", { id });
+}
+
+/** Lists files in the folder that no row owns. It deletes nothing. */
+export function fileOrphanReport(): Promise<OrphanReport> {
+  return invoke<OrphanReport>("file_orphan_report");
+}

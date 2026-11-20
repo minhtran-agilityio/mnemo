@@ -1,7 +1,7 @@
 // Acceptance tests for #33 [NOTE-01] Notes with nested labels.
 // Run: MNEMO_NESTED=1 node --test --test-isolation=none tests/acceptance/note-01-notes.test.mjs
 // Black box:
-// - Data (AC1): the migration files are applied with the sqlite3 CLI to a database built by 0001 to 0004.
+// - Data (AC1): the migration files are applied with the sqlite3 CLI to a database built by 0001 to 0005.
 // - Core rules (AC2 to AC5): the Rust test list is read with `cargo test -- --list`.
 // - Commands (AC6): lib.rs registration is read as text; the typed client is checked by
 //   tests/acceptance/note-01-api.test.ts (vitest, mocked invoke), which this file runs.
@@ -38,7 +38,7 @@ const walk = (d, out = []) => {
   return out;
 };
 
-// ================================================================ AC1: migration 0005
+// ================================================================ AC1: migration 0006
 const migFile = (prefix) => {
   const f = existsSync(MIG) ? readdirSync(MIG).find((n) => n.startsWith(prefix) && n.endsWith('.sql')) : null;
   assert.ok(f, `migration ${prefix}_*.sql is missing in src-tauri/migrations`);
@@ -59,31 +59,31 @@ const indexFirsts = (db, t) =>
   ok(db, `SELECT name FROM pragma_index_list('${t}');`).split('\n').filter(Boolean)
     .map((i) => ok(db, `SELECT name FROM pragma_index_info('${i}') ORDER BY seqno LIMIT 1;`));
 
-// A database built by migration 0004 (0001 to 0004) with one live note.
-function db0004() {
+// A database built by migration 0005 (0001 to 0005) with one live note.
+function db0005() {
   const dir = mkdtempSync(join(tmpdir(), 'mnemo-note01-'));
   const db = join(dir, 'mnemo.db');
-  for (const f of ['0001', '0002', '0003', '0004']) ok(db, migFile(f));
+  for (const f of ['0001', '0002', '0003', '0004', '0005']) ok(db, migFile(f));
   ok(db, `INSERT INTO note(id, created_at, updated_at, body) VALUES('note-old','${U}','${U}','kept body');`);
   return { dir, db };
 }
 const withDb = (fn) => () => {
-  const h = db0004();
+  const h = db0005();
   try {
-    ok(h.db, migFile('0005'));
+    ok(h.db, migFile('0006'));
     fn(h.db);
   } finally { rmSync(h.dir, { recursive: true, force: true }); }
 };
 const lab = (id, name, parent = null, deleted = null) =>
   `INSERT INTO label(id, created_at, updated_at, deleted_at, name, parent_id) VALUES('${id}','${U}','${U}',${deleted ? `'${deleted}'` : 'NULL'},'${name}',${parent ? `'${parent}'` : 'NULL'});`;
 
-// AC1: "A new numbered migration (0005) adds a `label` table (UUID id, base fields, name, nullable parent_id,
+// AC1: "A new numbered migration (0006) adds a `label` table (UUID id, base fields, name, nullable parent_id,
 // unique live name per parent) and a `note_label` link table (note_id, label_id, base fields), with indexes;
-// a migration test runs it on a database built by migration 0004 and keeps existing notes."
-test('AC1: migration 0005 runs on a database built by 0004 and keeps existing notes', () => {
-  const h = db0004();
+// a migration test runs it on a database built by migration 0005 and keeps existing notes."
+test('AC1: migration 0006 runs on a database built by 0005 and keeps existing notes', () => {
+  const h = db0005();
   try {
-    ok(h.db, migFile('0005'));
+    ok(h.db, migFile('0006'));
     assert.equal(ok(h.db, "SELECT body FROM note WHERE id='note-old' AND deleted_at IS NULL;"), 'kept body');
     const tables = ok(h.db, "SELECT name FROM sqlite_master WHERE type='table';").split('\n');
     for (const t of ['label', 'note_label', 'note', 'item_link']) assert.ok(tables.includes(t), `table ${t} missing`);
@@ -118,7 +118,7 @@ test('AC1: note_label links a note to a label with the base fields', withDb((db)
   assert.equal(ok(db, "SELECT count(*) FROM note_label WHERE note_id='note-old' AND label_id='t1';"), '1');
 }));
 
-test('AC1: migration 0005 adds indexes for label parents and for both sides of note_label', withDb((db) => {
+test('AC1: migration 0006 adds indexes for label parents and for both sides of note_label', withDb((db) => {
   assert.ok(indexFirsts(db, 'label').includes('parent_id'), 'no index on label starting with parent_id');
   const nl = indexFirsts(db, 'note_label');
   assert.ok(nl.includes('note_id'), 'no index on note_label starting with note_id');
@@ -138,10 +138,10 @@ function rustTests() {
 const labelTests = () => rustTests().filter((n) => n.startsWith('storage::') && /label/i.test(n));
 const someTest = (re, what) => assert.ok(labelTests().some((n) => re.test(n)), `no storage label test ${what}; label tests: ${labelTests().join(', ')}`);
 
-// AC1: "... a migration test runs it on a database built by migration 0004 and keeps existing notes."
+// AC1: "... a migration test runs it on a database built by migration 0005 and keeps existing notes."
 test('AC1: the Rust test list has a migration test for the label migration', () => {
   const mig = rustTests().filter((n) => n.startsWith('storage::') && /migrat/i.test(n));
-  assert.ok(mig.some((n) => /label|0005|five|_5\b/i.test(n)), `no migration test names the label migration: ${mig.join(', ')}`);
+  assert.ok(mig.some((n) => /label|0006|six|_6\b/i.test(n)), `no migration test names the label migration: ${mig.join(', ')}`);
 }, { timeout: 600000 });
 
 // AC2: "storage has label create, rename, move, delete and list-tree functions; move refuses moving a label under

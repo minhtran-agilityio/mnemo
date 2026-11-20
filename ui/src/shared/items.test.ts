@@ -12,18 +12,23 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import {
   addBookmark,
+  addFile,
   addLink,
   createLabel,
   deleteBookmark,
   deleteLabel,
+  deleteFile,
   errorMessage,
+  fileOrphanReport,
   getBookmark,
+  getFile,
   isAppError,
   listBookmarks,
   listLabelledNotes,
   listLabels,
   listLinks,
   moveLabel,
+  readFileBlob,
   removeLink,
   renameLabel,
   saveLabelledNote,
@@ -219,4 +224,73 @@ test("a refused label call reaches the caller as the core's { code, message }", 
     (e: unknown) => e,
   );
   expect(errorMessage(refused)).toBe("A note needs at least one label.");
+});
+
+// ---- Images and attached files (#16) ----
+// The Rust test `file_commands_save_read_delete_end_to_end` (src-tauri/src/commands.rs)
+// runs the same calls against the core.
+const FILE_ID = "9c1b7e2a-0000-4000-8000-0000000000f1";
+const FILE_RECORD = {
+  id: FILE_ID,
+  originalName: "caf\u00e9 photo.png",
+  sizeBytes: 3,
+  mime: "image/png",
+  createdAt: AT,
+  updatedAt: AT,
+};
+
+test("addFile sends the raw bytes with the percent-encoded file name header", async () => {
+  invoke.mockResolvedValueOnce(FILE_RECORD);
+  const file = new File([new Uint8Array([1, 2, 3])], "caf\u00e9 photo.png");
+  expect(await addFile(file)).toEqual(FILE_RECORD);
+  expect(invoke).toHaveBeenCalledTimes(1);
+  const [command, body, options] = invoke.mock.calls[0];
+  expect(command).toBe("add_file");
+  expect(body).toBeInstanceOf(Uint8Array);
+  expect(Array.from(body as Uint8Array)).toEqual([1, 2, 3]);
+  expect(options).toEqual({
+    headers: { "x-mnemo-file-name": "caf%C3%A9%20photo.png" },
+  });
+});
+
+test("getFile, deleteFile and fileOrphanReport send the exact file commands", async () => {
+  invoke.mockResolvedValueOnce(FILE_RECORD);
+  invoke.mockResolvedValueOnce(undefined);
+  invoke.mockResolvedValueOnce({ files: [], truncated: false });
+  await getFile(FILE_ID);
+  await deleteFile(FILE_ID);
+  expect(await fileOrphanReport()).toEqual({ files: [], truncated: false });
+  expect(invoke.mock.calls).toEqual([
+    ["get_file", { id: FILE_ID }],
+    ["delete_file", { id: FILE_ID }],
+    ["file_orphan_report"],
+  ]);
+});
+
+test("readFileBlob reads the file details and the raw bytes, and keeps the stored type", async () => {
+  invoke.mockResolvedValueOnce(FILE_RECORD);
+  invoke.mockResolvedValueOnce(new Uint8Array([1, 2, 3]).buffer);
+  const blob = await readFileBlob(FILE_ID);
+  expect(invoke.mock.calls).toEqual([
+    ["get_file", { id: FILE_ID }],
+    ["read_file", { id: FILE_ID }],
+  ]);
+  expect(blob.type).toBe("image/png");
+  expect(Array.from(new Uint8Array(await blob.arrayBuffer()))).toEqual([
+    1, 2, 3,
+  ]);
+});
+
+test("a file_too_large rejection reaches the caller as an AppError with the limit in the message", async () => {
+  invoke.mockRejectedValueOnce({
+    code: "file_too_large",
+    message:
+      "This file is larger than the limit of 20 MB. Choose a smaller file.",
+  });
+  const err = await addFile(new File([new Uint8Array([1])], "big.bin")).catch(
+    (e: unknown) => e,
+  );
+  expect(isAppError(err)).toBe(true);
+  expect(err).toMatchObject({ code: "file_too_large" });
+  expect(errorMessage(err)).toContain("20 MB");
 });
