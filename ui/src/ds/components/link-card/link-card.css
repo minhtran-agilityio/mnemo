@@ -26,6 +26,10 @@
 }
 
 .lcard .url {
+  /* Room above and below the line for stacked Vietnamese marks, taken back by the margin so the
+     layout does not move. */
+  padding-block: var(--border-2);
+  margin-block: calc(-1 * var(--border-2));
   overflow: hidden;
   color: var(--muted);
   font-family: var(--font-mono);

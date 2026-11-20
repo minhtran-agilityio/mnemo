@@ -10,6 +10,7 @@
   flex-direction: column;
   gap: var(--space-2);
   margin: 0;
+  min-width: 0;
   padding: 0;
   border: 0;
 }
@@ -24,7 +25,7 @@
 
 .choice-list-row {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   column-gap: var(--space-3);
   align-items: center;
   min-height: var(--control-height);

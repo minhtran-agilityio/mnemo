@@ -10,7 +10,8 @@
 
 .tag-item {
   max-width: 100%;
-  padding: 0 var(--space-2);
+  /* The block padding keeps stacked Vietnamese marks inside the clip box of a long tag. */
+  padding: var(--border-2) var(--space-2);
   overflow: hidden;
   border-radius: var(--radius-sm);
   background: var(--tint-info);

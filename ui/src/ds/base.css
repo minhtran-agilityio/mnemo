@@ -10,6 +10,8 @@ body {
   color: var(--ink);
   font-family: var(--font-body);
   font-size: var(--text-base);
+  /* A long word or URL breaks inside its box instead of widening the page. */
+  overflow-wrap: anywhere;
   line-height: var(--leading-body);
 }
 
