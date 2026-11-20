@@ -259,12 +259,23 @@ export const renderRecords: TabRenderer = (panel, ctx) => {
         state(doc, caption, createMarkdownView(doc, { source, ...extra }), {
           grow: true,
         });
+      const focused = (source: string) => {
+        const view = createMarkdownView(doc, { source });
+        view.querySelector("a")?.classList.add("is-focus");
+        view.querySelector("pre")?.classList.add("is-focus");
+        return state(doc, "focus-visible on a link and a code block", view, {
+          grow: true,
+        });
+      };
       return {
         nodes: [
           md(sample, "default, sample with script and onerror shown as text"),
           md(rich, "marks, lists, rule and a link"),
           md("", "empty"),
           md(long, "overflow: long word, long URL, wide code"),
+          focused(
+            "[the docs](https://example.com/docs)\n\n```ts\nconst x = 1;\n```",
+          ),
         ],
         column: true,
       };

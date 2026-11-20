@@ -2,8 +2,9 @@
 // into markup: a small parser reads it and builds only these elements with createElement and text
 // nodes (headings, paragraphs, strong, em, code, pre, blockquote, lists, hr, links). Raw HTML such as
 // <script> or <img onerror> stays visible as plain text and never runs. Images are not loaded (no
-// network); their alt text shows. A link is never opened by this part: it reports the click to the
-// screen, and only http, https and mailto addresses are links at all. No library and no markup strings.
+// network); their alt text shows. A link is never opened by this part: a click, a middle click and
+// the context menu are stopped and reported to the screen, and only http, https and mailto
+// addresses are links at all. No library and no markup strings.
 import { createLink } from "../link/link";
 import "./markdown-view.css";
 
@@ -16,7 +17,10 @@ export interface MarkdownViewOptions {
   readonly emptyText?: string;
   /** The heading element a "#" becomes, 1 to 6. Default 2 (the screen owns the h1). */
   readonly headingLevel?: number;
-  /** A link was activated. The part has already stopped the browser from following it. */
+  /**
+   * A link was activated: a click, a middle click or the context menu. The part has already
+   * stopped the browser from following it, so nothing leaves Mnemo until the screen decides.
+   */
   readonly onLinkClick?: (href: string, event: MouseEvent) => void;
 }
 
@@ -25,11 +29,34 @@ export const MARKDOWN_EMPTY_TEXT = "This note has no text.";
 const MAX_DEPTH = 8;
 const SAFE_HREF = /^(https?:\/\/|mailto:)[^\s]+$/i;
 const LIST_ITEM = /^( *)([-*+]|\d{1,9}[.)])\s+(.*)$/;
-const FENCE = /^ {0,3}(```+|~~~+)\s*([\w+#.-]*)/;
-const HEADING = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
+const FENCE_LINE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+// A closing "#" run closes the heading only when a space comes before it ("# Learning C#" keeps it).
+const HEADING = /^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
 const RULE = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/;
 const QUOTE = /^ {0,3}>/;
 const LINK = /\[([^\]]{0,2000})\]\(([^)\s]{0,2000})(?:\s+"[^"]{0,500}")?\)/y;
+const URL_PART = /\(([^)\s]{0,2000})\)/y;
+const ALNUM = /[\p{L}\p{N}]/u;
+
+interface Fence {
+  readonly marker: string;
+  readonly lang: string;
+}
+
+/** An opening fence, or null. A backtick fence cannot have a backtick in its info string. */
+function matchFence(line: string): Fence | null {
+  const m = FENCE_LINE.exec(line);
+  if (!m) return null;
+  if (m[1][0] === "`" && m[2].includes("`")) return null;
+  return { marker: m[1], lang: m[2].trim().split(/\s+/)[0].slice(0, 40) };
+}
+
+function closesFence(line: string, fence: Fence): boolean {
+  const m = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
+  return (
+    !!m && m[1][0] === fence.marker[0] && m[1].length >= fence.marker.length
+  );
+}
 
 function make<K extends keyof HTMLElementTagNameMap>(
   doc: Document,
@@ -47,7 +74,33 @@ interface Context {
   readonly onLinkClick?: MarkdownViewOptions["onLinkClick"];
 }
 
-function inline(ctx: Context, s: string, depth = 0): Node[] {
+/** A link the owner may follow only through the screen: every way of opening it is stopped. */
+function linkNode(ctx: Context, label: string, href: string): Node {
+  if (!SAFE_HREF.test(href)) return ctx.doc.createTextNode(label || href);
+  const report = (event: Event) => {
+    event.preventDefault();
+    ctx.onLinkClick?.(href, event as MouseEvent);
+  };
+  const a = createLink(ctx.doc, {
+    label: label || href,
+    href,
+    external: true,
+    onClick: report,
+  });
+  // A middle click and "open in new window" skip `click`; stop and report them too.
+  a.addEventListener("auxclick", report);
+  a.addEventListener("contextmenu", report);
+  return a;
+}
+
+/** Inline marks in s between lo and hi. Context (the characters around a mark) reads the whole string. */
+function inline(
+  ctx: Context,
+  s: string,
+  lo = 0,
+  hi = s.length,
+  depth = 0,
+): Node[] {
   const { doc } = ctx;
   const out: Node[] = [];
   let buf = "";
@@ -55,21 +108,17 @@ function inline(ctx: Context, s: string, depth = 0): Node[] {
     if (buf) out.push(doc.createTextNode(buf));
     buf = "";
   };
-  let i = 0;
-  while (i < s.length) {
+  let i = lo;
+  while (i < hi) {
     const c = s[i];
-    if (
-      c === "\\" &&
-      i + 1 < s.length &&
-      /[\\`*_{}[\]()#+\-.!<>~|]/.test(s[i + 1])
-    ) {
+    if (c === "\\" && i + 1 < hi && /[\\`*_{}[\]()#+\-.!<>~|]/.test(s[i + 1])) {
       buf += s[i + 1];
       i += 2;
       continue;
     }
     if (c === "`") {
       const j = s.indexOf("`", i + 1);
-      if (j > i + 1) {
+      if (j > i + 1 && j < hi) {
         flush();
         const code = make(doc, "code", "md-code");
         code.textContent = s.slice(i + 1, j);
@@ -78,32 +127,33 @@ function inline(ctx: Context, s: string, depth = 0): Node[] {
         continue;
       }
     }
+    // A badge: [![alt](image)](page). The image never loads; its alt text is the link label.
+    if (c === "[" && s[i + 1] === "!" && s[i + 2] === "[") {
+      LINK.lastIndex = i + 2;
+      const img = LINK.exec(s);
+      if (img && s[LINK.lastIndex] === "]" && s[LINK.lastIndex + 1] === "(") {
+        URL_PART.lastIndex = LINK.lastIndex + 1;
+        const page = URL_PART.exec(s);
+        if (page && URL_PART.lastIndex <= hi) {
+          flush();
+          out.push(linkNode(ctx, img[1] || "image", page[1]));
+          i = URL_PART.lastIndex;
+          continue;
+        }
+      }
+    }
     const image = c === "!" && s[i + 1] === "[";
     if (c === "[" || image) {
       LINK.lastIndex = image ? i + 1 : i;
       const m = LINK.exec(s);
-      if (m) {
+      if (m && LINK.lastIndex <= hi) {
         flush();
         if (image) {
           const alt = make(doc, "span", "md-image");
           alt.textContent = m[1] || "image";
           out.push(alt);
-        } else if (SAFE_HREF.test(m[2])) {
-          const href = m[2];
-          out.push(
-            createLink(doc, {
-              label: m[1] || href,
-              href,
-              external: true,
-              onClick: (event) => {
-                event.preventDefault();
-                ctx.onLinkClick?.(href, event);
-              },
-            }),
-          );
         } else {
-          // Not an address the part will offer: the label stays as plain text.
-          out.push(doc.createTextNode(m[1] || m[2]));
+          out.push(linkNode(ctx, m[1], m[2]));
         }
         i = LINK.lastIndex;
         continue;
@@ -113,10 +163,10 @@ function inline(ctx: Context, s: string, depth = 0): Node[] {
       const two = s.slice(i, i + 2);
       if (two === "**" || two === "__") {
         const j = s.indexOf(two, i + 2);
-        if (j > i + 2) {
+        if (j > i + 2 && j + 2 <= hi) {
           flush();
           const strong = make(doc, "strong", "md-strong");
-          strong.append(...inline(ctx, s.slice(i + 2, j), depth + 1));
+          strong.append(...inline(ctx, s, i + 2, j, depth + 1));
           out.push(strong);
           i = j + 2;
           continue;
@@ -125,13 +175,16 @@ function inline(ctx: Context, s: string, depth = 0): Node[] {
       if (
         (c === "*" || c === "_") &&
         s[i + 1] !== " " &&
-        (c === "*" || !/[\p{L}\p{N}]/u.test(s[i - 1] ?? " "))
+        (c === "*" || !ALNUM.test(s[i - 1] ?? " "))
       ) {
-        const j = s.indexOf(c, i + 1);
-        if (j > i + 1 && s[j - 1] !== " ") {
+        let j = s.indexOf(c, i + 1);
+        // An underscore inside a word (snake_case_name) never closes an emphasis.
+        while (j !== -1 && j < hi && c === "_" && ALNUM.test(s[j + 1] ?? " "))
+          j = s.indexOf(c, j + 1);
+        if (j > i + 1 && j < hi && s[j - 1] !== " ") {
           flush();
           const em = make(doc, "em", "md-em");
-          em.append(...inline(ctx, s.slice(i + 1, j), depth + 1));
+          em.append(...inline(ctx, s, i + 1, j, depth + 1));
           out.push(em);
           i = j + 1;
           continue;
@@ -147,7 +200,7 @@ function inline(ctx: Context, s: string, depth = 0): Node[] {
 
 function isBlockStart(line: string): boolean {
   return (
-    FENCE.test(line) ||
+    matchFence(line) !== null ||
     HEADING.test(line) ||
     RULE.test(line) ||
     QUOTE.test(line) ||
@@ -155,6 +208,12 @@ function isBlockStart(line: string): boolean {
   );
 }
 
+const leadOf = (line: string) => line.length - line.trimStart().length;
+
+/**
+ * One list. A blank line keeps the list going when an item (or an indented continuation) follows;
+ * indented lines under an item belong to it; an ordered list starts at its first number.
+ */
 function list(
   ctx: Context,
   lines: string[],
@@ -165,17 +224,84 @@ function list(
   const first = LIST_ITEM.exec(lines[start]) as RegExpExecArray;
   const ordered = /\d/.test(first[2]);
   const node: HTMLElement = make(ctx.doc, ordered ? "ol" : "ul", "md-list");
+  if (ordered) {
+    const n = Number.parseInt(first[2], 10);
+    if (n !== 1) (node as HTMLOListElement).start = n;
+  }
+  const inner = indent + 2;
   let i = start;
   let last: HTMLElement | undefined;
+  let afterBlank = false;
+  let content = inner;
   while (i < lines.length) {
-    const m = LIST_ITEM.exec(lines[i]);
-    if (!m) break;
+    const line = lines[i];
+    if (!line.trim()) {
+      let j = i + 1;
+      while (j < lines.length && !lines[j].trim()) j += 1;
+      if (j >= lines.length) break;
+      const next = lines[j];
+      const item = LIST_ITEM.exec(next);
+      const continues = item
+        ? item[1].length >= indent
+        : !!last && leadOf(next) >= inner;
+      if (!continues) break;
+      i = j;
+      afterBlank = true;
+      continue;
+    }
+    const m = LIST_ITEM.exec(line);
+    if (!m) {
+      if (!last || leadOf(line) < inner) break;
+      // Lines indented under the item: more of its text, or a code block or quote inside it.
+      const chunk: string[] = [];
+      let fence: Fence | null = null;
+      while (i < lines.length) {
+        const l = lines[i];
+        if (fence) {
+          chunk.push(l.slice(Math.min(leadOf(l), content)));
+          if (closesFence(l.slice(Math.min(leadOf(l), content)), fence))
+            fence = null;
+          i += 1;
+          continue;
+        }
+        if (!l.trim()) {
+          let j = i + 1;
+          while (j < lines.length && !lines[j].trim()) j += 1;
+          if (
+            j < lines.length &&
+            leadOf(lines[j]) >= inner &&
+            !LIST_ITEM.test(lines[j])
+          ) {
+            chunk.push("");
+            i += 1;
+            continue;
+          }
+          break;
+        }
+        if (leadOf(l) < inner || LIST_ITEM.test(l)) break;
+        const dedented = l.slice(Math.min(leadOf(l), content));
+        fence = matchFence(dedented);
+        chunk.push(dedented);
+        i += 1;
+      }
+      const parts = blocks(ctx, chunk, depth + 1);
+      const head = parts[0];
+      if (!afterBlank && head && head.tagName === "P") {
+        last.append(" ", ...Array.from(head.childNodes));
+        last.append(...parts.slice(1));
+      } else {
+        last.append(...parts);
+      }
+      afterBlank = false;
+      continue;
+    }
     const ind = m[1].length;
     if (ind < indent) break;
     if (ind > indent && last && depth < MAX_DEPTH) {
       const nested = list(ctx, lines, i, ind, depth + 1);
       last.append(nested.node);
       i = nested.next;
+      afterBlank = false;
       continue;
     }
     if (/\d/.test(m[2]) !== ordered) break;
@@ -189,12 +315,14 @@ function list(
       mark.setAttribute("aria-label", done ? "Done" : "Not done");
       mark.textContent = done ? "[x]" : "[ ]";
       li.classList.add("md-item-task");
-      li.append(mark, " ");
+      li.append(mark);
       text = box[2];
     }
     li.append(...inline(ctx, text));
     node.append(li);
     last = li;
+    content = Math.max(inner, ind + m[2].length + 1);
+    afterBlank = false;
     i += 1;
   }
   return { node, next: i };
@@ -210,16 +338,11 @@ function blocks(ctx: Context, lines: string[], depth: number): HTMLElement[] {
       i += 1;
       continue;
     }
-    const fence = FENCE.exec(line);
+    const fence = matchFence(line);
     if (fence) {
       const body: string[] = [];
       i += 1;
-      while (
-        i < lines.length &&
-        !(
-          lines[i].trim().startsWith(fence[1]) && /^\s*[`~]+\s*$/.test(lines[i])
-        )
-      ) {
+      while (i < lines.length && !closesFence(lines[i], fence)) {
         body.push(lines[i]);
         i += 1;
       }
@@ -227,7 +350,10 @@ function blocks(ctx: Context, lines: string[], depth: number): HTMLElement[] {
       const pre = make(doc, "pre", "md-pre");
       pre.tabIndex = 0;
       pre.setAttribute("role", "region");
-      pre.setAttribute("aria-label", fence[2] ? `Code, ${fence[2]}` : "Code");
+      pre.setAttribute(
+        "aria-label",
+        fence.lang ? `Code, ${fence.lang}` : "Code",
+      );
       const code = make(doc, "code");
       code.textContent = body.join("\n");
       pre.append(code);

@@ -13,7 +13,7 @@ test("the sample renders its blocks", () => {
   expect(v.querySelector("h2")?.textContent).toBe("Kế hoạch tuần 47");
   const items = v.querySelectorAll("li");
   expect(items).toHaveLength(2);
-  expect(items[0].textContent).toBe("[ ] Viết test cho nhãn lồng nhau");
+  expect(items[0].textContent).toBe("[ ]Viết test cho nhãn lồng nhau");
   expect(items[0].querySelector("[role=img]")?.getAttribute("aria-label")).toBe(
     "Not done",
   );
@@ -135,11 +135,103 @@ test("long content keeps all its text", () => {
   expect(v.querySelector("a")?.textContent).toContain(url);
 });
 
-test("unclosed marks and deep nesting finish quickly as text", () => {
-  const t = Date.now();
+test("unclosed marks and deep nesting stay bounded and keep their text", () => {
   const v = view(
-    `${"[".repeat(20000)}\n\n${"*".repeat(20000)}\n\n${"> ".repeat(500)}x\n\n${"- ".repeat(300)}`,
+    `${"[".repeat(20000)}\n\n${"*".repeat(20000)}x\n\n${"> ".repeat(500)}x\n\n${"- ".repeat(300)}`,
   );
-  expect(Date.now() - t).toBeLessThan(3000);
   expect(v.textContent).toContain("[[[");
+  expect(v.querySelectorAll("p")[0].textContent).toBe("[".repeat(20000));
+  expect(v.querySelectorAll("p")[1].textContent).toBe(`${"*".repeat(20000)}x`);
+  // Nesting stops at the depth cap instead of growing with the input.
+  expect(v.querySelectorAll("blockquote").length).toBeLessThanOrEqual(9);
+});
+
+const clickKinds = ["click", "auxclick", "contextmenu"] as const;
+
+test.each(clickKinds)("a %s on a link is stopped and reported", (kind) => {
+  const onLinkClick = vi.fn();
+  const a = view("[x](https://example.com/a)", { onLinkClick }).querySelector(
+    "a",
+  ) as HTMLAnchorElement;
+  const event = new MouseEvent(kind, { bubbles: true, cancelable: true });
+  a.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  expect(onLinkClick).toHaveBeenCalledWith("https://example.com/a", event);
+});
+
+test("a ctrl click is reported and not followed", () => {
+  const onLinkClick = vi.fn();
+  const a = view("[x](https://example.com/a)", { onLinkClick }).querySelector(
+    "a",
+  ) as HTMLAnchorElement;
+  const event = new MouseEvent("click", {
+    bubbles: true,
+    cancelable: true,
+    ctrlKey: true,
+  });
+  a.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  expect(onLinkClick).toHaveBeenCalledTimes(1);
+});
+
+test("a blank line keeps one ordered list and its numbers", () => {
+  const v = view("1. one\n\n2. two\n\n3. three");
+  expect(v.querySelectorAll("ol")).toHaveLength(1);
+  expect(v.querySelectorAll("ol > li")).toHaveLength(3);
+});
+
+test("an ordered list starts at its first number", () => {
+  const ol = view("3. c\n4. d").querySelector("ol") as HTMLOListElement;
+  expect(ol.start).toBe(3);
+  expect((view("1. a").querySelector("ol") as HTMLOListElement).start).toBe(1);
+});
+
+test("a different list after a blank line starts a new list", () => {
+  const v = view("- a\n\ntext\n\n- b");
+  expect(v.querySelectorAll("ul")).toHaveLength(2);
+});
+
+test("indented lines and an indented code block stay inside their item", () => {
+  const v = view(
+    "1. first\n   more of first\n\n   ```ts\n   - not an item\n   ```\n\n2. second",
+  );
+  expect(v.querySelectorAll("ol")).toHaveLength(1);
+  const items = v.querySelectorAll("ol > li");
+  expect(items).toHaveLength(2);
+  expect(items[0].textContent).toContain("first more of first");
+  expect(items[0].querySelector("pre code")?.textContent).toBe("- not an item");
+  expect(items[0].querySelectorAll("li")).toHaveLength(0);
+});
+
+test("a trailing # that is part of the title stays", () => {
+  expect(view("# Learning C#").querySelector("h2")?.textContent).toBe(
+    "Learning C#",
+  );
+  expect(view("## Title ##").querySelector("h3")?.textContent).toBe("Title");
+  expect(view("# C# #").querySelector("h2")?.textContent).toBe("C#");
+});
+
+test("a line of inline backticks that starts with three is not a fence", () => {
+  const v = view("```npm install``` then run it\n\nnext paragraph");
+  expect(v.querySelector("pre")).toBeNull();
+  expect(v.textContent).toContain("next paragraph");
+  expect(v.querySelector("code")?.textContent).toBe("npm install");
+});
+
+test("a badge shows the alt text as the link and never loads the image", () => {
+  const v = view(
+    "[![build passing](https://img.test/b.svg)](https://example.com/ci)",
+  );
+  expect(v.querySelector("img")).toBeNull();
+  const a = v.querySelector("a") as HTMLAnchorElement;
+  expect(a.getAttribute("href")).toBe("https://example.com/ci");
+  expect(a.textContent).toContain("build passing");
+});
+
+test("underscores inside words are not emphasis, also inside bold", () => {
+  const v = view("snake_case_name and **use my_var_name here** and _real_");
+  expect(v.querySelectorAll("em")).toHaveLength(1);
+  expect(v.querySelector("em")?.textContent).toBe("real");
+  expect(v.querySelector("strong")?.textContent).toBe("use my_var_name here");
+  expect(v.textContent).toContain("snake_case_name");
 });

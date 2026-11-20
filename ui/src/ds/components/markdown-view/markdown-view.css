@@ -56,22 +56,28 @@
 }
 
 .md-list {
-  padding-left: var(--space-5);
+  padding-left: var(--size-icon-lg);
 }
 
 .md-list .md-list {
   margin: 0;
 }
 
+/* The marker column is one width (--size-icon-lg): bullets and numbers sit in it, and a task mark
+   fills it, so task items line up with the others at every nesting depth. */
 .md-item-task {
   list-style: none;
-  margin-left: calc(-1 * var(--space-4));
 }
 
 .md-check {
+  display: inline-block;
+  box-sizing: border-box;
+  width: var(--size-icon-lg);
+  margin-left: calc(-1 * var(--size-icon-lg));
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
+  white-space: nowrap;
 }
 
 .md-code {
@@ -96,7 +102,8 @@
   overflow-wrap: normal;
 }
 
-.md-pre:focus-visible {
+.md-pre:focus-visible,
+.md-pre.is-focus {
   outline: var(--focus-ring) solid var(--accent);
   outline-offset: var(--border-2);
 }
