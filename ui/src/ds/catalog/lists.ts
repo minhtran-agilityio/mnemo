@@ -28,12 +28,11 @@ export const LISTS = [
   {
     name: "kanban column",
     tab: "Lists",
-    variants: ["default", "drag"],
-    states: ["default", "empty", "drop over"],
+    variants: ["default", "drag", "no move (button cards)"],
+    states: ["default", "empty", "drop over", "open now", "overflow"],
     source: "ds",
     className: "kcol",
-    notes:
-      'Focus a card, then Alt+← / Alt+→ to move it. The drag option adds pointer drag and the plain ← / →. "Doing" shows the drop-target state.',
+    notes: `Focus a card, then Alt+← / Alt+→ to move it. The drag option adds pointer drag and the plain ← / →. "Doing" shows the drop-target state. The option move: false (${ref(129)}) is the no-move board for the Ideas screen: no drag, no Alt+Arrow, no Arrow move; its button cards open an idea.`,
   },
   {
     name: "table",

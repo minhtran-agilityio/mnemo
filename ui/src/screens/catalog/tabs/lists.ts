@@ -136,9 +136,59 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           ],
           { drag: true },
         );
+        const idea = (title: string, current = false) =>
+          createKanbanCard(doc, {
+            title,
+            meta: ["3 of 4 checks", "2 tags"],
+            onOpen: () => {},
+            current,
+          });
+        const stage = (name: string, cards: HTMLElement[]) => ({
+          name,
+          cards,
+          emptyText: "No idea here yet.",
+        });
+        const garden = "Garden robot that waters by soil moisture";
+        const ideas = createKanbanBoard(
+          doc,
+          "Idea board example",
+          [
+            stage("Spark", [
+              idea(garden, true),
+              idea(
+                "A very long idea title that keeps going to show how a title wraps inside the card",
+              ),
+            ]),
+            stage("Shape", [idea("Weekly review ritual")]),
+            stage("Ready", []),
+            stage("Project", [idea("Reading list export")]),
+          ],
+          { move: false },
+        );
+        const many = createKanbanBoard(
+          doc,
+          "Idea board with many cards",
+          [
+            stage(
+              "Spark",
+              Array.from({ length: 12 }, (_, i) =>
+                idea(`Idea number ${i + 1}`),
+              ),
+            ),
+          ],
+          { move: false },
+        );
         return {
           nodes: [
             board,
+            el(
+              doc,
+              "p",
+              "cat-note",
+              "No-move board (move: false), button cards: click, Enter or Space opens an idea; the open one has a check and aria-current. Ready shows the empty state; the last board shows many cards scrolling in the column.",
+            ),
+            ideas,
+            many,
             el(
               doc,
               "p",
