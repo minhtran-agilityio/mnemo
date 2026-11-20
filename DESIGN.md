@@ -249,13 +249,16 @@ How to pick a part:
 
 ## 8. Request flow for a missing part
 
-The agent is [`.claude/agents/ui-designer.md`](.claude/agents/ui-designer.md). The request template is [`.github/ISSUE_TEMPLATE/ui-component-request.md`](.github/ISSUE_TEMPLATE/ui-component-request.md). One request is one issue and one pull request. The flow:
+The agent is [`.claude/agents/ui-designer.md`](.claude/agents/ui-designer.md). The request template is [`.github/ISSUE_TEMPLATE/ui-component-request.md`](.github/ISSUE_TEMPLATE/ui-component-request.md). One request is one issue and one pull request.
 
-1. The feature agent searches the UI Catalog and `ui/src/ds/` and finds no part, variant or state that fits.
-2. The feature agent stops its UI work and files a request: a **UI component request** issue from the template (title `[UI-REQ] `, label `ui-component-request`). It states the screen and ticket that need the part, what the part must do, which states from section 5 apply, real sample content, and what it checked in the UI Catalog and `ui/src/ds/`.
-3. The ui-designer agent picks up the issue. It builds the part in `ui/src/ds/components/<name>/` with tokens only and every state, adds the registry entry and the test, shows the part in its UI Catalog tab, and opens its own pull request with `Closes #<request>` and the label `design-system`, with light and dark screenshots of the catalog row on the `pr-assets` branch.
-4. The feature agent continues after the design pull request is merged. It does not add a temporary style or element to a screen in the meantime; the guards of section 6 fail one that does.
-5. The owner approves the new part in its pull request.
+The **Storehouse keeper** is a long-running session named `Mnemo Storehouse`. It is the one place a feature agent asks about a part. Its role and message forms are in [`.claude/storehouse-keeper.md`](.claude/storehouse-keeper.md). The flow:
+
+1. Before UI work, the feature agent searches the UI Catalog and `ui/src/ds/` for each part it needs, then asks the keeper: `ListAgents` to find `Mnemo Storehouse`, then `SendMessage` with a `UI-ASK` message (the fields of the request template, and its own session name).
+2. The keeper answers `UI-EXISTS` with the part, its import and the variant or state to use. The feature agent picks that part and builds its screen itself. If the keeper answers `UI-QUEUED`, the feature agent stops its UI work for that part and goes on with the rest of its ticket.
+3. For a missing part, the keeper files the request: a **UI component request** issue from the template (title `[UI-REQ] `, label `ui-component-request`) with the screen and ticket that need the part, what the part must do, which states from section 5 apply, real sample content, what was checked in the UI Catalog and `ui/src/ds/`, and a `Requested by:` line for each asking session. If the keeper session is not running, the feature agent files this issue itself and says so in its pull request.
+4. The ui-designer agent, run by the keeper, picks up the issue. It builds the part in `ui/src/ds/components/<name>/` with tokens only and every state, adds the registry entry and the test, shows the part in its UI Catalog tab, and opens its own pull request with `Closes #<request>` and the label `design-system`, with light and dark screenshots of the catalog row on the `pr-assets` branch.
+5. The owner approves the new part in its pull request and merges it.
+6. After the design pull request is merged, the keeper sends `UI-READY` to every session on the issue's `Requested by:` lines, with the part and its import. The feature agent pulls `main`, picks the part and does its own UI work. It does not add a temporary style or element to a screen before that; the guards of section 6 fail one that does.
 
 Check: Review; every new file or variant in `ui/src/ds/` links to a UI component request issue. Test: the write guard of section 6 rule 4 fails a `ui/src/ds/` change without the label `design-system`.
 

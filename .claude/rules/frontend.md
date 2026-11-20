@@ -32,7 +32,7 @@ The UI lives in `ui/`, is built by Vite to `dist/`, and runs in the system web v
 - Semantic HTML: `button` for actions, `a` for navigation, `form` with real `label`s, landmarks (`header`, `nav`, `main`). No clickable `div`s.
 - Every image has `alt`. Every icon-only control has an accessible name.
 - Code outside `ui/src/ds` never creates a `button`, `input`, `select`, `textarea` or `dialog` itself (no `createElement`, no markup string). It calls the builders from `ui/src/ds`. Checked by `tests/ds-screen-elements.test.mjs`.
-- A part that `ui/src/ds` does not have goes through a UI component request (DESIGN.md §8); the ui-designer agent builds it. Do not build it in the screen.
+- Ask the Storehouse keeper session `Mnemo Storehouse` before using or needing a part (DESIGN.md §8, `.claude/storehouse-keeper.md`). A part that `ui/src/ds` does not have goes through a UI component request; the ui-designer agent builds it. Do not build it in the screen.
 
 ## Styling
 - Styles use design tokens (CSS custom properties) only. No raw colour values in component rules.
