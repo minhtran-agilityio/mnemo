@@ -7,6 +7,8 @@ import {
   buildErrorState,
   type Choice,
   createButton,
+  createKanbanBoard,
+  createKanbanCard,
   createPageHeader,
   createPanel,
   createToastRegion,
@@ -22,7 +24,13 @@ import type {
 } from "../../shared/api";
 import { errorMessage } from "../../shared/api";
 import { createIdeaEditor, editorError } from "./idea-editor";
-import type { FieldName } from "./idea-logic";
+import {
+  cardMeta,
+  type FieldName,
+  groupByStage,
+  type IdeaForm,
+  STAGES,
+} from "./idea-logic";
 
 /** The calls the screen makes; main.ts passes the typed client from shared/api. */
 export interface IdeasDeps {
@@ -87,14 +95,17 @@ export function renderIdeas(
     openId: string | null;
     savedItems: Choice[];
     error: { field: FieldName; message: string } | null;
-  } = { ideas: [], openId: null, savedItems: [], error: null };
+    /** What the owner typed before a refused save, so nothing typed is lost. */
+    draft: IdeaForm | null;
+  } = { ideas: [], openId: null, savedItems: [], error: null, draft: null };
 
   const toasts = createToastRegion();
   const newIdea = createButton(doc, { label: "New idea" });
   newIdea.addEventListener("click", () => {
     state.openId = null;
     state.error = null;
-    drawEditor();
+    state.draft = null;
+    draw();
   });
   // Every roadmap screen names its phase, like Settings does.
   const phase = findItem("ideas")?.phase;
@@ -109,8 +120,8 @@ export function renderIdeas(
 
   const body = doc.createElement("div");
   body.className = "ideas-layout";
-  // The stage board (Spark, Shape, Ready, Project) waits for UI component request 129 (idea board with
-  // button cards). It is drawn here when that part is merged; no stand-in until then.
+  // The stage board: Spark, Shape, Ready, Project. Cards open the idea; nothing moves by hand,
+  // because the stage follows the checks.
   const board = doc.createElement("div");
   board.className = "ideas-board";
   const editorSlot = doc.createElement("div");
@@ -127,12 +138,13 @@ export function renderIdeas(
     else state.ideas[at] = idea;
   }
 
-  function refused(error: unknown): void {
+  function refused(error: unknown, form: IdeaForm): void {
     state.error = editorError(errorMessage(error));
+    state.draft = form;
     drawEditor();
   }
 
-  async function save(input: IdeaInput): Promise<void> {
+  async function save(input: IdeaInput, form: IdeaForm): Promise<void> {
     const current = open();
     try {
       const saved = current
@@ -142,10 +154,11 @@ export function renderIdeas(
       put(saved);
       state.openId = saved.id;
       state.error = null;
-      drawEditor();
+      state.draft = null;
+      draw();
       toasts.show(current ? "Idea saved." : "Idea added.");
     } catch (error) {
-      if (!left) refused(error);
+      if (!left) refused(error, form);
     }
   }
 
@@ -155,12 +168,43 @@ export function renderIdeas(
       if (left) return;
       put(idea);
       state.error = null;
-      drawEditor();
+      state.draft = null;
+      draw();
       toasts.show("Project created from your idea. The idea is kept.");
     } catch (error) {
       if (!left)
         toasts.show(`Mnemo could not make the project. ${errorMessage(error)}`);
     }
+  }
+
+  function openIdea(id: string): void {
+    state.openId = id;
+    state.error = null;
+    state.draft = null;
+    draw();
+  }
+
+  function drawBoard(): void {
+    const groups = groupByStage(state.ideas);
+    board.replaceChildren(
+      createKanbanBoard(
+        doc,
+        "Ideas by stage",
+        STAGES.map((stage) => ({
+          name: stage.label,
+          emptyText: "No idea here yet.",
+          cards: groups[stage.id].map((idea) =>
+            createKanbanCard(doc, {
+              title: idea.title,
+              meta: [cardMeta(idea)],
+              onOpen: () => openIdea(idea.id),
+              current: idea.id === state.openId,
+            }),
+          ),
+        })),
+        { move: false },
+      ),
+    );
   }
 
   function drawEditor(): void {
@@ -171,8 +215,14 @@ export function renderIdeas(
         save,
         turnIntoProject,
         error: state.error,
+        draft: state.draft,
       }),
     );
+  }
+
+  function draw(): void {
+    drawBoard();
+    drawEditor();
   }
 
   async function load(): Promise<void> {
@@ -186,6 +236,7 @@ export function renderIdeas(
       if (left) return;
       state.ideas = ideas.items;
       state.savedItems = sourceChoices(bookmarks.items, notes.items);
+      drawBoard();
       if (state.ideas.length === 0) {
         editorSlot.replaceChildren(
           createPanel({
@@ -209,7 +260,7 @@ export function renderIdeas(
         return;
       }
       state.openId = state.ideas[0]?.id ?? null;
-      drawEditor();
+      draw();
     } catch (error) {
       if (left) return;
       editorSlot.replaceChildren(

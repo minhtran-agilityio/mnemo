@@ -50,10 +50,12 @@ export interface IdeaEditorOptions {
   idea: Idea | null;
   /** The owner's saved bookmarks and notes, as "<kind>:<id>" choices. */
   savedItems: readonly Choice[];
-  /** Saves the input. Rejects with the core's `{ code, message }` when it is refused. */
-  save(input: IdeaInput): Promise<void>;
+  /** Saves the input; `form` is what the owner typed, kept if the save is refused. */
+  save(input: IdeaInput, form: IdeaForm): Promise<void>;
   /** "Turn into project" for the saved idea. */
   turnIntoProject(id: string): Promise<void>;
+  /** What the owner typed before a refused save. Defaults to the idea's saved values. */
+  draft?: IdeaForm | null;
   /** A refused save, to show next to its field. */
   error?: { field: FieldName; message: string } | null;
 }
@@ -64,7 +66,7 @@ export function createIdeaEditor(
   options: IdeaEditorOptions,
 ): HTMLElement {
   const { idea } = options;
-  const form: IdeaForm = formOf(idea);
+  const form: IdeaForm = { ...(options.draft ?? formOf(idea)) };
   const errorFor = (f: FieldName): string | undefined =>
     options.error?.field === f ? options.error.message : undefined;
 
@@ -228,7 +230,7 @@ export function createIdeaEditor(
   save.addEventListener("click", () => {
     if (save.getAttribute("aria-busy") === "true") return;
     setButtonBusy(save, true, saveLook);
-    options.save(toInput(form)).finally(() => {
+    options.save(toInput(form), { ...form }).finally(() => {
       if (save.isConnected) setButtonBusy(save, false, saveLook);
     });
   });

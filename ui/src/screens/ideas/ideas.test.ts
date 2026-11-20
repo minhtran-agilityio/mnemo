@@ -197,3 +197,70 @@ test("a new idea starts empty with Add idea as the primary action and no Turn in
   expect(labels).not.toContain("Turn into project");
   expect(el.textContent).toContain("0 of 4");
 });
+
+test("the board groups ideas by stage and a card opens its idea", async () => {
+  const d = deps({
+    listIdeas: vi.fn(async () =>
+      page([
+        idea({
+          id: "a",
+          title: "Alpha",
+          stage: "spark",
+          checks: none,
+          tags: [],
+        }),
+        idea({ id: "b", title: "Beta", stage: "ready" }),
+        idea({ id: "c", title: "Gamma", stage: "project", projectId: "p1" }),
+      ]),
+    ),
+  });
+  const box = document.createElement("main");
+  document.body.append(box);
+  renderIdeas(box, d);
+  await flush();
+  const column = (name: string) =>
+    box.querySelector<HTMLElement>(`[aria-label="${name}"]`);
+  expect(column("Spark")?.textContent).toContain("Alpha");
+  expect(column("Ready")?.textContent).toContain("Beta");
+  expect(column("Project")?.textContent).toContain("Gamma");
+  expect(column("Shape")?.textContent).toContain("No idea here yet.");
+  const beta = [...box.querySelectorAll("button")].find((b) =>
+    b.textContent?.includes("Beta"),
+  );
+  expect(beta).toBeDefined();
+  beta?.click();
+  expect(box.querySelector('[aria-current="true"]')?.textContent).toContain(
+    "Beta",
+  );
+  expect(box.querySelector("h2")?.textContent).toBe("Ideas");
+  expect(box.textContent).toContain("Stage: Ready");
+  box.remove();
+});
+
+test("a refused save keeps what the owner typed", async () => {
+  const d = deps({
+    updateIdea: vi.fn(async () => {
+      throw {
+        code: "invalid_input",
+        message: "The why line must be null or 1 to 500 characters.",
+      };
+    }),
+  });
+  const box = document.createElement("main");
+  document.body.append(box);
+  renderIdeas(box, d);
+  await flush();
+  const title = box.querySelector<HTMLInputElement>("input.input");
+  if (!title) throw new Error("no title input");
+  title.value = "Garden robot, take two";
+  title.dispatchEvent(new Event("input"));
+  [...box.querySelectorAll("button")]
+    .find((b) => b.textContent === "Save idea")
+    ?.click();
+  await flush();
+  expect(box.textContent).toContain("The why line must be null");
+  expect(box.querySelector<HTMLInputElement>("input.input")?.value).toBe(
+    "Garden robot, take two",
+  );
+  box.remove();
+});
