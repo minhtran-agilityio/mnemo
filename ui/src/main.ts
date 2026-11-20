@@ -26,6 +26,7 @@ import {
   checkAiHealth,
   errorMessage,
   getAiHealth,
+  getAiMode,
   getSetting,
   ping,
   setSetting,
@@ -174,6 +175,7 @@ async function start(): Promise<void> {
           ),
         onDetachedSave: (failure) => showNote(themeSaveNote, failure),
         getAiHealth,
+        getAiMode,
         checkAiHealth,
       });
     } else if (isRoadmapItem(item)) {
