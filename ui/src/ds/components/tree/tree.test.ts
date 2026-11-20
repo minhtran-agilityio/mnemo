@@ -212,6 +212,98 @@ test("F2 renames in place: Enter saves and reports, the name stays text", () => 
   t.remove();
 });
 
+test("after a rename the tree keeps the new name: F2 again, menu names and the duplicate check", () => {
+  const { t, events } = withActions();
+  const mnemo = node(t, "Mnemo");
+  key(mnemo, "F2");
+  key(typeIn(t, "Mnemo 2"), "Enter");
+  expect(
+    mnemo.closest(".trow")?.querySelector(".tmore")?.getAttribute("aria-label"),
+  ).toBe("Actions for Mnemo 2");
+  expect(
+    mnemo.closest(".trow")?.querySelector(".tmenu")?.getAttribute("aria-label"),
+  ).toBe("Actions for Mnemo 2");
+  key(mnemo, "F2");
+  expect(field(t).value).toBe("Mnemo 2");
+  expect(field(t).getAttribute("aria-label")).toBe("Rename Mnemo 2");
+  key(field(t), "Escape");
+  // The old name is free again; the new one is taken, by another node too.
+  key(node(t, "Design notes"), "F2");
+  key(typeIn(t, "mnemo 2"), "Enter");
+  expect(t.querySelector(".err-text")?.textContent).toContain("already exists");
+  key(field(t), "Escape");
+  key(node(t, "Design notes"), "F2");
+  key(typeIn(t, "Mnemo"), "Enter");
+  expect(t.querySelector(".err-text")).toBeNull();
+  menuItem(t, "Mnemo 2", "Delete").click();
+  expect(events.at(-2)).toMatchObject({ action: "rename", name: "Mnemo" });
+  expect(events.at(-1)).toMatchObject({ action: "delete", label: "Mnemo 2" });
+  t.remove();
+});
+
+test("leaving the field keeps a typed name open and cancels only an empty or unchanged one", () => {
+  const { t, events } = withActions();
+  const out = (el: Element) =>
+    el.dispatchEvent(
+      new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+    );
+  key(node(t, "Mnemo"), "F2");
+  typeIn(t, "Design notes");
+  out(field(t));
+  expect(t.querySelector(".tedit")).not.toBeNull();
+  expect(field(t).getAttribute("aria-invalid")).toBe("true");
+  typeIn(t, "Mnemo 3");
+  out(field(t));
+  expect(t.querySelector(".tedit")).not.toBeNull();
+  expect(events).toEqual([]);
+  typeIn(t, "Mnemo");
+  out(field(t));
+  expect(t.querySelector(".tedit")).toBeNull();
+  t.querySelector<HTMLButtonElement>(".tree-new")?.click();
+  out(field(t));
+  expect(t.querySelector(".tedit")).toBeNull();
+  t.remove();
+});
+
+test("one field at a time: New label is disabled while a field is open", () => {
+  const { t } = withActions();
+  key(node(t, "Mnemo"), "F2");
+  const newLabel = t.querySelector<HTMLButtonElement>(".tree-new");
+  expect(newLabel?.disabled).toBe(true);
+  menuItem(t, "Design notes", "New label inside").click();
+  expect(t.querySelectorAll(".tedit")).toHaveLength(1);
+  key(field(t), "Escape");
+  expect(newLabel?.disabled).toBe(false);
+  t.remove();
+});
+
+test("error messages have unique ids", () => {
+  const a = withActions(actionNodes, {
+    forced: { id: "Mnemo", state: "error", value: "Design notes" },
+  });
+  const b = withActions(actionNodes, {
+    forced: { id: "Mnemo", state: "error", value: "Design notes" },
+  });
+  expect(a.t.querySelector(".err-text")?.id).not.toBe(
+    b.t.querySelector(".err-text")?.id,
+  );
+  a.t.remove();
+  b.t.remove();
+});
+
+test("the held-open menu is the popover's own: a click on its button closes it", () => {
+  const { t } = withActions(actionNodes, {
+    forced: { id: "Mnemo", state: "menu" },
+  });
+  const trigger = node(t, "Mnemo")
+    .closest(".trow")
+    ?.querySelector<HTMLButtonElement>(".tmore");
+  expect(trigger?.getAttribute("aria-expanded")).toBe("true");
+  trigger?.click();
+  expect(trigger?.getAttribute("aria-expanded")).toBe("false");
+  t.remove();
+});
+
 test("Escape cancels a rename and reports nothing", () => {
   const { t, events } = withActions();
   const mnemo = node(t, "Mnemo");

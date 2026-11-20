@@ -64,7 +64,7 @@ export const LISTS = [
     ],
     source: "ds",
     className: "tree",
-    notes: `Folders and nested labels. With actions (${ref(126)}) each node has a menu: New label inside, Rename (F2), Move to, Delete (Delete key); Shift+F10 or the context menu key opens it. Rename and create are a field in the row: Enter saves, Escape cancels, an empty or duplicate name is refused at the field. The tree reports the node and the action; the screen does the work. Loading, success, partial and AI off do not apply: the screen shows a skeleton or a toast.`,
+    notes: `Folders and nested labels. With actions (${ref(126)}) each node has a menu: New label inside, Rename (F2), Move to, Delete (Delete key); Shift+F10 or the context menu key opens it. Rename and create are a field in the row: Enter saves, Escape cancels, an empty or duplicate name is refused at the field. The tree reports the node and the action; the screen does the work. After a saved rename the tree keeps the new name itself (shown name, menu names, F2 again, duplicate check) until the screen re-renders from the event. A typed name is never lost to a stray click or the window losing focus: only an empty or unchanged field closes on leaving, and Escape cancels. Loading, success, partial and AI off do not apply: the screen shows a skeleton or a toast.`,
   },
   {
     name: "section list",

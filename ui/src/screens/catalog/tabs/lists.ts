@@ -90,7 +90,11 @@ const wrapRoom = (doc: Document, tree: HTMLElement): HTMLElement => {
 };
 
 /** The live example: it reports to a toast, the way a screen would do the work. */
-const labelActions = (toast: (text: string) => void): TreeActionsOptions => ({
+const labelActions = (
+  toast: (text: string) => void,
+  signal: AbortSignal,
+): TreeActionsOptions => ({
+  signal,
   onAction: (e) =>
     toast(
       `${e.action} ${e.name ?? e.label ?? "top level"}. Catalog only, nothing changed.`,
@@ -261,7 +265,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
             "Labels, live example",
             LABELS,
             undefined,
-            labelActions(ctx.toast),
+            labelActions(ctx.toast, ctx.signal),
           ),
           { grow: true },
         ),
@@ -270,6 +274,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           "empty: no labels yet",
           createTree(doc, "Labels, empty example", [], undefined, {
             onAction: () => {},
+            signal: ctx.signal,
           }),
           { grow: true },
         ),
@@ -280,6 +285,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
             doc,
             createTree(doc, "Labels, menu example", LABELS, undefined, {
               onAction: () => {},
+              signal: ctx.signal,
               forced: { id: "Design notes", state: "menu" },
             }),
           ),
@@ -290,6 +296,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           "renaming (Enter saves, Escape cancels)",
           createTree(doc, "Labels, rename example", LABELS, undefined, {
             onAction: () => {},
+            signal: ctx.signal,
             forced: { id: "Mnemo", state: "renaming" },
           }),
           { grow: true },
@@ -299,6 +306,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           "rename refused: duplicate name at the field",
           createTree(doc, "Labels, rename error example", LABELS, undefined, {
             onAction: () => {},
+            signal: ctx.signal,
             forced: { id: "Mnemo", state: "error", value: "Design notes" },
           }),
           { grow: true },
@@ -308,6 +316,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           "hover",
           createTree(doc, "Labels, hover example", LABELS, undefined, {
             onAction: () => {},
+            signal: ctx.signal,
             forced: { id: "Mnemo", state: "hover" },
           }),
           { grow: true },
@@ -317,6 +326,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           "focus-visible",
           createTree(doc, "Labels, focus example", LABELS, undefined, {
             onAction: () => {},
+            signal: ctx.signal,
             forced: { id: "Mnemo", state: "focus" },
           }),
           { grow: true },
@@ -326,6 +336,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           "active (pressed)",
           createTree(doc, "Labels, active example", LABELS, undefined, {
             onAction: () => {},
+            signal: ctx.signal,
             forced: { id: "Mnemo", state: "active" },
           }),
           { grow: true },
@@ -335,6 +346,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           "overflow: long Vietnamese name, 60 characters, cut with the full name as title",
           createTree(doc, "Labels, long name example", LONG_LABELS, undefined, {
             onAction: () => {},
+            signal: ctx.signal,
           }),
           { grow: true },
         ),
