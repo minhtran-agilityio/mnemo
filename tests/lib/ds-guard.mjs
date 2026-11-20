@@ -65,13 +65,6 @@ export const readRepo = (path) => readFileSync(join(ROOT, path), "utf8");
  */
 export const KNOWN_EXCEPTIONS = [
   {
-    path: "ui/src/frame/",
-    guards: ["css", "elements"],
-    removedBy: 111,
-    reason:
-      "The app frame (sidebar, empty state, theme) shipped before the design system. sidebar.css holds its own look and sidebar.ts creates raw buttons and the search input.",
-  },
-  {
     path: "ui/src/screens/settings/",
     guards: ["css", "elements"],
     removedBy: 111,
@@ -84,27 +77,6 @@ export const KNOWN_EXCEPTIONS = [
     removedBy: 111,
     reason:
       "The kanban screen shipped before the design system and kanban.css holds its own look. It creates no form element, so the elements guard already holds it.",
-  },
-  {
-    path: "ui/src/style.css",
-    guards: ["css"],
-    removedBy: 111,
-    reason:
-      "The old page style sheet of the frame, the screens and the error page. It holds colour, font and border rules.",
-  },
-  {
-    path: "ui/error.html",
-    guards: [],
-    removedBy: 111,
-    reason:
-      "The error page. Listed by the owner; it passes both guards today because its look comes from ui/src/style.css.",
-  },
-  {
-    path: "ui/src/error-page.ts",
-    guards: [],
-    removedBy: 111,
-    reason:
-      "The error page script. Listed by the owner; it passes both guards today (it only sets text).",
   },
 ];
 

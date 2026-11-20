@@ -3,6 +3,8 @@
 // plus the color-scheme, so the built-in controls match. System removes both and follows the OS:
 // tokens.css reads prefers-color-scheme itself, so an OS change shows at once with no script.
 
+import { setRootTheme } from "../ds/theme-root";
+
 /** The settings key that keeps the theme choice. */
 export const THEME_KEY = "theme";
 
@@ -24,13 +26,7 @@ export function parseTheme(value: string | null | undefined): Theme {
 
 /** Shows `theme` on the root element. System removes the override so the OS decides. */
 export function applyTheme(root: HTMLElement, theme: Theme): void {
-  if (theme === "system") {
-    root.removeAttribute("data-theme");
-    root.style.removeProperty("color-scheme");
-  } else {
-    root.setAttribute("data-theme", theme);
-    root.style.colorScheme = theme;
-  }
+  setRootTheme(root, theme === "system" ? null : theme);
 }
 
 /** How long start-up waits for the saved theme before it uses System. */

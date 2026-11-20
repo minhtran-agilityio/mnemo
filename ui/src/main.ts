@@ -1,9 +1,9 @@
 import "./fonts";
 import "./ds";
 import "./style.css";
-import "./frame/sidebar.css";
 import "./screens/settings/settings.css";
 import { getVersion } from "@tauri-apps/api/app";
+import { textClasses } from "./ds";
 import { renderEmptyState } from "./frame/empty-state";
 import { EVERYTHING_ID } from "./frame/nav";
 import { createRouter, splitHash } from "./frame/router";
@@ -40,6 +40,10 @@ const themeSaveNote = document.querySelector<HTMLElement>("#theme-save-note");
 const screen = document.querySelector<HTMLElement>("#screen");
 const content = document.querySelector<HTMLElement>("#app-content");
 const frame = document.querySelector<HTMLElement>("#app");
+
+// The status lines under the page take the look of the text part: muted and small.
+for (const line of document.querySelectorAll<HTMLElement>(".app-status"))
+  line.classList.add(...textClasses({ tone: "muted", size: "sm" }));
 
 /** Each kind of failure has its own line, so a save that works never clears a read failure. */
 function showNote(note: HTMLElement | null, text: string | null): void {

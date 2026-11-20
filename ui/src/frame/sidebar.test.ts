@@ -35,14 +35,20 @@ const names = (el: ParentNode) =>
   );
 const toggle = () =>
   document.querySelector<HTMLButtonElement>(
-    "button.sbmini",
+    "button.sidebar-toggle",
   ) as HTMLButtonElement;
 
 test("the top is the logo with a toggle, then Save or ask, then the search box", () => {
   const order = [...sidebar.element.children].map((c) => c.className);
-  expect(order.slice(0, 3)).toEqual(["sb-logo", "sb-quick", "sbsearch"]);
-  expect(sidebar.element.querySelector(".sb-name")?.textContent).toBe("Mnemo");
-  expect(sidebar.element.querySelector("a.sb-quick")?.textContent).toBe(
+  expect(order.slice(0, 3)).toEqual([
+    "sidebar-logo",
+    "sidebar-quick",
+    "sidebar-search",
+  ]);
+  expect(sidebar.element.querySelector(".sidebar-name")?.textContent).toBe(
+    "Mnemo",
+  );
+  expect(sidebar.element.querySelector("a.sidebar-quick")?.textContent).toBe(
     "Save or ask",
   );
   const input = sidebar.element.querySelector("input");
@@ -56,7 +62,7 @@ test("every item is a link with its name, and there is no Tags group, count or b
   const all = names(sidebar.element);
   for (const item of ALL_ITEMS)
     expect(all.some((n) => n.startsWith(item.label))).toBe(true);
-  expect(sidebar.element.querySelectorAll(".sb-label").length).toBe(
+  expect(sidebar.element.querySelectorAll(".sidebar-label").length).toBe(
     GROUPS.length,
   );
   expect(sidebar.element.textContent).not.toMatch(/tags/i);
@@ -137,7 +143,9 @@ test("Enter in the search box sends the word; the search button opens a collapse
   expect(searched).toEqual(["zebra"]);
   sidebar.setCollapsed(true);
   const focus = vi.spyOn(input, "focus");
-  (sidebar.element.querySelector(".sbsearchbtn") as HTMLButtonElement).click();
+  (
+    sidebar.element.querySelector(".sidebar-search-button") as HTMLButtonElement
+  ).click();
   expect(sidebar.isCollapsed()).toBe(false);
   expect(focus).toHaveBeenCalled();
   expect(toggled).toEqual([false]);
@@ -145,7 +153,7 @@ test("Enter in the search box sends the word; the search button opens a collapse
 
 test("Apps and settings is the last control, starts closed and opens and closes its list", () => {
   const apps = sidebar.element.querySelector<HTMLButtonElement>(
-    "button.sbtog",
+    "button.sidebar-bottom-toggle",
   ) as HTMLButtonElement;
   const list = sidebar.element.querySelector<HTMLElement>(
     "#sidebar-apps",
