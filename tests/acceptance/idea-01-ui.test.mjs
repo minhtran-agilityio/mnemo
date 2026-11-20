@@ -228,7 +228,8 @@ async function openApp({ profile } = {}) {
       const leaves = (test) => [...main().querySelectorAll('*')].filter((e) => shown(e) && test(norm(e.textContent)) && ![...e.children].some((c) => test(norm(c.textContent))));
       const STAGE_RE = /^(Spark|Shape|Ready|Project)\\b\\s*[(\\[·:\\-–]?\\s*\\d*\\s*[)\\]]?$/i;
       const heads = () => leaves((t) => STAGE_RE.test(t)).map((e) => ({ e, stage: norm(e.textContent).match(STAGE_RE)[1].toLowerCase() }));
-      const titleEl = (t) => leaves((x) => x === t).filter((e) => !e.closest('[role=status], [role=alert], [aria-live], [role=dialog], dialog'))[0] || null;
+      // The board copy of a title sits inside its card (a button); an opened idea may repeat the title outside it.
+      const titleEl = (t) => { const all = leaves((x) => x === t).filter((e) => !e.closest('[role=status], [role=alert], [aria-live], [role=dialog], dialog')); return all.find((e) => e.closest('button, [role=button]')) || all[0] || null; };
       const groupOf = (t) => {
         const el = titleEl(t);
         if (!el) return null;
@@ -256,7 +257,13 @@ async function openApp({ profile } = {}) {
         return c;
       };
       const stagesShown = () => [...new Set(heads().map((h) => h.stage))];
-      window.__h = { norm, name, shown, main, ctl, find, heads, titleEl, groupOf, cardOf, stagesShown };
+      // The idea's card: a shown button whose accessible name contains the idea title.
+      const cardButton = (t) => [...document.querySelectorAll('button, [role=button]')].filter((el) => shown(el) && name(el).includes(t) && !/turn into project/i.test(name(el)))[0] || null;
+      // The opened idea's view names the idea outside its board card (as text or as a field value).
+      const openedShows = (t) => { const card = cardButton(t); return [...main().querySelectorAll('*')].some((e) => shown(e) && !(card && card.contains(e)) && !e.closest('button, [role=button]') && ((('value' in e) && norm(e.value) === t) || (norm(e.textContent) === t && ![...e.children].some((c) => norm(c.textContent) === t)))); };
+      // "Turn into project" in the opened view, not inside the idea's card.
+      const turnButton = (t) => { const card = cardButton(t); return find('Turn into project').filter((b) => !(card && card.contains(b)))[0] || null; };
+      window.__h = { norm, name, shown, main, ctl, find, heads, titleEl, groupOf, cardOf, stagesShown, cardButton, openedShows, turnButton };
     })();`;
     app.h = async (expr) => { await evalJs(app.helpers); return evalJs(expr); };
     app.click = (label) => app.h(`(() => { const e = __h.find(${JSON.stringify(label)})[0]; if (!e) return false; e.click(); return true; })()`);
@@ -282,17 +289,26 @@ async function withIdeas(fn) {
 const groups = (app) => app.h(`Object.fromEntries(${JSON.stringify(TITLES)}.map((t) => [t, __h.groupOf(t)]))`);
 const expectedGroups = (over = {}) => Object.fromEntries(TITLES.map((t) => [t, over[t] ?? EXPECT[t][0]]));
 
-// "Turn into project" in the card of one idea; returns the main text just before the click.
+// Open one idea by clicking its card (the button named by its title) and wait for its opened view.
+async function openIdea(app, title) {
+  const t = JSON.stringify(title);
+  const ok = await app.h(`(() => { const c = __h.cardButton(${t}); if (!c) return false; c.click(); return true; })()`);
+  assert.ok(ok, `no card button whose name contains '${title}'`);
+  await app.until(`__h.openedShows(${t})`, `the opened view of '${title}' to show its title`, 5000);
+}
+// Open the idea, then click "Turn into project" in its opened view; returns the page text just before that click.
 async function turn(app, title) {
+  await openIdea(app, title);
+  const t = JSON.stringify(title);
+  await app.until(`!!__h.turnButton(${t})`, `a 'Turn into project' button in the opened view of '${title}'`, 5000);
   const r = await app.h(`(() => {
-    const card = __h.cardOf(${JSON.stringify(title)});
-    const b = card && __h.find('Turn into project', card)[0];
+    const b = __h.turnButton(${t});
     if (!b) return null;
     const before = (document.body.innerText || '');
     b.click();
     return before;
   })()`);
-  assert.ok(r !== null, `no 'Turn into project' control in the card of '${title}'`);
+  assert.ok(r !== null, `no 'Turn into project' button in the opened view of '${title}'`);
   return r;
 }
 
@@ -330,11 +346,17 @@ test('AC1: each idea card shows how many of the four checks pass (0 of 4 to 4 of
 
 // ---------------------------------------------------------------- AC2
 // "\"Turn into project\" works at any stage and links idea and project both ways."
+// Each idea is opened from its card; its opened view offers "Turn into project" while its stage is not Project.
 test('AC2: "Turn into project" is offered on ideas in Spark, Shape and Ready', UI, () =>
   withIdeas(async (app) => {
-    const r = await app.h(`Object.fromEntries(${JSON.stringify(TITLES.filter((t) => EXPECT[t][0] !== 'project'))}.map((t) => { const c = __h.cardOf(t); return [t, !!(c && __h.find('Turn into project', c)[0])]; }))`);
-    const missing = Object.entries(r).filter(([, v]) => !v).map(([t]) => `${t} (${EXPECT[t][0]})`);
-    assert.deepEqual(missing, [], `no 'Turn into project' on: ${missing.join(', ')}`);
+    const missing = [];
+    for (const t of TITLES.filter((x) => EXPECT[x][0] !== 'project')) {
+      await openIdea(app, t);
+      let found = false;
+      for (let i = 0; i < 30 && !found; i++) { found = await app.h(`!!__h.turnButton(${JSON.stringify(t)})`); if (!found) await sleep(100); }
+      if (!found) missing.push(`${t} (${EXPECT[t][0]})`);
+    }
+    assert.deepEqual(missing, [], `no 'Turn into project' in the opened view of: ${missing.join(', ')}`);
   }));
 
 // Out of scope note in the ticket: "Turn into project" creates the project record and shows a confirmation.
