@@ -196,7 +196,7 @@ test("a refused action stays in the menu, disabled, with its reason", () => {
   t.remove();
 });
 
-test("F2 renames in place: Enter saves and reports, the name stays text", () => {
+test("F2 renames in place: Enter closes the field and only reports; the name stays as given", () => {
   const { t, events } = withActions();
   const mnemo = node(t, "Mnemo");
   key(mnemo, "F2");
@@ -205,8 +205,11 @@ test("F2 renames in place: Enter saves and reports, the name stays text", () => 
   key(typeIn(t, "<b>Mnemo 2</b>"), "Enter");
   expect(t.querySelector(".tedit")).toBeNull();
   expect(mnemo.hidden).toBe(false);
-  expect(mnemo.querySelector(".tname")?.textContent).toBe("<b>Mnemo 2</b>");
-  expect(t.querySelector(".tree b")).toBeNull();
+  // The tree does not rename: the screen re-renders from its own data.
+  expect(mnemo.querySelector(".tname")?.textContent).toBe("Mnemo");
+  expect(
+    mnemo.closest(".trow")?.querySelector(".tmore")?.getAttribute("aria-label"),
+  ).toBe("Actions for Mnemo");
   expect(events).toEqual([
     {
       action: "rename",
@@ -216,35 +219,6 @@ test("F2 renames in place: Enter saves and reports, the name stays text", () => 
     },
   ]);
   expect(document.activeElement).toBe(mnemo);
-  t.remove();
-});
-
-test("after a rename the tree keeps the new name: F2 again, menu names and the duplicate check", () => {
-  const { t, events } = withActions();
-  const mnemo = node(t, "Mnemo");
-  key(mnemo, "F2");
-  key(typeIn(t, "Mnemo 2"), "Enter");
-  expect(
-    mnemo.closest(".trow")?.querySelector(".tmore")?.getAttribute("aria-label"),
-  ).toBe("Actions for Mnemo 2");
-  expect(
-    mnemo.closest(".trow")?.querySelector(".tmenu")?.getAttribute("aria-label"),
-  ).toBe("Actions for Mnemo 2");
-  key(mnemo, "F2");
-  expect(field(t).value).toBe("Mnemo 2");
-  expect(field(t).getAttribute("aria-label")).toBe("Rename Mnemo 2");
-  key(field(t), "Escape");
-  // The old name is free again; the new one is taken, by another node too.
-  key(node(t, "Design notes"), "F2");
-  key(typeIn(t, "mnemo 2"), "Enter");
-  expect(t.querySelector(".err-text")?.textContent).toContain("already exists");
-  key(field(t), "Escape");
-  key(node(t, "Design notes"), "F2");
-  key(typeIn(t, "Mnemo"), "Enter");
-  expect(t.querySelector(".err-text")).toBeNull();
-  menuItem(t, "Mnemo 2", "Delete").click();
-  expect(events.at(-2)).toMatchObject({ action: "rename", name: "Mnemo" });
-  expect(events.at(-1)).toMatchObject({ action: "delete", label: "Mnemo 2" });
   t.remove();
 });
 
@@ -272,15 +246,71 @@ test("leaving the field keeps a typed name open and cancels only an empty or unc
   t.remove();
 });
 
-test("one field at a time: New label is disabled while a field is open", () => {
-  const { t } = withActions();
+test("another action cancels a kept field and then runs; New label does too", () => {
+  const { t, events } = withActions();
   key(node(t, "Mnemo"), "F2");
-  const newLabel = t.querySelector<HTMLButtonElement>(".tree-new");
-  expect(newLabel?.disabled).toBe(true);
+  typeIn(t, "Mnemo 3");
+  field(t).dispatchEvent(
+    new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+  );
+  expect(t.querySelector(".tedit")).not.toBeNull(); // kept: a changed name
+  key(node(t, "Work"), "Delete");
+  expect(t.querySelector(".tedit")).toBeNull();
+  expect(events).toEqual([{ action: "delete", id: '["Work"]', label: "Work" }]);
+  key(node(t, "Mnemo"), "F2");
+  typeIn(t, "Mnemo 3");
+  menuItem(t, "Work", "Move to").click();
+  expect(t.querySelector(".tedit")).toBeNull();
+  expect(events.at(-1)).toMatchObject({ action: "move" });
+  key(node(t, "Mnemo"), "F2");
+  typeIn(t, "Mnemo 3");
   menuItem(t, "Design notes", "New label inside").click();
   expect(t.querySelectorAll(".tedit")).toHaveLength(1);
+  expect(
+    node(t, "Design notes").closest("li")?.querySelector("ul .tedit"),
+  ).not.toBeNull();
   key(field(t), "Escape");
-  expect(newLabel?.disabled).toBe(false);
+  key(node(t, "Mnemo"), "F2");
+  typeIn(t, "Mnemo 3");
+  t.querySelector<HTMLButtonElement>(".tree-new")?.click();
+  expect(t.querySelectorAll(".tedit")).toHaveLength(1);
+  expect(node(t, "Mnemo").hidden).toBe(false);
+  t.remove();
+});
+
+test("Escape in the tree cancels a kept field", () => {
+  const { t, events } = withActions();
+  key(node(t, "Mnemo"), "F2");
+  typeIn(t, "Mnemo 3");
+  field(t).dispatchEvent(
+    new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+  );
+  key(node(t, "Work"), "Escape");
+  expect(t.querySelector(".tedit")).toBeNull();
+  expect(node(t, "Mnemo").hidden).toBe(false);
+  expect(events).toEqual([]);
+  t.remove();
+});
+
+test("no node menu opens while a field is open, and one key press opens a menu once", () => {
+  const { t } = withActions();
+  const mnemo = node(t, "Mnemo");
+  const panel = mnemo.closest(".trow")?.querySelector(".tmenu") as HTMLElement;
+  key(mnemo, "ContextMenu");
+  mnemo.dispatchEvent(
+    new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+  );
+  expect(panel.hidden).toBe(false);
+  key(panel, "Escape");
+  key(node(t, "Design notes"), "F2");
+  typeIn(t, "Design notes 2");
+  key(mnemo, "ContextMenu");
+  mnemo.dispatchEvent(
+    new MouseEvent("contextmenu", { bubbles: true, cancelable: true }),
+  );
+  expect(
+    [...t.querySelectorAll<HTMLElement>(".tmenu")].filter((m) => !m.hidden),
+  ).toHaveLength(0);
   t.remove();
 });
 
@@ -333,17 +363,6 @@ test("on an empty tree focus returns to the empty state button after Escape and 
   t.remove();
 });
 
-test("a create checks names created since the tree was drawn", () => {
-  const { t } = withActions();
-  const newLabel = t.querySelector<HTMLButtonElement>(".tree-new");
-  newLabel?.click();
-  key(typeIn(t, "Personal"), "Enter");
-  newLabel?.click();
-  key(typeIn(t, "personal"), "Enter");
-  expect(t.querySelector(".err-text")?.textContent).toContain("already exists");
-  t.remove();
-});
-
 test("a held renaming example stays open when focus leaves", () => {
   const { t } = withActions(actionNodes, {
     forced: { id: '["Work","Mnemo"]', state: "renaming" },
@@ -389,11 +408,9 @@ test("a handler that throws shows a plain line and keeps the field open", () => 
 
 test("an empty string from the handler counts as success", () => {
   const { t } = withActions(actionNodes, { onAction: () => "" });
-  const mnemo = node(t, "Mnemo");
-  key(mnemo, "F2");
+  key(node(t, "Mnemo"), "F2");
   key(typeIn(t, "Mnemo 2"), "Enter");
   expect(t.querySelector(".tedit")).toBeNull();
-  expect(mnemo.querySelector(".tname")?.textContent).toBe("Mnemo 2");
   t.remove();
 });
 
@@ -454,40 +471,38 @@ test("opening a node menu closes the one that is open", () => {
 });
 
 test("a rename check compares nodes: another sibling with the same name is refused, the node's own name is not", () => {
-  const { t } = withActions([
+  const { t, events } = withActions([
     { label: "Notes", kind: "label" },
     { label: "Notes", kind: "label" },
   ]);
   const both = [...t.querySelectorAll<HTMLButtonElement>(".tnode")];
-  key(both[0], "F2");
-  key(typeIn(t, "Notes"), "Enter"); // unchanged: no error, no event
-  expect(t.querySelector(".tedit")).toBeNull();
-  key(both[0], "F2");
-  key(typeIn(t, "notes!"), "Enter");
-  expect(t.querySelector(".tedit")).toBeNull();
   key(both[1], "F2");
-  key(typeIn(t, "Notes!"), "Enter");
+  key(typeIn(t, "Notes"), "Enter"); // its own name, unchanged: no error, no event
+  expect(t.querySelector(".tedit")).toBeNull();
+  expect(events).toEqual([]);
+  key(both[1], "F2");
+  key(typeIn(t, "notes"), "Enter");
   expect(t.querySelector(".tedit .err-text")?.textContent).toContain(
     "already exists",
   );
   t.remove();
 });
 
-test("while a field is open no action goes through for another node", () => {
-  const { t, events } = withActions();
-  key(node(t, "Mnemo"), "F2");
-  typeIn(t, "Mnemo 3");
-  field(t).dispatchEvent(
-    new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+test("a refusal or a throw from Move or Delete shows under the node", () => {
+  const { t } = withActions(actionNodes, {
+    onAction: () => {
+      throw new Error("boom");
+    },
+  });
+  key(node(t, "Mnemo"), "Delete");
+  expect(t.querySelector(".tnote")?.textContent).toContain(
+    "Could not save. Try again.",
   );
-  expect(t.querySelector(".tedit")).not.toBeNull(); // kept: a changed name
-  key(node(t, "Work"), "Delete");
-  menuItem(t, "Work", "Move to").click();
-  key(node(t, "Work"), "F2");
-  expect(events).toEqual([]);
-  expect(t.querySelectorAll(".tedit")).toHaveLength(1);
-  expect(document.activeElement).toBe(field(t));
   t.remove();
+  const refused = withActions(actionNodes, { onAction: () => "Not now." });
+  key(node(refused.t, "Mnemo"), "Delete");
+  expect(refused.t.querySelector(".tnote")?.textContent).toContain("Not now.");
+  refused.t.remove();
 });
 
 test("two labels with the same name under different parents get different ids", () => {
@@ -541,18 +556,6 @@ test("two labels with the same name under different parents get different ids", 
     hovered[0].closest("li")?.parentElement?.closest("li")?.textContent,
   ).toContain("B");
   forced.t.remove();
-});
-
-test("a rename checks names created since the tree was drawn, under its own parent", () => {
-  const { t } = withActions();
-  menuItem(t, "Work", "New label inside").click();
-  key(typeIn(t, "Fresh"), "Enter");
-  key(node(t, "Mnemo"), "F2");
-  key(typeIn(t, "fresh"), "Enter");
-  expect(t.querySelector(".tedit .err-text")?.textContent).toContain(
-    "already exists",
-  );
-  t.remove();
 });
 
 test("Escape cancels a rename and reports nothing", () => {

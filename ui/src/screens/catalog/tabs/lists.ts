@@ -97,7 +97,7 @@ const labelActions = (
   signal,
   onAction: (e) =>
     toast(
-      `${e.action} ${e.name ?? e.label ?? "top level"}. Catalog only, nothing changed.`,
+      `${e.action} ${e.label || e.name || "top level"}. Catalog only, nothing changed.`,
     ),
 });
 

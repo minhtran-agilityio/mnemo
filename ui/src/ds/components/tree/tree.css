@@ -175,3 +175,8 @@
   min-height: var(--size-tap-sm);
   font-size: var(--text-md);
 }
+
+/* A refusal of Move or Delete, under the node. */
+.tnote {
+  padding: 0 var(--space-2) var(--space-1);
+}
