@@ -28,12 +28,12 @@ export const LISTS = [
   {
     name: "kanban column",
     tab: "Lists",
-    variants: ["default"],
+    variants: ["default", "drag"],
     states: ["default", "empty", "drop over"],
     source: "ds",
     className: "kcol",
     notes:
-      'Focus a card, then Alt+← / Alt+→ to move it. "Doing" shows the drop-target state.',
+      'Focus a card, then Alt+← / Alt+→ to move it. The drag option adds pointer drag and the plain ← / →. "Doing" shows the drop-target state.',
   },
   {
     name: "table",
@@ -52,5 +52,14 @@ export const LISTS = [
     source: "ds",
     className: "tree",
     notes: "Folders and nested labels.",
+  },
+  {
+    name: "section list",
+    tab: "Lists",
+    variants: ["default"],
+    states: ["default", "hover", "focus-visible", "current", "long value"],
+    source: "ds",
+    className: "section-list",
+    notes: `Rows of a name and its current value; one row is current. A long value is cut with an ellipsis and its full text is the title. Narrow windows put the rows side by side (${ref(111)}).`,
   },
 ] as const satisfies readonly CatalogEntry[];

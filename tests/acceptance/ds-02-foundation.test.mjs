@@ -132,8 +132,8 @@ test('AC2: dark values of --control-edge and --on-bad are in both dark blocks', 
   }
 });
 
-test('AC2: --sidebar-width and --sidebar-width-collapsed are removed from frame/sidebar.css', () => {
-  const css = strip(readFileSync(p('ui', 'src', 'frame', 'sidebar.css'), 'utf8'));
+test('AC2: --sidebar-width and --sidebar-width-collapsed are removed from the sidebar part css', () => {
+  const css = strip(readFileSync(p('ui', 'src', 'ds', 'components', 'sidebar', 'sidebar.css'), 'utf8'));
   assert.doesNotMatch(css, /--sidebar-width(-collapsed)?\s*:/, 'sidebar.css still declares a sidebar width token');
   assert.match(css, /var\(\s*--sidebar-width\s*\)/, 'sidebar.css should still use var(--sidebar-width)');
   assert.match(css, /var\(\s*--sidebar-width-collapsed\s*\)/, 'sidebar.css should still use var(--sidebar-width-collapsed)');

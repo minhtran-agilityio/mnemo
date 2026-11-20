@@ -1,7 +1,7 @@
 // The exception lists of the design-system guards can only shrink (#106 [DS-04]).
 // Every (path, guard) pair in tests/lib/ds-guard.mjs must be in PINNED below. Adding an exception,
-// or letting an existing one switch off one more guard, fails this test. Removing one is fine:
-// #111 deletes the known exceptions, and a removal needs no edit here (a stale pin is harmless).
+// or letting an existing one switch off one more guard, fails this test. Removing one is fine.
+// #111 emptied KNOWN_EXCEPTIONS, so only the dev tool exceptions of the UI Catalog are pinned.
 // The state gaps of ui/src/ds-guard.test.ts are pinned in that file.
 // This file and tests/lib/ds-guard.mjs are protected by scripts/ds-write-guard.mjs: a pull request
 // that changes either needs the label design-system, so a feature pull request cannot widen a list.
@@ -14,12 +14,6 @@ import { ALL_EXCEPTIONS } from "./lib/ds-guard.mjs";
 
 /** "path|guard": the exceptions that exist today. */
 const PINNED = new Set([
-  "ui/src/frame/|css",
-  "ui/src/frame/|elements",
-  "ui/src/screens/settings/|css",
-  "ui/src/screens/settings/|elements",
-  "ui/src/screens/kanban/|css",
-  "ui/src/style.css|css",
   "ui/src/screens/catalog/catalog.ts|elements",
   "ui/src/screens/catalog/find.ts|elements",
   "ui/src/screens/catalog/parts.ts|elements",
@@ -32,8 +26,8 @@ const PINNED = new Set([
   "ui/src/screens/catalog/tabs/limits.ts|elements",
   "ui/src/screens/catalog/tabs/surfaces.ts|elements",
 ]);
-/** Entries with no guard switched off: they pass both guards today and may stay listed. */
-const PINNED_PATHS = new Set(["ui/error.html", "ui/src/error-page.ts"]);
+/** Entries with no guard switched off. None is left, so a new one fails. */
+const PINNED_PATHS = new Set([]);
 
 /** The (path, guard) pairs of `entries` that are not pinned. */
 export function unpinned(entries, pinned = PINNED, pinnedPaths = PINNED_PATHS) {
@@ -56,13 +50,13 @@ test("the exception lists only shrink: every exception is pinned", () => {
 });
 
 test("self-test: a new entry, a new guard on an entry, a folder entry and a new path fail; a removal passes", () => {
-  const known = { path: "ui/src/frame/", guards: ["css", "elements"] };
+  const known = { path: "ui/src/screens/catalog/specimen.ts", guards: ["css", "elements"] };
   assert.deepEqual(unpinned([known]), []);
   assert.deepEqual(unpinned([{ ...known, guards: ["css"] }]), [], "removing a guard is fine");
   assert.deepEqual(unpinned([]), [], "removing every entry is fine");
   assert.deepEqual(unpinned([{ path: "ui/src/screens/new/", guards: ["css"] }]), ["ui/src/screens/new/ (css)"]);
-  assert.deepEqual(unpinned([{ path: "ui/src/screens/kanban/", guards: ["css", "elements"] }]), [
-    "ui/src/screens/kanban/ (elements)",
+  assert.deepEqual(unpinned([{ path: "ui/src/screens/catalog/inspect.ts", guards: ["css", "elements"] }]), [
+    "ui/src/screens/catalog/inspect.ts (elements)",
   ]);
   assert.deepEqual(unpinned([{ path: "ui/src/screens/catalog/", guards: ["elements"] }]), [
     "ui/src/screens/catalog/ (elements)",

@@ -127,4 +127,22 @@ export const SURFACES = [
     source: "ds",
     notes: "Right-click the row, or focus it and press Shift+F10.",
   },
+  {
+    name: "sidebar",
+    tab: "Surfaces",
+    className: "sidebar",
+    variants: ["open", "collapsed"],
+    states: [
+      "open",
+      "collapsed",
+      "current",
+      "hover",
+      "focus-visible",
+      "Later",
+      "bottom list open",
+      "long label",
+    ],
+    source: "ds",
+    notes: `The app's side menu (${ref(11)}, moved here in ${ref(111)}). Folds only when the owner presses the toggle; no counts or badges. It shows what the caller gives it, so loading, error and AI off do not apply.`,
+  },
 ] as const satisfies readonly CatalogEntry[];

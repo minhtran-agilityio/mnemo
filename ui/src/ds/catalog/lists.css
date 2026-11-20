@@ -1,3 +1,9 @@
 /* UI Catalog styles of the lists tab: only the rows of this tab (examples, captions, layout of the
    samples). A real part's own styles live in ui/src/ds/components/<name>/<name>.css, not here.
    Tokens only. Scope every rule to .ui-catalog. Only the lists tab's agent edits this file. */
+
+/* The section list examples: the width the Settings column gives it. */
+.ui-catalog .lst-section {
+  width: var(--size-section-list-max);
+  max-width: 100%;
+}

@@ -10,6 +10,7 @@ import {
   createList,
   createListbox,
   createListRow,
+  createSectionList,
   createTable,
   createTree,
   type TreeNode,
@@ -111,25 +112,30 @@ export const renderLists: TabRenderer = (panel, ctx) => {
       "kanban column": () => {
         const c = (title: string, ref: string) =>
           createKanbanCard(doc, { title, meta: [ref] });
-        const board = createKanbanBoard(doc, "Board example", [
-          {
-            name: "To do",
-            cards: [
-              c("Pick an icon set", ref(104)),
-              c("Contrast test", ref(104)),
-            ],
-          },
-          {
-            name: "Doing",
-            cards: [c("Write DESIGN.md", ref(112))],
-            over: true,
-          },
-          {
-            name: "Done",
-            cards: [],
-            emptyText: "Nothing done yet. Drag a card here.",
-          },
-        ]);
+        const board = createKanbanBoard(
+          doc,
+          "Board example",
+          [
+            {
+              name: "To do",
+              cards: [
+                c("Pick an icon set", ref(104)),
+                c("Contrast test", ref(104)),
+              ],
+            },
+            {
+              name: "Doing",
+              cards: [c("Write DESIGN.md", ref(112))],
+              over: true,
+            },
+            {
+              name: "Done",
+              cards: [],
+              emptyText: "Nothing done yet. Drag a card here.",
+            },
+          ],
+          { drag: true },
+        );
         return {
           nodes: [
             board,
@@ -137,7 +143,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
               doc,
               "p",
               "cat-note",
-              '"Doing" shows the drop-target state, "Done" the empty state.',
+              '"Doing" shows the drop-target state, "Done" the empty state. This board has the drag option: drag a card, or press Left or Right.',
             ),
           ],
           column: true,
@@ -189,6 +195,59 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           { grow: true },
         ),
       ],
+      "section list": () => {
+        const sections = [
+          { id: "appearance", label: "Appearance", value: "System" },
+          { id: "ai", label: "AI", value: "Not built yet" },
+          { id: "data", label: "Data", value: "Not built yet" },
+        ];
+        const live = createSectionList(doc, {
+          label: "Settings sections, live example",
+          sections,
+          current: "appearance",
+          onSelect: (id) => ctx.toast(`Opened ${id}. Catalog only.`),
+        });
+        const hover = createSectionList(doc, {
+          label: "Settings sections, hover example",
+          sections,
+          current: "appearance",
+          forceState: { id: "ai", state: "hover" },
+        });
+        const focus = createSectionList(doc, {
+          label: "Settings sections, focus example",
+          sections,
+          current: "appearance",
+          forceState: { id: "data", state: "focus" },
+        });
+        const long = createSectionList(doc, {
+          label: "Settings sections, long value example",
+          sections: [
+            {
+              id: "folder",
+              label: "Save folder",
+              value:
+                "/home/owner/Documents/Mnemo/attachments/2026/very/long/folder/name",
+            },
+            { id: "ai", label: "AI", value: "Not built yet" },
+          ],
+          current: "folder",
+        });
+        const box = (node: HTMLElement) => {
+          const wrap = el(doc, "div", "lst-section");
+          wrap.append(node);
+          return wrap;
+        };
+        return [
+          state(doc, "default, current (live)", box(live.element)),
+          state(doc, "hover", box(hover.element)),
+          state(doc, "focus-visible", box(focus.element)),
+          state(
+            doc,
+            "long value: ellipsis, full text in the title",
+            box(long.element),
+          ),
+        ];
+      },
     }),
   );
 };

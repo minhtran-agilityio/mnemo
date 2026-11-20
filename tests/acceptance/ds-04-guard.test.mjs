@@ -57,22 +57,12 @@ test('AC1: design.md and frontend.md state the pick-only rule and the request fl
 });
 
 // ---------- AC5 ----------
-test('AC5: tests/lib/ds-guard.mjs lists every known exception once, each tied to #111', async () => {
+test('AC5: tests/lib/ds-guard.mjs exports the known-exception list and #111 emptied it', async () => {
   const file = p('tests', 'lib', 'ds-guard.mjs');
   assert.ok(existsSync(file), 'tests/lib/ds-guard.mjs is missing');
   const m = await import(file);
   assert.ok(Array.isArray(m.KNOWN_EXCEPTIONS), 'KNOWN_EXCEPTIONS is not exported as an array');
-  const paths = m.KNOWN_EXCEPTIONS.map((e) => e.path);
-  for (const want of ['ui/src/frame/', 'ui/src/screens/settings/', 'ui/src/screens/kanban/', 'ui/src/style.css']) {
-    assert.ok(paths.some((x) => x === want || x === want.replace(/\/$/, '')), `exception missing: ${want}`);
-  }
-  assert.ok(paths.some((x) => /error/.test(x)), 'the error page is not listed');
-  assert.equal(new Set(paths).size, paths.length, 'an exception is listed twice');
-  for (const e of m.KNOWN_EXCEPTIONS) {
-    assert.equal(e.removedBy, 111, `${e.path} is not tied to #111`);
-    assert.ok(e.reason && e.reason.length > 5, `${e.path} has no reason`);
-    assert.ok(existsSync(p(e.path)), `${e.path} no longer exists: remove this exception`);
-  }
+  assert.deepEqual(m.KNOWN_EXCEPTIONS, [], '#111 removes every known exception');
 });
 
 test('AC5: the catalog screen decision is recorded with its reason and is not tied to #111', async () => {
@@ -83,7 +73,7 @@ test('AC5: the catalog screen decision is recorded with its reason and is not ti
   assert.ok(e.reason && e.reason.length > 10, 'the catalog decision has no reason');
   assert.notEqual(e.removedBy, 111, 'the dev tool exception must not be tied to #111');
   assert.equal(typeof m.isExcepted, 'function');
-  assert.equal(m.isExcepted('ui/src/screens/settings/settings.css', 'css'), true);
+  assert.equal(m.isExcepted('ui/src/screens/settings/settings.css', 'css'), false);
   assert.equal(m.isExcepted('ui/src/shared/card.ts', 'elements'), false);
 });
 

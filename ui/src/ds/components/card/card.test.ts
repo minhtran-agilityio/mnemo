@@ -19,3 +19,16 @@ test("the heading level can change", () => {
     createCard({ title: "T", level: 4 }).querySelector("h4"),
   ).not.toBeNull();
 });
+
+test("a section card is a named region of the page", () => {
+  const card = createCard({
+    title: "Appearance",
+    level: 2,
+    element: "section",
+    label: "Appearance",
+  });
+  expect(card.tagName).toBe("SECTION");
+  expect(card.getAttribute("aria-label")).toBe("Appearance");
+  expect(card.querySelector("h2")?.textContent).toBe("Appearance");
+  expect(createCard().hasAttribute("aria-label")).toBe(false);
+});

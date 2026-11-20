@@ -1,7 +1,6 @@
 import "./fonts";
 import "./ds";
 import "./style.css";
-import "./frame/sidebar.css";
 import "./screens/settings/settings.css";
 import { getVersion } from "@tauri-apps/api/app";
 import { renderEmptyState } from "./frame/empty-state";

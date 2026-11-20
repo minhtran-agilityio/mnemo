@@ -1,5 +1,7 @@
 // The screen every item shows until its own screen is built: its name and the phase it
 // comes in. Everything shows the searched word. All text goes in as text, never as markup.
+// The look comes from ui/src/ds (the text part and the Later mark); style.css lays it out.
+import { buildLaterMark, buildText } from "../ds";
 import type { NavItem } from "./nav";
 
 /** Fills `container` with the empty state for a roadmap screen and its searched word. */
@@ -14,17 +16,14 @@ export function renderEmptyState(
   heading.className = "empty-title";
   heading.textContent = item.label;
 
-  const meta = doc.createElement("p");
-  meta.className = "empty-meta";
   const phase = doc.createElement("span");
   phase.textContent = `Phase ${item.phase}`;
-  meta.append(phase);
-  if (item.later) {
-    const later = doc.createElement("span");
-    later.className = "later-mark";
-    later.textContent = "Later";
-    meta.append(" ", later);
-  }
+  const meta = buildText(doc, {
+    tone: "muted",
+    size: "md",
+    content: item.later ? [phase, " ", buildLaterMark(doc)] : [phase],
+  });
+  meta.classList.add("empty-meta");
 
   const message = doc.createElement("p");
   message.className = "empty-text";

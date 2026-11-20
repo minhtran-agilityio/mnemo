@@ -1,0 +1,76 @@
+/* Choice list: native radios with a label and a hint, and an error line. Tokens only. */
+.choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.choice-list-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.choice-list-legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  color: var(--ink2);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.choice-list-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-3);
+  align-items: center;
+  min-height: var(--control-height);
+}
+
+.choice-list-row input {
+  width: var(--space-5);
+  height: var(--space-5);
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.choice-list-row input.is-focus {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--border-2);
+}
+
+.choice-list-row label {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.choice-list-hint {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: var(--text-md);
+}
+
+.choice-list-group:disabled label,
+.choice-list-group:disabled .choice-list-hint {
+  color: var(--muted);
+}
+
+.choice-list-group:disabled input {
+  cursor: not-allowed;
+}
+
+.choice-list-error {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--bad-soft);
+  color: var(--ink);
+  font-size: var(--text-md);
+}
+
+.choice-list-error[hidden] {
+  display: none;
+}

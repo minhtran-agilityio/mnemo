@@ -73,3 +73,97 @@ test("arrows without Alt do nothing", () => {
   );
   expect(board.querySelectorAll(".kcol")[0].contains(a)).toBe(true);
 });
+
+const key = (el: Element, k: string, init: KeyboardEventInit = {}) =>
+  el.dispatchEvent(
+    new KeyboardEvent("keydown", { key: k, bubbles: true, ...init }),
+  );
+
+test("with the drag option the plain arrows move the card, and Alt+Arrow still does", () => {
+  const board = createKanbanBoard(
+    document,
+    "Board",
+    [
+      { name: "To do", cards: [card("A")] },
+      { name: "Doing", cards: [] },
+      { name: "Done", cards: [] },
+    ],
+    { drag: true },
+  );
+  document.body.append(board);
+  const a = board.querySelector(".kcard") as HTMLElement;
+  const cols = board.querySelectorAll(".kcol");
+  key(a, "ArrowRight");
+  expect(cols[1].contains(a)).toBe(true);
+  key(a, "ArrowRight", { altKey: true });
+  expect(cols[2].contains(a)).toBe(true);
+  key(a, "ArrowLeft", { shiftKey: true });
+  expect(cols[2].contains(a)).toBe(true);
+  key(a, "ArrowLeft");
+  expect(cols[1].contains(a)).toBe(true);
+  board.remove();
+});
+
+test("with the drag option a pointer drag drops the card in the column under it", () => {
+  const board = createKanbanBoard(
+    document,
+    "Board",
+    [
+      { name: "To do", cards: [card("A")] },
+      { name: "Doing", cards: [] },
+    ],
+    { drag: true },
+  );
+  document.body.append(board);
+  const a = board.querySelector(".kcard") as HTMLElement;
+  const cols = board.querySelectorAll<HTMLElement>(".kcol");
+  document.elementsFromPoint = () => [cols[1]];
+  const ptr = (type: string, x: number) =>
+    a.dispatchEvent(
+      new MouseEvent(type, {
+        bubbles: true,
+        clientX: x,
+        clientY: 5,
+        button: 0,
+      }),
+    );
+  ptr("pointerdown", 0);
+  expect(a.classList.contains("is-dragging")).toBe(true);
+  ptr("pointermove", 50);
+  expect(cols[1].classList.contains("is-over")).toBe(true);
+  ptr("pointerup", 50);
+  expect(cols[1].contains(a)).toBe(true);
+  expect(a.classList.contains("is-dragging")).toBe(false);
+  expect(a.style.transform).toBe("");
+  expect(board.querySelector(".board-live")?.textContent).toBe(
+    'Moved "A" to Doing.',
+  );
+  board.remove();
+});
+
+test("a pointer drop on the same column or a cancel moves nothing", () => {
+  const board = createKanbanBoard(
+    document,
+    "Board",
+    [
+      { name: "To do", cards: [card("A")] },
+      { name: "Doing", cards: [] },
+    ],
+    { drag: true },
+  );
+  document.body.append(board);
+  const a = board.querySelector(".kcard") as HTMLElement;
+  const cols = board.querySelectorAll<HTMLElement>(".kcol");
+  const ptr = (type: string) =>
+    a.dispatchEvent(new MouseEvent(type, { bubbles: true, button: 0 }));
+  document.elementsFromPoint = () => [cols[0]];
+  ptr("pointerdown");
+  ptr("pointerup");
+  expect(cols[0].contains(a)).toBe(true);
+  document.elementsFromPoint = () => [cols[1]];
+  ptr("pointerdown");
+  ptr("pointercancel");
+  expect(cols[0].contains(a)).toBe(true);
+  expect(a.classList.contains("is-dragging")).toBe(false);
+  board.remove();
+});

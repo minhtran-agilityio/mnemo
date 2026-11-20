@@ -1,7 +1,15 @@
-/* Page layout for the app frame. Colours, type and spacing come from ds/tokens.css. */
+/* Page layout for the app frame and the startup error page. Layout only, with token values: every
+   look comes from ui/src/ds (the sidebar, text and Later mark parts, and the base styles). */
 .app-frame {
   display: flex;
-  min-height: 100vh;
+  min-height: var(--size-frame-height);
+}
+
+/* The sidebar part stays in view and is as high as the window. */
+.app-sidebar {
+  position: sticky;
+  top: 0;
+  height: var(--size-frame-height);
 }
 
 .app-content {
@@ -13,7 +21,7 @@
 
 main {
   flex: 1 1 auto;
-  max-width: 72ch;
+  max-width: var(--measure-intro);
   padding: var(--space-5) var(--space-4);
 }
 
@@ -34,14 +42,8 @@ main {
   overflow-wrap: anywhere;
 }
 
-.empty-meta {
-  color: var(--muted);
-  font-size: var(--text-md);
-}
-
+/* The status lines under the page; their look is the text part (muted, small). */
 .app-status {
   margin: 0;
   padding: var(--space-2) var(--space-4);
-  color: var(--muted);
-  font-size: var(--text-sm);
 }

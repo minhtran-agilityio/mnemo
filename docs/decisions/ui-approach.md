@@ -30,13 +30,15 @@ The library builds leave out drag, so the real gap is larger. Svelte was not mea
 
 ## Proof
 
-- `ui/src/shared/card.ts` builds a card. Its test (`card.test.ts`) checks that markup in a title stays text.
-- `ui/src/screens/kanban/` is the #5 kanban ported to plain TypeScript. Its CSS is the spike's, unchanged, and `ui/index.html` loads it until P1.2 replaces it.
+- The #5 kanban was ported to plain TypeScript in `ui/src/screens/kanban/` with its own card builder. #111 moved it onto the kanban parts of the design system (`createKanbanBoard` and `createKanbanCard` in `ui/src/ds`); its old card builder is gone. The proof is not mounted in the app.
 
 ## Folder layout (proposal)
 
 ```
-ui/src/screens/<screen>/   one folder per screen: view, state, tests
-ui/src/shared/             parts used by two or more screens (card.ts, store.ts)
-ui/src/client.ts           the one typed Tauri client; screens never call invoke
+ui/src/ds/                 the design system: tokens, base styles and every UI part
+ui/src/screens/<screen>/   one folder per screen: view, state, tests; layout-only CSS
+ui/src/frame/              the app frame: sidebar data, router, empty state, theme choice
+ui/src/shared/             code used by two or more screens (store.ts, api.ts)
 ```
+
+Since #111 every screen takes its parts from `ui/src/ds` (DESIGN.md section 6). There are no known exceptions to the design-system guards.

@@ -16,3 +16,9 @@ test("extra classes are added after the base class", () => {
   expect(svg.classList.contains("ic")).toBe(true);
   expect(svg.classList.contains("ic-muted")).toBe(true);
 });
+
+test("the nav size is the sidebar's icon token", () => {
+  const nav = createIcon(Check, "nav");
+  expect(nav.style.width).toBe("var(--icon-nav)");
+  expect(nav.style.height).toBe("var(--icon-nav)");
+});

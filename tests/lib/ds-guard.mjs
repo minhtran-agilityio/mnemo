@@ -1,7 +1,8 @@
 // Shared data of the design-system guards (#106 [DS-04]): which UI files the guards scan, the
-// known exceptions, and the property and tag lists. This file is the only place that lists the
-// exceptions. #111 deletes its entries as it moves code into ui/src/ds/; removing an entry never
-// breaks a test, and an entry that no longer matches anything fails with "remove this exception".
+// exceptions, and the property and tag lists. This file is the only place that lists the
+// exceptions. #111 moved the old screens into ui/src/ds/ and emptied KNOWN_EXCEPTIONS; only the
+// dev tool exceptions of the UI Catalog remain. An entry that no longer matches anything fails
+// with "remove this exception".
 //
 // This file is guard configuration: a pull request that changes it needs the label design-system
 // (scripts/ds-write-guard.mjs), and tests/guard-exceptions-pinned.test.mjs fails when an exception
@@ -58,55 +59,11 @@ export function dsSourceFiles() {
 export const readRepo = (path) => readFileSync(join(ROOT, path), "utf8");
 
 /**
- * Code that shipped before the pick-only rule. Each entry names the guards it switches off
- * (`guards`), only those it really needs: every (entry, guard) pair must hide at least one
- * violation, or its guard test fails with "remove this exception". An entry with `guards: []`
- * passes both guards today and stays listed because the owner listed it; #111 removes it too.
+ * Code that shipped before the pick-only rule. There is none left: #111 moved the frame, Settings,
+ * the kanban proof, style.css and the error page onto the parts of ui/src/ds/. The list stays as
+ * the place an exception would go, and tests/guard-exceptions-pinned.test.mjs fails if one is added.
  */
-export const KNOWN_EXCEPTIONS = [
-  {
-    path: "ui/src/frame/",
-    guards: ["css", "elements"],
-    removedBy: 111,
-    reason:
-      "The app frame (sidebar, empty state, theme) shipped before the design system. sidebar.css holds its own look and sidebar.ts creates raw buttons and the search input.",
-  },
-  {
-    path: "ui/src/screens/settings/",
-    guards: ["css", "elements"],
-    removedBy: 111,
-    reason:
-      "The Settings screen shipped before the design system. settings.css holds its own look and settings.ts creates raw buttons and inputs.",
-  },
-  {
-    path: "ui/src/screens/kanban/",
-    guards: ["css"],
-    removedBy: 111,
-    reason:
-      "The kanban screen shipped before the design system and kanban.css holds its own look. It creates no form element, so the elements guard already holds it.",
-  },
-  {
-    path: "ui/src/style.css",
-    guards: ["css"],
-    removedBy: 111,
-    reason:
-      "The old page style sheet of the frame, the screens and the error page. It holds colour, font and border rules.",
-  },
-  {
-    path: "ui/error.html",
-    guards: [],
-    removedBy: 111,
-    reason:
-      "The error page. Listed by the owner; it passes both guards today because its look comes from ui/src/style.css.",
-  },
-  {
-    path: "ui/src/error-page.ts",
-    guards: [],
-    removedBy: 111,
-    reason:
-      "The error page script. Listed by the owner; it passes both guards today (it only sets text).",
-  },
-];
+export const KNOWN_EXCEPTIONS = [];
 
 /**
  * Permanent exceptions for dev tools. They are not tied to #111, and each names one file, never a

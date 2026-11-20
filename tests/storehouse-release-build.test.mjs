@@ -30,7 +30,7 @@ test("a release build has no Storehouse section and no UI Catalog item", { timeo
     assert.equal(build.status, 0, `vite build failed:\n${build.stdout}\n${build.stderr}`);
     const built = files(out).filter((f) => /\.(js|css|html)$/.test(f));
     assert.ok(built.length > 0, "the build wrote no files");
-    const sidebar = built.filter((f) => readFileSync(f, "utf8").includes("sb-label"));
+    const sidebar = built.filter((f) => readFileSync(f, "utf8").includes("sidebar-label"));
     assert.ok(sidebar.length > 0, "the sidebar code is not in the build, so the check proves nothing");
     for (const file of built) {
       const text = readFileSync(file, "utf8");

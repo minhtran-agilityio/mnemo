@@ -29,8 +29,8 @@ function deps(): SettingsDeps {
 }
 
 function rowText(name: string): string {
-  const row = [...container.querySelectorAll("button.settings-row")].find(
-    (b) => b.querySelector(".settings-row-name")?.textContent === name,
+  const row = [...container.querySelectorAll("button.section-list-row")].find(
+    (b) => b.querySelector(".section-list-name")?.textContent === name,
   );
   return (row?.textContent ?? "").replace(/\s+/g, " ").trim();
 }
@@ -66,7 +66,7 @@ beforeEach(() => {
 
 test("it shows the title, the note and a section list with the current value of each row", () => {
   expect(container.querySelector("h1")?.textContent).toBe("Settings");
-  expect(container.querySelector(".settings-note")?.textContent).toBe(
+  expect(container.querySelector(".settings-head .text")?.textContent).toBe(
     "Changes are saved at once.",
   );
   expect(rowText("Appearance")).toBe("Appearance System");
@@ -75,7 +75,7 @@ test("it shows the title, the note and a section list with the current value of 
 });
 
 test("Appearance offers System, Light and Dark, and no other theme", () => {
-  const labels = [...container.querySelectorAll(".settings-choice label")].map(
+  const labels = [...container.querySelectorAll(".choice-list-row label")].map(
     (l) => l.textContent,
   );
   expect(labels).toEqual(["System", "Light", "Dark"]);
@@ -85,8 +85,8 @@ test("Appearance offers System, Light and Dark, and no other theme", () => {
 
 test("the AI and Data sections open and have no controls", () => {
   for (const name of ["AI", "Data"]) {
-    const row = [...container.querySelectorAll("button.settings-row")].find(
-      (b) => b.querySelector(".settings-row-name")?.textContent === name,
+    const row = [...container.querySelectorAll("button.section-list-row")].find(
+      (b) => b.querySelector(".section-list-name")?.textContent === name,
     ) as HTMLButtonElement;
     row.click();
     expect(container.querySelector(".settings-body h2")?.textContent).toBe(
@@ -130,7 +130,7 @@ test("a failed save shows a plain line, keeps the theme applied and keeps the ch
   pick("Dark");
   await tick();
   await tick();
-  const status = container.querySelector<HTMLElement>(".settings-status");
+  const status = container.querySelector<HTMLElement>(".choice-list-error");
   expect(status?.hidden).toBe(false);
   expect(status?.textContent).toContain("could not save the theme");
   expect(status?.textContent).toContain("The data file could not be written.");
@@ -150,9 +150,9 @@ test("a later save that works clears the line", async () => {
   release[0]?.();
   await tick();
   await tick();
-  expect(container.querySelector<HTMLElement>(".settings-status")?.hidden).toBe(
-    true,
-  );
+  expect(
+    container.querySelector<HTMLElement>(".choice-list-error")?.hidden,
+  ).toBe(true);
 });
 
 test("a failed save after the owner left Settings is still reported", async () => {
@@ -173,8 +173,8 @@ test("a failed save after the owner left Settings is still reported", async () =
 test("clicking a section row keeps keyboard focus on that row", () => {
   renderSettings(container, deps());
   const row = [
-    ...container.querySelectorAll<HTMLButtonElement>("button.settings-row"),
-  ].find((b) => b.querySelector(".settings-row-name")?.textContent === "AI");
+    ...container.querySelectorAll<HTMLButtonElement>("button.section-list-row"),
+  ].find((b) => b.querySelector(".section-list-name")?.textContent === "AI");
   if (!row) throw new Error("no AI row");
   row.focus();
   row.click();

@@ -35,14 +35,20 @@ const names = (el: ParentNode) =>
   );
 const toggle = () =>
   document.querySelector<HTMLButtonElement>(
-    "button.sbmini",
+    "button.sidebar-toggle",
   ) as HTMLButtonElement;
 
 test("the top is the logo with a toggle, then Save or ask, then the search box", () => {
   const order = [...sidebar.element.children].map((c) => c.className);
-  expect(order.slice(0, 3)).toEqual(["sb-logo", "sb-quick", "sbsearch"]);
-  expect(sidebar.element.querySelector(".sb-name")?.textContent).toBe("Mnemo");
-  expect(sidebar.element.querySelector("a.sb-quick")?.textContent).toBe(
+  expect(order.slice(0, 3)).toEqual([
+    "sidebar-logo",
+    "sidebar-quick",
+    "sidebar-search",
+  ]);
+  expect(sidebar.element.querySelector(".sidebar-name")?.textContent).toBe(
+    "Mnemo",
+  );
+  expect(sidebar.element.querySelector("a.sidebar-quick")?.textContent).toBe(
     "Save or ask",
   );
   const input = sidebar.element.querySelector("input");
@@ -58,7 +64,7 @@ test("every item is a link with its name, and there is no Tags group, count or b
     expect(all.some((n) => n.startsWith(item.label))).toBe(true);
   // One heading per group, the dev-only Storehouse group included (Vitest runs in dev mode).
   expect(
-    [...sidebar.element.querySelectorAll(".sb-label")].map(
+    [...sidebar.element.querySelectorAll(".sidebar-label")].map(
       (h) => h.textContent,
     ),
   ).toEqual(SIDEBAR_GROUPS.map((g) => g.label));
@@ -108,9 +114,11 @@ test("collapsed icons keep their name, and get it as a tooltip", () => {
     "Today",
   );
   build(false);
+  // Open, a long label is cut with an ellipsis, so the full name stays as the title.
   expect(
-    sidebar.element.querySelector("a[data-item=today]")?.hasAttribute("title"),
-  ).toBe(false);
+    sidebar.element.querySelector<HTMLAnchorElement>("a[data-item=today]")
+      ?.title,
+  ).toBe("Today");
 });
 
 test("a collapsed Later item keeps its Later status in the tooltip", () => {
@@ -140,7 +148,9 @@ test("Enter in the search box sends the word; the search button opens a collapse
   expect(searched).toEqual(["zebra"]);
   sidebar.setCollapsed(true);
   const focus = vi.spyOn(input, "focus");
-  (sidebar.element.querySelector(".sbsearchbtn") as HTMLButtonElement).click();
+  (
+    sidebar.element.querySelector(".sidebar-search-button") as HTMLButtonElement
+  ).click();
   expect(sidebar.isCollapsed()).toBe(false);
   expect(focus).toHaveBeenCalled();
   expect(toggled).toEqual([false]);
@@ -148,7 +158,7 @@ test("Enter in the search box sends the word; the search button opens a collapse
 
 test("Apps and settings is the last control, starts closed and opens and closes its list", () => {
   const apps = sidebar.element.querySelector<HTMLButtonElement>(
-    "button.sbtog",
+    "button.sidebar-bottom-toggle",
   ) as HTMLButtonElement;
   const list = sidebar.element.querySelector<HTMLElement>(
     "#sidebar-apps",
@@ -237,7 +247,7 @@ test("a read that never finishes gives an open sidebar after the limit and repor
 });
 
 test("in a dev build Storehouse is the last group and its UI Catalog item opens #/ui-catalog", () => {
-  const headings = [...sidebar.element.querySelectorAll("h2.sb-label")];
+  const headings = [...sidebar.element.querySelectorAll("h2.sidebar-label")];
   expect(headings.at(-1)?.textContent).toBe("Storehouse");
   const list = headings.at(-1)?.nextElementSibling as HTMLElement;
   const links = list.querySelectorAll<HTMLAnchorElement>("a");
@@ -245,7 +255,7 @@ test("in a dev build Storehouse is the last group and its UI Catalog item opens 
   expect(links[0]?.textContent).toBe("UI Catalog");
   expect(links[0]?.getAttribute("href")).toBe("#/ui-catalog");
   // It sits before the bottom items.
-  expect(sidebar.element.querySelector(".sb-scroll")?.contains(list)).toBe(
+  expect(sidebar.element.querySelector(".sidebar-scroll")?.contains(list)).toBe(
     true,
   );
   // The collapsed sidebar keeps its name as a tooltip.

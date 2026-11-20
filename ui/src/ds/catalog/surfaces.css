@@ -32,3 +32,8 @@
 .ui-catalog .panel {
   max-width: var(--size-field-max);
 }
+
+/* The sidebar examples: a window-high frame, so the groups scroll inside it like in the app. */
+.ui-catalog .frame-sidebar {
+  height: var(--size-specimen-height);
+}
