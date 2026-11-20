@@ -23,6 +23,9 @@ use serde::Serialize;
 const CHECK_TIMEOUT: Duration = Duration::from_secs(10);
 /// The most output read from a check command. The status JSON is a few hundred bytes.
 const MAX_OUTPUT: u64 = 64 * 1024;
+/// How long to wait for the output to end after the command has exited or been killed. A
+/// descendant that keeps the pipe open must not hold the check forever.
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// The four things the start check can find. The UI shows one of them in Settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -318,11 +321,13 @@ impl ClaudeCli for SystemClaude {
     fn run(&self, program: &Path, args: &[&str]) -> Result<CliOutput, ()> {
         let mut child = spawn_retrying_busy(program, args)?;
         let stdout = child.stdout.take().ok_or(())?;
-        let reader = std::thread::spawn(move || {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        // The reader is not joined: if a descendant keeps the pipe open it ends when that does.
+        std::thread::spawn(move || {
             let mut text = String::new();
             // Bytes that are not text make the read fail; the empty text then reads as a problem.
             let _ = stdout.take(MAX_OUTPUT).read_to_string(&mut text);
-            text
+            let _ = sender.send(text);
         });
         let deadline = Instant::now() + CHECK_TIMEOUT;
         let status = loop {
@@ -334,12 +339,11 @@ impl ClaudeCli for SystemClaude {
                 _ => {
                     let _ = child.kill();
                     let _ = child.wait();
-                    let _ = reader.join();
                     return Err(());
                 }
             }
         };
-        let stdout = reader.join().map_err(|_| ())?;
+        let stdout = receiver.recv_timeout(DRAIN_TIMEOUT).map_err(|_| ())?;
         Ok(CliOutput {
             success: status.success(),
             stdout,
@@ -598,6 +602,18 @@ esac"#;
             assert_eq!(got.stdout.trim(), "hi");
             assert!(!got.success);
             assert!(cli.run(&dir.join("missing"), &[]).is_err());
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        #[test]
+        fn a_descendant_holding_the_pipe_open_does_not_hang_the_check() {
+            let dir = temp_dir("hold");
+            // The background sleep keeps stdout open after `claude` itself has exited.
+            write_claude(&dir, "echo hi; sleep 8 &");
+            let cli = SystemClaude::new(vec![dir.clone()]);
+            let started = Instant::now();
+            assert!(cli.run(&dir.join("claude"), &[]).is_err());
+            assert!(started.elapsed() < Duration::from_secs(6));
             let _ = std::fs::remove_dir_all(dir);
         }
 
