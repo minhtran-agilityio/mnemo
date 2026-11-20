@@ -259,7 +259,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
         ),
         state(
           doc,
-          "with actions, live: F2 renames, Delete asks, Shift+F10 opens the menu",
+          "with actions, live: F2 renames, Delete is reported, Shift+F10 opens the menu",
           createTree(
             doc,
             "Labels, live example",
@@ -286,7 +286,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
             createTree(doc, "Labels, menu example", LABELS, undefined, {
               onAction: () => {},
               signal: ctx.signal,
-              forced: { id: "Design notes", state: "menu" },
+              forced: { id: "Work/Design notes", state: "menu" },
             }),
           ),
           { grow: true },
@@ -297,7 +297,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           createTree(doc, "Labels, rename example", LABELS, undefined, {
             onAction: () => {},
             signal: ctx.signal,
-            forced: { id: "Mnemo", state: "renaming" },
+            forced: { id: "Work/Mnemo", state: "renaming" },
           }),
           { grow: true },
         ),
@@ -307,7 +307,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           createTree(doc, "Labels, rename error example", LABELS, undefined, {
             onAction: () => {},
             signal: ctx.signal,
-            forced: { id: "Mnemo", state: "error", value: "Design notes" },
+            forced: { id: "Work/Mnemo", state: "error", value: "Design notes" },
           }),
           { grow: true },
         ),
@@ -317,7 +317,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           createTree(doc, "Labels, hover example", LABELS, undefined, {
             onAction: () => {},
             signal: ctx.signal,
-            forced: { id: "Mnemo", state: "hover" },
+            forced: { id: "Work/Mnemo", state: "hover" },
           }),
           { grow: true },
         ),
@@ -327,7 +327,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           createTree(doc, "Labels, focus example", LABELS, undefined, {
             onAction: () => {},
             signal: ctx.signal,
-            forced: { id: "Mnemo", state: "focus" },
+            forced: { id: "Work/Mnemo", state: "focus" },
           }),
           { grow: true },
         ),
@@ -337,7 +337,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           createTree(doc, "Labels, active example", LABELS, undefined, {
             onAction: () => {},
             signal: ctx.signal,
-            forced: { id: "Mnemo", state: "active" },
+            forced: { id: "Work/Mnemo", state: "active" },
           }),
           { grow: true },
         ),

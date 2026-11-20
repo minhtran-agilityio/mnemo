@@ -63,7 +63,11 @@ export function createPopover(doc: Document, options: PopoverOptions): Popover {
     if (isOpen()) return;
     panel.hidden = false;
     trigger.setAttribute("aria-expanded", "true");
-    if (options.held) return;
+    if (options.held) {
+      // Nothing inside the panel has focus, so Escape is read on the document.
+      doc.addEventListener("keydown", heldEscape);
+      return;
+    }
     doc.addEventListener("click", outside);
     options.onOpen?.();
     const first =
@@ -77,7 +81,12 @@ export function createPopover(doc: Document, options: PopoverOptions): Popover {
     panel.hidden = true;
     trigger.setAttribute("aria-expanded", "false");
     doc.removeEventListener("click", outside);
+    doc.removeEventListener("keydown", heldEscape);
     if (returnFocus) trigger.focus();
+  }
+
+  function heldEscape(event: KeyboardEvent): void {
+    if (event.key === "Escape") close(false);
   }
 
   trigger.addEventListener("click", () => (isOpen() ? close(false) : open()));

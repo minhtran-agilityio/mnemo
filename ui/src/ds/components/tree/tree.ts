@@ -33,7 +33,12 @@ export interface TreeNode {
   readonly children?: readonly TreeNode[];
   readonly expanded?: boolean;
   readonly current?: boolean;
-  /** Names the node in a TreeActionEvent. Defaults to the label. */
+  /**
+   * Names the node in a TreeActionEvent. Ids must be unique in the tree. Without one the tree
+   * uses the path of labels from the top ("Work/Notes"), so two labels called "Notes" under
+   * different parents stay apart; give a real id (the database id) when labels can repeat in a
+   * path or can be renamed between draws.
+   */
   readonly id?: string;
   /** An action the screen refuses for this node, with the reason. It stays in the menu, disabled. */
   readonly refused?: Partial<Record<TreeAction, string>>;
@@ -74,6 +79,12 @@ export interface TreeActionsOptions {
     name: string,
     action: "create" | "rename",
   ) => string | undefined;
+  /**
+   * Called when a refusal that came late (a promise) cannot be shown at the field, because another
+   * field is open or the row is gone. Without it the tree shows the reason as a note under the
+   * node, when the node is still on the page.
+   */
+  readonly onRefused?: (event: TreeActionEvent, message: string) => void;
   readonly forced?: TreeForcedState;
   /** When it aborts, an open menu closes and its document listener goes. */
   readonly signal?: AbortSignal;
@@ -87,12 +98,14 @@ const ICONS: Record<TreeNode["kind"], IconNode> = {
 const KEYS = "F2 Delete Shift+F10";
 const ACTIONS: readonly TreeAction[] = ["create", "rename", "move", "delete"];
 const nameKey = (name: string) => name.trim().normalize("NFC").toLowerCase();
-const idOf = (node: TreeNode) => node.id ?? node.label;
 let counter = 0;
 
 interface Meta {
   readonly node: TreeNode;
   readonly siblings: readonly TreeNode[];
+  /** The node's id as reported, fixed when the tree is drawn. */
+  readonly id: string;
+  readonly parent: Meta | null;
 }
 
 type Run = (action: TreeAction, node: TreeNode, btn: HTMLButtonElement) => void;
@@ -177,7 +190,7 @@ function menuFor(
     firstFocus: () => rows[0] ?? null,
     held:
       build.actions?.forced?.state === "menu" &&
-      build.actions.forced.id === idOf(node),
+      build.actions.forced.id === build.meta.get(btn)?.id,
   });
   // Escape closes the menu (the popover does that); focus goes back to the node, not the "..." button.
   pop.anchor.addEventListener("keydown", (event) => {
@@ -191,6 +204,7 @@ function buildNodes(
   doc: Document,
   nodes: readonly TreeNode[],
   build: Build,
+  parent: Meta | null = null,
 ): HTMLUListElement {
   const ul = doc.createElement("ul");
   for (const node of nodes) {
@@ -219,7 +233,13 @@ function buildNodes(
       cnt.textContent = String(node.count);
       btn.append(cnt);
     }
-    build.meta.set(btn, { node, siblings: nodes });
+    const meta: Meta = {
+      node,
+      siblings: nodes,
+      id: node.id ?? (parent ? `${parent.id}/${node.label}` : node.label),
+      parent,
+    };
+    build.meta.set(btn, meta);
     if (build.actions) {
       btn.setAttribute("aria-keyshortcuts", KEYS);
       const row = doc.createElement("div");
@@ -230,7 +250,7 @@ function buildNodes(
       li.append(btn);
     }
     if (hasKids) {
-      const sub = buildNodes(doc, node.children ?? [], build);
+      const sub = buildNodes(doc, node.children ?? [], build, meta);
       sub.hidden = node.expanded !== true;
       li.append(sub);
     }
@@ -250,7 +270,7 @@ type Edit = (
     /** The catalog's held example: leaving the field does not close it. */
     held?: boolean;
   },
-) => void;
+) => boolean;
 
 /** Without actions: the plain list, as before. */
 export function createTree(
@@ -275,7 +295,7 @@ export function createTree(
   actions?: TreeActionsOptions,
 ): HTMLElement {
   // The actions need the finished tree (to find a row), so `run` reads `startEdit` when called.
-  let startEdit: Edit = () => {};
+  let startEdit: Edit = () => false;
   let openField: HTMLInputElement | null = null;
   // Names created since the tree was drawn, by parent (null: top level), for the duplicate check.
   const created = new Map<TreeNode | null, string[]>();
@@ -285,11 +305,17 @@ export function createTree(
     names: new Map(),
     actions,
     run: (action, node, btn) => {
+      // A field that is still open (kept after focus left) owns the tree: no action, on this node
+      // or another, goes through until it is saved or cancelled.
+      if (openField) {
+        openField.focus();
+        return;
+      }
       if (action === "rename" || action === "create") startEdit(action, btn);
       else
         actions?.onAction({
           action,
-          id: idOf(node),
+          id: build.meta.get(btn)?.id ?? node.label,
           label: labelOf(build, node),
         });
     },
@@ -401,10 +427,13 @@ export function createTree(
     // One field at a time: a second request goes to the field that is open.
     if (openField) {
       openField.focus();
-      return;
+      return false;
     }
     const meta = target ? build.meta.get(target) : undefined;
-    if (mode === "rename" && (!target || !meta)) return;
+    if (mode === "rename" && (!target || !meta)) return false;
+    // The row was taken out of the page (the screen drew the tree again): nothing to edit.
+    // (A held catalog example is built before it is on the page.)
+    if (target && !target.isConnected && !options.held) return false;
     const current = mode === "rename" && meta ? labelOf(build, meta.node) : "";
     const siblings: readonly TreeNode[] =
       mode === "rename"
@@ -424,7 +453,7 @@ export function createTree(
         parentLi.append(list);
         createdList = true;
       }
-      if (!list) return;
+      if (!list) return false;
       if (target?.hasAttribute("aria-expanded")) setOpen(target, true);
       list.hidden = false;
       row = doc.createElement("li");
@@ -467,11 +496,13 @@ export function createTree(
     const problem = (typed: string): string | undefined => {
       const name = typed.trim();
       if (!name) return "Type a name before you save.";
+      const parentNode =
+        mode === "create" ? (meta?.node ?? null) : (meta?.parent?.node ?? null);
       const taken = [
         ...siblings
           .map((s) => labelOf(build, s))
           .filter((label) => label !== current),
-        ...(mode === "create" ? (created.get(meta?.node ?? null) ?? []) : []),
+        ...(created.get(parentNode) ?? []),
       ];
       if (taken.some((label) => nameKey(label) === nameKey(name)))
         return `A label named "${name}" already exists here.`;
@@ -527,16 +558,16 @@ export function createTree(
             ?.setAttribute("aria-label", `Actions for ${text}`);
       };
       const parent = meta?.node ?? null;
-      const outcome = actions.onAction(
+      const event: TreeActionEvent =
         mode === "rename" && meta
-          ? { action: "rename", id: idOf(meta.node), label: current, name }
+          ? { action: "rename", id: meta.id, label: current, name }
           : {
               action: "create",
-              id: meta ? idOf(meta.node) : null,
+              id: meta ? meta.id : null,
               label: meta ? labelOf(build, meta.node) : "",
               name,
-            },
-      );
+            };
+      const outcome = actions.onAction(event);
       // The screen refused at once: nothing changes, the message shows at the field.
       if (typeof outcome === "string") {
         showError(outcome);
@@ -551,12 +582,32 @@ export function createTree(
       if (outcome instanceof Promise) {
         const undo = (reason: string) => {
           if (mode === "rename") showName(current);
-          else
-            created.set(
-              parent,
-              (created.get(parent) ?? []).filter((n) => n !== name),
-            );
-          startEdit(mode, target, { value: name, error: reason });
+          else {
+            // Remove one occurrence only: another create may have used the same name.
+            const names = [...(created.get(parent) ?? [])];
+            const at = names.indexOf(name);
+            if (at >= 0) names.splice(at, 1);
+            created.set(parent, names);
+          }
+          if (startEdit(mode, target, { value: name, error: reason })) return;
+          // The field cannot reopen (another field is open, or the row is gone): never silent.
+          if (actions.onRefused) {
+            actions.onRefused(event, reason);
+            return;
+          }
+          const row = target?.isConnected ? target.closest(".trow") : null;
+          if (!row) return;
+          const note = doc.createElement("span");
+          note.className = "err-text tnote";
+          note.setAttribute("role", "alert");
+          note.append(
+            createIcon(CircleAlert),
+            doc.createTextNode(`${name}: ${reason}`),
+          );
+          row.after(note);
+          const drop = () => note.remove();
+          tree.addEventListener("click", drop, { once: true });
+          tree.addEventListener("keydown", drop, { once: true });
         };
         outcome.then(
           (reason) => {
@@ -611,6 +662,7 @@ export function createTree(
     }
     if (options.error !== undefined) showError(options.error);
     else if (options.value !== undefined) showError(problem(options.value));
+    return true;
   };
 
   const forced = actions.forced;
@@ -618,7 +670,7 @@ export function createTree(
     const btn = [...tree.querySelectorAll<HTMLButtonElement>(".tnode")].find(
       (b) => {
         const meta = build.meta.get(b);
-        return meta !== undefined && idOf(meta.node) === forced.id;
+        return meta !== undefined && meta.id === forced.id;
       },
     );
     if (btn) {

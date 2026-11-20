@@ -37,6 +37,9 @@ test("a held panel stays open on an outside click, and its trigger still closes 
   expect(panel.hidden).toBe(false);
   trigger.click();
   expect(panel.hidden).toBe(true);
+  pop.open();
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  expect(panel.hidden).toBe(true);
   pop.anchor.remove();
 });
 
