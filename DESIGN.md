@@ -186,7 +186,7 @@ Every component that holds data or reacts to the owner shows these seven states,
 | Overflow | Long titles, names and URLs wrap or truncate with a way to see the full value |
 | AI off | AI controls show why they are unavailable. Everything else still saves and reads |
 
-Also required for every interactive component: default, hover, focus-visible, active and disabled. Check for the whole section: Review of the UI Catalog entry (each component has one example per state). **Planned**: a test that lists the states in the UI Catalog is requested in #106.
+Also required for every interactive component: default, hover, focus-visible, active and disabled. Check for the whole section: Review of the UI Catalog entry (each component has one example per state); Test (`ui/src/ds-guard.test.ts`): every component's registry entry lists its states or has a notes line saying why none applies. The entries that still miss both are listed in that test's `KNOWN_STATE_GAPS` (today: shortcut hint), and the list can only shrink.
 
 ## 6. Folder contract and pick-only rule
 
@@ -195,17 +195,17 @@ Also required for every interactive component: default, hover, focus-visible, ac
 | `ui/src/ds/tokens.css` | Token values. The only file with colour values |
 | `ui/src/ds/base.css` | Page-wide rules only (reset, body, headings, links, focus ring). No component rule |
 | `ui/src/ds/icon.ts` | The one icon helper, `createIcon`. Components import it; none keeps its own copy |
-| `ui/src/ds/components/<name>/` | One folder per component: `<name>.ts`, `<name>.css`, `<name>.test.ts`. The barrel of each catalog tab (`controls.ts`, `feedback.ts`, `surfaces.ts`, `records.ts`, `lists.ts`) exports them, and `ui/src/ds/index.ts` re-exports the barrels |
+| `ui/src/ds/components/<name>/` | One folder per component: `<name>.ts`, `<name>.css`, `<name>.test.ts`. The barrel of each catalog tab (`controls.ts`, `feedback.ts`, `surfaces.ts`, `records.ts`, `lists.ts`) exports them, and `ui/src/ds/index.ts` re-exports the barrels. Check: Test (`ui/src/ds-guard.test.ts`): each folder has a registry entry, a `<name>.test.ts` and exactly one barrel line |
 | `ui/src/ds/` | The design system. **The only place that defines visual styles** (colour, font, size, spacing, radius, shadow, border) for a component |
-| `ui/src/screens/**` | Layout only: where parts go, grid, flex, gap, which part to show. No visual style of its own |
-| `ui/src/frame/`, `ui/src/screens/settings/`, `ui/src/screens/kanban/`, `ui/src/style.css` | Shipped before this contract and still hold their own CSS. They are known exceptions: #109 moves the sidebar into `ui/src/ds/`, #111 moves the rest and removes the exceptions |
-
+| UI outside `ui/src/ds/` (`ui/src/screens/**`, `ui/src/frame/`, `ui/src/shared/`, `ui/src/*.ts`, `ui/src/style.css`, `ui/*.html`) | Layout only: where parts go, grid, flex, gap, which part to show. No visual style of its own, and no `button`, `input`, `select`, `textarea` or `dialog` of its own |
+| `ui/src/frame/` (sidebar, empty state, theme), `ui/src/screens/settings/`, `ui/src/screens/kanban/`, `ui/src/style.css`, the error page (`ui/error.html`, `ui/src/error-page.ts`) | Shipped before this contract and still hold their own CSS or elements. They are known exceptions, listed once in `tests/lib/ds-guard.mjs` with the guards each one switches off. #111 moves them into `ui/src/ds/` and deletes each entry; an entry that no longer hides a violation fails its guard with "remove this exception" |
+| `ui/src/screens/catalog/` | The UI Catalog is a dev tool, not in the release bundle. It is held to rule 1 and rule 5, and to rule 2 except for the files listed in `DEV_TOOL_EXCEPTIONS` in `tests/lib/ds-guard.mjs`. Each entry names one file and its reason (its own chrome: Find a part, Inspect, the specimen hotspots, the Limits range; the token specimens that set a token inline). The list names files, never the folder, so a new file in the folder is held to the guards |
 Rules:
 
-1. A screen file under `ui/src/screens/**` does not set colour, font, radius, shadow or border. It may set layout (`display`, `grid`, `flex`, `gap`, `margin`, `width`) using spacing tokens. Check: Review; **Planned**: a test that fails on those properties in `ui/src/screens/**/*.css` (requested in #106).
-2. **Pick-only.** An agent never defines UI. It picks a part from `ui/src/ds/` by looking it up in the UI Catalog. Check: Review; the diff of a screen change imports from `ui/src/ds/` and adds no new component style.
+1. CSS outside `ui/src/ds/` does not set colour, font, radius, shadow or border, and defines no custom property, in a style sheet or inline (`node.style.x = ...`, `style.setProperty`, `style.cssText`, `setAttribute("style", ...)`, a `<style>` block or a `style="..."` attribute). It may set layout (`display`, `position`, `grid`, `flex`, `gap`, `padding`, `margin`, sizes, `overflow`) with token values, keywords, `0`, `%` or `fr`; motion only to switch it off (`none`). Check: Test (`tests/ds-screen-css.test.mjs`).
+2. **Pick-only.** An agent never defines UI. It picks a part from `ui/src/ds/` by looking it up in the UI Catalog. Check: Review; the diff of a screen change imports from `ui/src/ds/` and adds no new component style. Test (`tests/ds-screen-elements.test.mjs`): code outside `ui/src/ds/` creates no `button`, `input`, `select`, `textarea` or `dialog` (no `createElement`, no tag helper call, no markup); it calls the builders from `ui/src/ds/`.
 3. If the part is missing, the agent does not invent one. It follows the request flow in section 8. Check: Review; a UI component request issue exists for every new part.
-4. `ui/src/ds/` changes only in a pull request that comes from a UI component request issue, and that updates the UI Catalog in the same pull request. Check: Review.
+4. `ui/src/ds/` changes only in a pull request that comes from a UI component request issue, and that updates the UI Catalog in the same pull request. Only the ui-designer agent (`.claude/agents/ui-designer.md`) makes it, with the label `design-system`. The guard configuration is protected the same way: `tests/lib/ds-guard.mjs` (the exception lists), `ui/src/ds-guard.test.ts` (its state gaps), the guard tests and `scripts/ds-write-guard.mjs` (the full list is `GUARD_FILES` in that script). Without that, a feature pull request could switch a guard off by adding an exception outside `ui/src/ds/`. The exception lists and the state gaps can only shrink: `tests/guard-exceptions-pinned.test.mjs` and `ui/src/ds-guard.test.ts` pin the current ones, so adding one fails. Check: Test (the workflow "Design system write guard", `.github/workflows/ds-write-guard.yml`, `scripts/ds-write-guard.mjs`, unit test `tests/ds-write-guard.test.mjs`): a pull request whose diff (`git diff --name-only --no-renames base...head`, so a move lists both paths) has a path starting with `ui/src/ds/`, or a guard file, fails unless it has the label `design-system`. An empty diff passes. Adding or removing a label runs only this workflow again, not the build in `ci.yml`; "Re-run jobs" keeps the labels of the old run, so change the label to refresh it. The owner adds "Design system write guard" as a required check in the branch protection of `main`. The label is a speed bump, not an identity check: anyone can add it, and the owner's review is still the gate.
 5. Raw colour values stay out of `ui/src/ds/` and `ui/src/screens/**`. Check: Test (`tests/raw-colour.test.mjs`).
 
 Every component lives in `ui/src/ds/components/<name>/`; `ui/src/ds/base.css` holds page-wide rules only. A part that another part needs (the trust label, the spinner, the small button, the segmented choice, the tooltip) is imported, never copied. Check: Review; `grep -rn "function createIcon" ui/src/ds` shows one definition.
@@ -244,15 +244,15 @@ How to pick a part:
 
 ## 8. Request flow for a missing part
 
-Detail and templates are in #106. The flow:
+The agent is [`.claude/agents/ui-designer.md`](.claude/agents/ui-designer.md). The request template is [`.github/ISSUE_TEMPLATE/ui-component-request.md`](.github/ISSUE_TEMPLATE/ui-component-request.md). One request is one issue and one pull request. The flow:
 
-1. The agent searches the UI Catalog and `ui/src/ds/` and finds no part, variant or state that fits.
-2. The agent opens a **UI component request** issue. It states: the screen and ticket that need it, what the part must do, which states from section 5 apply, and what it checked in the UI Catalog.
-3. A ui-designer agent picks up the issue, builds the part in `ui/src/ds/` using tokens only, and adds it to the UI Catalog with every state.
-4. The original ticket continues only after that pull request merges. The agent does not add a temporary style to a screen.
+1. The feature agent searches the UI Catalog and `ui/src/ds/` and finds no part, variant or state that fits.
+2. The feature agent stops its UI work and files a request: a **UI component request** issue from the template (title `[UI-REQ] `, label `ui-component-request`). It states the screen and ticket that need the part, what the part must do, which states from section 5 apply, real sample content, and what it checked in the UI Catalog and `ui/src/ds/`.
+3. The ui-designer agent picks up the issue. It builds the part in `ui/src/ds/components/<name>/` with tokens only and every state, adds the registry entry and the test, shows the part in its UI Catalog tab, and opens its own pull request with `Closes #<request>` and the label `design-system`, with light and dark screenshots of the catalog row on the `pr-assets` branch.
+4. The feature agent continues after the design pull request is merged. It does not add a temporary style or element to a screen in the meantime; the guards of section 6 fail one that does.
 5. The owner approves the new part in its pull request.
 
-Check: Review; every new file or variant in `ui/src/ds/` links to a UI component request issue.
+Check: Review; every new file or variant in `ui/src/ds/` links to a UI component request issue. Test: the write guard of section 6 rule 4 fails a `ui/src/ds/` change without the label `design-system`.
 
 ## 9. Changing this file
 

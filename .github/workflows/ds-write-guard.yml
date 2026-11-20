@@ -1,0 +1,42 @@
+name: Design system write guard
+
+# Its own workflow so that adding or removing a label re-runs only this check. In ci.yml the label
+# events would cancel and restart the whole macOS and Ubuntu build. The check name stays stable:
+# add "Design system write guard" as a required check in the branch protection of main.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+concurrency:
+  group: ds-write-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Fails a pull request that changes ui/src/ds/ or a guard file without the label design-system.
+  # How it decides is written at the top of scripts/ds-write-guard.mjs and in DESIGN.md section 6,
+  # rule 4. Labels reach the script through env as JSON, never through the shell text.
+  ds-write-guard:
+    name: Design system write guard
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Check protected changes against the label
+        # bash runs with -eo pipefail here, so a failing git diff fails the step. An empty
+        # successful diff passes: the script treats it as no protected change.
+        shell: bash
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          DS_GUARD_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: git diff --name-only --no-renames "$PR_BASE...$PR_HEAD" | node scripts/ds-write-guard.mjs

@@ -28,6 +28,7 @@ Mnemo is a local-first Tauri 2 desktop app: a Rust core in `src-tauri/`, a web U
 6. No embeddings. Search and the graph use plain code rules.
 7. Colours come from tokens only.
 8. Unchecked facts are marked "Unverified".
+9. UI comes from `ui/src/ds` only. A missing part goes through a UI component request (DESIGN.md §8); only the ui-designer agent edits `ui/src/ds/**`.
 
 ## Working rules
 

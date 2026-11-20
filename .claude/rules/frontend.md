@@ -31,9 +31,12 @@ The UI lives in `ui/`, is built by Vite to `dist/`, and runs in the system web v
 ## Markup
 - Semantic HTML: `button` for actions, `a` for navigation, `form` with real `label`s, landmarks (`header`, `nav`, `main`). No clickable `div`s.
 - Every image has `alt`. Every icon-only control has an accessible name.
+- Code outside `ui/src/ds` never creates a `button`, `input`, `select`, `textarea` or `dialog` itself (no `createElement`, no markup string). It calls the builders from `ui/src/ds`. Checked by `tests/ds-screen-elements.test.mjs`.
+- A part that `ui/src/ds` does not have goes through a UI component request (DESIGN.md §8); the ui-designer agent builds it. Do not build it in the screen.
 
 ## Styling
 - Styles use design tokens (CSS custom properties) only. No raw colour values in component rules.
+- Pick-only: every visual style lives in `ui/src/ds`, and only the ui-designer agent edits `ui/src/ds/**`. CSS outside it holds layout properties only, with token values (`tests/ds-screen-css.test.mjs`). The known exceptions are listed once, in `tests/lib/ds-guard.mjs`.
 - Layout uses flex/grid and works from the smallest allowed window size up to full screen with no horizontal scroll.
 - Theme uses an attribute on the root element and sets `color-scheme`; apply the saved theme before first paint.
 - Bundle fonts locally (the app must work offline). No remote fonts or CDN scripts.
