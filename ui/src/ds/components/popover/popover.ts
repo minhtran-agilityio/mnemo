@@ -86,6 +86,11 @@ export function createPopover(doc: Document, options: PopoverOptions): Popover {
   }
 
   function heldEscape(event: KeyboardEvent): void {
+    // The panel left the page (its screen was drawn again): stop listening.
+    if (!anchor.isConnected) {
+      doc.removeEventListener("keydown", heldEscape);
+      return;
+    }
     // Not an Escape another part already used (a field, a dialog) or that came from inside one.
     if (event.key !== "Escape" || event.defaultPrevented) return;
     const from = event.target;

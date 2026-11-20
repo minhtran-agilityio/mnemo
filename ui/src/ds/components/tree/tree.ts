@@ -35,9 +35,9 @@ export interface TreeNode {
   readonly current?: boolean;
   /**
    * Names the node in a TreeActionEvent. Ids must be unique in the tree. Without one the tree
-   * uses the path of labels from the top as JSON (["Work","Notes"]), so two labels called "Notes"
-   * under different parents stay apart and a "/" in a label is safe; give a real id (the database
-   * id) when labels can repeat in a path.
+   * uses the path from the top as JSON, each step a label and its index among its siblings
+   * ([["Work",0],["Notes",1]]), so equal labels stay apart and a "/" in a label is safe. Give a
+   * real id (the database id) when the screen needs ids that survive a reorder.
    */
   readonly id?: string;
   /** An action the screen refuses for this node, with the reason. It stays in the menu, disabled. */
@@ -70,9 +70,13 @@ export interface TreeActionsOptions {
    * when the work is done. A handler that throws shows "Could not save. Try again." at the field.
    * The tree only reports: after a save it does not change the shown name, the menu names, the
    * ids or any other state. The screen does the work and re-renders the tree from its own data,
-   * on success and on failure alike. A handler may be async: the tree does not wait for it.
+   * on success and on failure alike. A handler may be async: the tree does not wait for it, and a
+   * value it resolves to is ignored, so refuse synchronously. If the promise rejects, the tree
+   * shows "Could not save. Try again." as a note under the node.
    */
-  readonly onAction: (event: TreeActionEvent) => void | string;
+  readonly onAction: (
+    event: TreeActionEvent,
+  ) => void | string | Promise<unknown>;
   /** An extra rule for a name. Return the message to show at the field, or nothing. */
   readonly validateName?: (
     name: string,
@@ -98,7 +102,7 @@ interface Meta {
   readonly siblings: readonly TreeNode[];
   /** The node's id as reported, fixed when the tree is drawn. */
   readonly id: string;
-  readonly path: readonly string[];
+  readonly path: readonly (readonly [string, number])[];
   readonly parent: Meta | null;
 }
 
@@ -224,7 +228,8 @@ function buildNodes(
       cnt.textContent = String(node.count);
       btn.append(cnt);
     }
-    const path = [...(parent?.path ?? []), node.label];
+    const step: readonly [string, number] = [node.label, nodes.indexOf(node)];
+    const path = [...(parent?.path ?? []), step];
     const meta: Meta = {
       node,
       siblings: nodes,
@@ -292,9 +297,22 @@ export function createTree(
   // Closes the open name field, if there is one.
   let cancelField: ((returnFocus: boolean) => void) | null = null;
   /** Calls the screen. Returns a refusal message, or nothing. A throw is a failed save. */
-  const report = (event: TreeActionEvent): string | undefined => {
+  const report = (
+    event: TreeActionEvent,
+    near: HTMLElement | null,
+  ): string | undefined => {
     try {
       const outcome = actions?.onAction(event);
+      // A promise is not waited for. A rejection shows as a note and is never left unhandled; a
+      // value it resolves to is ignored.
+      if (
+        typeof outcome === "object" &&
+        outcome !== null &&
+        typeof (outcome as PromiseLike<unknown>).then === "function"
+      )
+        (outcome as PromiseLike<unknown>).then(undefined, () =>
+          note(near, "Could not save. Try again."),
+        );
       return typeof outcome === "string" && outcome !== ""
         ? outcome
         : undefined;
@@ -302,15 +320,16 @@ export function createTree(
       return "Could not save. Try again.";
     }
   };
-  /** A refusal of Move or Delete has no field: it shows as a line under the node. */
-  const note = (btn: HTMLElement, text: string) => {
-    const row = btn.closest(".trow");
-    if (!row) return;
+  let noteLine: HTMLElement | null = null;
+  /** A refusal with no field (Move, Delete, a failed async save) shows as a line under the node. */
+  const note = (btn: HTMLElement | null, text: string) => {
+    noteLine?.remove();
     const line = doc.createElement("span");
     line.className = "err-text tnote";
     line.setAttribute("role", "alert");
     line.append(createIcon(CircleAlert), doc.createTextNode(text));
-    row.after(line);
+    (btn?.closest(".trow") ?? tree).after(line);
+    noteLine = line;
     // After this click or key has finished, the next one clears it.
     setTimeout(() => {
       const drop = () => line.remove();
@@ -328,11 +347,14 @@ export function createTree(
       cancelField?.(false);
       if (action === "rename" || action === "create") startEdit(action, btn);
       else {
-        const failure = report({
-          action,
-          id: build.meta.get(btn)?.id ?? JSON.stringify([node.label]),
-          label: node.label,
-        });
+        const failure = report(
+          {
+            action,
+            id: build.meta.get(btn)?.id ?? node.label,
+            label: node.label,
+          },
+          btn,
+        );
         if (failure !== undefined) note(btn, failure);
       }
     },
@@ -351,9 +373,10 @@ export function createTree(
   // One node menu at a time: opening one closes the others.
   const openMenu = (btn: HTMLElement) => {
     const pop = build.menus.get(btn);
-    // Not while a name field is open, and not twice for one key press (the ContextMenu key and
-    // Shift+F10 fire a contextmenu event as well as a keydown).
-    if (!pop || cancelField || pop.isOpen()) return;
+    // Not twice for one key press (the ContextMenu key and Shift+F10 fire a contextmenu event as
+    // well as a keydown). An open name field is cancelled first, as for any other action.
+    if (!pop || pop.isOpen()) return;
+    cancelField?.(false);
     for (const other of build.all) if (other !== pop) other.close(false);
     pop.open();
   };
@@ -455,8 +478,9 @@ export function createTree(
 
   /** The field of an inline rename or create. Enter saves; Escape or leaving the field cancels. */
   startEdit = (mode, target, options = {}) => {
-    // One field at a time: a new request cancels the one that is open.
+    // One field at a time: a new request cancels the one that is open. A note goes away too.
     cancelField?.(false);
+    noteLine?.remove();
     const meta = target ? build.meta.get(target) : undefined;
     if (mode === "rename" && (!target || !meta)) return;
     const current = mode === "rename" && meta ? meta.node.label : "";
@@ -574,6 +598,7 @@ export function createTree(
               label: meta ? meta.node.label : "",
               name,
             },
+        target,
       );
       // The screen refused: the field stays open with the message.
       if (failure !== undefined) {

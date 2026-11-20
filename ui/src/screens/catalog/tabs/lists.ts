@@ -286,7 +286,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
             createTree(doc, "Labels, menu example", LABELS, undefined, {
               onAction: () => {},
               signal: ctx.signal,
-              forced: { id: '["Work","Design notes"]', state: "menu" },
+              forced: { id: '[["Work",0],["Design notes",1]]', state: "menu" },
             }),
           ),
           { grow: true },
@@ -297,7 +297,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           createTree(doc, "Labels, rename example", LABELS, undefined, {
             onAction: () => {},
             signal: ctx.signal,
-            forced: { id: '["Work","Mnemo"]', state: "renaming" },
+            forced: { id: '[["Work",0],["Mnemo",0]]', state: "renaming" },
           }),
           { grow: true },
         ),
@@ -308,7 +308,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
             onAction: () => {},
             signal: ctx.signal,
             forced: {
-              id: '["Work","Mnemo"]',
+              id: '[["Work",0],["Mnemo",0]]',
               state: "error",
               value: "Design notes",
             },
@@ -321,7 +321,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           createTree(doc, "Labels, hover example", LABELS, undefined, {
             onAction: () => {},
             signal: ctx.signal,
-            forced: { id: '["Work","Mnemo"]', state: "hover" },
+            forced: { id: '[["Work",0],["Mnemo",0]]', state: "hover" },
           }),
           { grow: true },
         ),
@@ -331,7 +331,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           createTree(doc, "Labels, focus example", LABELS, undefined, {
             onAction: () => {},
             signal: ctx.signal,
-            forced: { id: '["Work","Mnemo"]', state: "focus" },
+            forced: { id: '[["Work",0],["Mnemo",0]]', state: "focus" },
           }),
           { grow: true },
         ),
@@ -341,7 +341,7 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           createTree(doc, "Labels, active example", LABELS, undefined, {
             onAction: () => {},
             signal: ctx.signal,
-            forced: { id: '["Work","Mnemo"]', state: "active" },
+            forced: { id: '[["Work",0],["Mnemo",0]]', state: "active" },
           }),
           { grow: true },
         ),

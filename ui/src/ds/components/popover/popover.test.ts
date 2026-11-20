@@ -67,6 +67,30 @@ test("a held panel stays open on an outside click, and its trigger still closes 
   pop.anchor.remove();
 });
 
+test("a held panel that left the page ignores Escape and drops its listener", () => {
+  const trigger = createButton(document, { label: "Why?" });
+  const panel = document.createElement("div");
+  const pop = createPopover(document, {
+    trigger,
+    panel,
+    haspopup: "dialog",
+    held: true,
+  });
+  document.body.append(pop.anchor);
+  pop.open();
+  pop.anchor.remove();
+  document.body.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  expect(panel.hidden).toBe(false); // not closed by the stale listener
+  document.body.append(pop.anchor);
+  document.body.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  expect(panel.hidden).toBe(false); // the listener removed itself
+  pop.anchor.remove();
+});
+
 test("click opens, click again closes", () => {
   const { trigger, panel } = make();
   trigger.click();
