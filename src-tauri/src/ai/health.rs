@@ -64,10 +64,23 @@ impl AiHealth {
 }
 
 /// What a check command gave back: whether it exited 0, and its standard output.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct CliOutput {
     pub success: bool,
     pub stdout: String,
+}
+
+/// The status output holds the account email and organisation, so `{:?}` never prints it.
+impl std::fmt::Debug for CliOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CliOutput")
+            .field("success", &self.success)
+            .field(
+                "stdout",
+                &format_args!("<{} bytes hidden>", self.stdout.len()),
+            )
+            .finish()
+    }
 }
 
 /// The `claude` program, behind a trait so tests use a fake.
@@ -81,8 +94,6 @@ pub trait ClaudeCli {
 /// The OS error "text file busy" (the same number on Linux and macOS).
 const ETXTBSY: i32 = 26;
 
-/// Starts `program`. A program that was written a moment ago can be "text file busy" while
-/// another thread's fork still holds its write handle; that clears in milliseconds, so retry.
 /// The command for one check run. The subscription is used, so an API key in the environment
 /// must not change the answer.
 fn check_command(program: &Path, args: &[&str]) -> Command {
@@ -96,6 +107,8 @@ fn check_command(program: &Path, args: &[&str]) -> Command {
     command
 }
 
+/// Starts `program`. A program that was written a moment ago can be "text file busy" while
+/// another thread's fork still holds its write handle; that clears in milliseconds, so retry.
 fn spawn_retrying_busy(program: &Path, args: &[&str]) -> Result<std::process::Child, ()> {
     let mut tries = 0;
     loop {
@@ -361,16 +374,29 @@ impl ClaudeCli for SystemClaude {
                 }
             }
         };
-        // Wait a short while for the end of the stream; on a timeout keep what was read.
-        let _ = receiver.recv_timeout(DRAIN_TIMEOUT);
-        let bytes = buffer.lock().map(|b| b.clone()).unwrap_or_default();
-        // Bytes that are not text read as empty text, which then reads as a problem.
-        let stdout = String::from_utf8(bytes).unwrap_or_default();
+        // Wait a short while for the end of the stream.
+        let finished = receiver.recv_timeout(DRAIN_TIMEOUT).is_ok();
+        let bytes = buffer.lock().map_err(|_| ())?.clone();
+        let stdout = complete_output(bytes, finished)?;
         Ok(CliOutput {
             success: status.success(),
             stdout,
         })
     }
+}
+
+/// The text of a check command's output, or `Err` when it may be cut short. Output that hit
+/// the size cap or is not valid UTF-8 is never trusted. When the stream did not end (a
+/// descendant still holds the pipe), the text is kept only if it ends at a line break, so a
+/// half-written line never counts as an answer.
+fn complete_output(bytes: Vec<u8>, finished: bool) -> Result<String, ()> {
+    if bytes.len() as u64 >= MAX_OUTPUT {
+        return Err(());
+    }
+    if !finished && bytes.last() != Some(&b'\n') {
+        return Err(());
+    }
+    String::from_utf8(bytes).map_err(|_| ())
 }
 
 #[cfg(test)]
@@ -494,6 +520,34 @@ mod tests {
         // A garbage answer is not echoed either.
         let health = check(&fake(out(true, "owner@example.com sk-ant-secret")));
         assert!(!format!("{health:?}").contains("owner@example.com"));
+    }
+
+    #[test]
+    fn debug_output_hides_the_status_text() {
+        let out = CliOutput {
+            success: true,
+            stdout: r#"{"loggedIn": true, "email": "owner@example.com"}"#.to_string(),
+        };
+        let shown = format!("{out:?}");
+        assert!(!shown.contains("owner@example.com"));
+        assert!(shown.contains("bytes hidden"));
+    }
+
+    #[test]
+    fn complete_output_refuses_cut_or_broken_text() {
+        // A finished stream is kept as it is, with or without a final line break.
+        assert_eq!(complete_output(b"hi".to_vec(), true), Ok("hi".to_string()));
+        // An open stream is kept only up to a full line.
+        assert_eq!(
+            complete_output(b"hi\n".to_vec(), false),
+            Ok("hi\n".to_string())
+        );
+        assert_eq!(complete_output(b"2.1.".to_vec(), false), Err(()));
+        // Not UTF-8 (a character split in two) is refused, not read as empty text.
+        assert_eq!(complete_output(vec![b'a', 0xE2, 0x82], true), Err(()));
+        // Output that reached the cap may be cut, so it is refused.
+        let full = vec![b'x'; MAX_OUTPUT as usize];
+        assert_eq!(complete_output(full, true), Err(()));
     }
 
     #[test]
@@ -639,6 +693,16 @@ esac"#;
             assert_eq!(got.stdout.trim(), "hi");
             assert!(got.success);
             assert!(started.elapsed() < Duration::from_secs(6));
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        #[test]
+        fn a_half_written_line_with_the_pipe_still_open_is_not_trusted() {
+            let dir = temp_dir("partial");
+            // No line break at the end, and the pipe stays open: the text may be cut short.
+            write_claude(&dir, "printf '2.1.'; sleep 8 &");
+            let cli = SystemClaude::new(vec![dir.clone()]);
+            assert!(cli.run(&dir.join("claude"), &[]).is_err());
             let _ = std::fs::remove_dir_all(dir);
         }
 
