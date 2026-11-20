@@ -308,3 +308,87 @@ export function listLinks(
 export function removeLink(id: string): Promise<void> {
   return invoke<void>("remove_link", { id });
 }
+
+// ---- Labels and labelled notes (#33) ----
+// A label nests under one parent label (null for a top label). A note is saved with at
+// least one label; the core refuses a save with none.
+
+export interface Label extends RecordBase {
+  name: string;
+  /** Null for a top label. */
+  parentId: string | null;
+}
+
+/** A note with the ids of its live labels. */
+export interface LabelledNote {
+  note: Note;
+  labelIds: string[];
+}
+
+/** Where a page of notes starts: the last note of the page before. */
+export interface ChangeCursor {
+  updatedAt: string;
+  id: string;
+}
+
+/** One page of notes, newest change first. `next` is set when more notes follow. */
+export interface LabelledNotePage {
+  items: LabelledNote[];
+  next: ChangeCursor | null;
+}
+
+/** What a label delete changed: notes that got the parent label, child labels moved up. */
+export interface DeleteLabelOutcome {
+  movedNotes: number;
+  movedLabels: number;
+  /** Where the notes and child labels went; null for a top label. */
+  parentId: string | null;
+}
+
+/** Creates a label under `parentId` (null: a top label). */
+export function createLabel(
+  parentId: string | null,
+  name: string,
+): Promise<Label> {
+  return invoke<Label>("create_label", { parentId, name });
+}
+
+/** Renames a label. */
+export function renameLabel(id: string, name: string): Promise<Label> {
+  return invoke<Label>("rename_label", { id, name });
+}
+
+/** Moves a label under `parentId` (null: to the top). */
+export function moveLabel(id: string, parentId: string | null): Promise<Label> {
+  return invoke<Label>("move_label", { id, parentId });
+}
+
+/** Deletes a label. Its notes get the parent label and its child labels move up. */
+export function deleteLabel(id: string): Promise<DeleteLabelOutcome> {
+  return invoke<DeleteLabelOutcome>("delete_label", { id });
+}
+
+/** Every live label, flat with its parent id, ordered by name. */
+export function listLabels(): Promise<Label[]> {
+  return invoke<Label[]>("list_labels");
+}
+
+/** Adds a note (`id` null) or replaces a note's text, and sets its labels. */
+export function saveLabelledNote(
+  id: string | null,
+  body: string,
+  labelIds: string[],
+): Promise<LabelledNote> {
+  return invoke<LabelledNote>("save_labelled_note", { id, body, labelIds });
+}
+
+/** One page of notes, newest change first: of `labelId` and its child labels, or all (null). */
+export function listLabelledNotes(
+  labelId: string | null,
+  page: { limit: number; after?: ChangeCursor | null } = { limit: 100 },
+): Promise<LabelledNotePage> {
+  return invoke<LabelledNotePage>("list_labelled_notes", {
+    labelId,
+    page: { limit: page.limit, after: page.after ?? null },
+  });
+}

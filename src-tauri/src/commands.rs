@@ -10,6 +10,9 @@ use crate::storage::items::{
     Bookmark, BookmarkInput, Event, EventInput, Idea, IdeaInput, Memory, MemoryInput, Note,
     NoteInput, Project, ProjectInput, Run, RunInput, Task, TaskInput,
 };
+use crate::storage::labels::{
+    ChangePage, ChangePageRequest, DeleteLabelOutcome, Label, LabelledNote,
+};
 use crate::storage::links::Link;
 use crate::storage::record::{Cursor, Page};
 use crate::storage::{Item, ItemRef, PageRequest, Storage, StorageError};
@@ -451,6 +454,133 @@ pub async fn remove_link(app: tauri::AppHandle, id: String) -> Result<(), AppErr
     off_main_thread(app, move |s| link_remove(s, &id)).await
 }
 
+// ---- Labels and labelled notes (#33) ----
+
+fn label_create(
+    storage: &AppStorage,
+    parent_id: Option<&str>,
+    name: &str,
+) -> Result<Label, AppError> {
+    storage
+        .get()?
+        .create_label(parent_id, name)
+        .map_err(item_failed)
+}
+
+fn label_rename(storage: &AppStorage, id: &str, name: &str) -> Result<Label, AppError> {
+    storage.get()?.rename_label(id, name).map_err(item_failed)
+}
+
+fn label_move(storage: &AppStorage, id: &str, parent_id: Option<&str>) -> Result<Label, AppError> {
+    storage
+        .get()?
+        .move_label(id, parent_id)
+        .map_err(item_failed)
+}
+
+fn label_delete(storage: &AppStorage, id: &str) -> Result<DeleteLabelOutcome, AppError> {
+    storage.get()?.delete_label(id).map_err(item_failed)
+}
+
+fn label_list(storage: &AppStorage) -> Result<Vec<Label>, AppError> {
+    storage.get()?.list_labels().map_err(item_failed)
+}
+
+fn labelled_note_save(
+    storage: &AppStorage,
+    id: Option<&str>,
+    body: &str,
+    label_ids: &[String],
+) -> Result<LabelledNote, AppError> {
+    storage
+        .get()?
+        .save_labelled_note(id, body, label_ids)
+        .map_err(item_failed)
+}
+
+fn labelled_note_list(
+    storage: &AppStorage,
+    label_id: Option<&str>,
+    page: &ChangePageRequest,
+) -> Result<ChangePage<LabelledNote>, AppError> {
+    storage
+        .get()?
+        .list_labelled_notes(label_id, page)
+        .map_err(item_failed)
+}
+
+/// Creates a label under `parent_id` (null: a top label).
+#[tauri::command]
+pub async fn create_label(
+    app: tauri::AppHandle,
+    parent_id: Option<String>,
+    name: String,
+) -> Result<Label, AppError> {
+    off_main_thread(app, move |s| label_create(s, parent_id.as_deref(), &name)).await
+}
+
+/// Renames a label.
+#[tauri::command]
+pub async fn rename_label(
+    app: tauri::AppHandle,
+    id: String,
+    name: String,
+) -> Result<Label, AppError> {
+    off_main_thread(app, move |s| label_rename(s, &id, &name)).await
+}
+
+/// Moves a label under `parent_id` (null: to the top).
+#[tauri::command]
+pub async fn move_label(
+    app: tauri::AppHandle,
+    id: String,
+    parent_id: Option<String>,
+) -> Result<Label, AppError> {
+    off_main_thread(app, move |s| label_move(s, &id, parent_id.as_deref())).await
+}
+
+/// Deletes a label: its notes get the parent label and its child labels move up.
+#[tauri::command]
+pub async fn delete_label(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<DeleteLabelOutcome, AppError> {
+    off_main_thread(app, move |s| label_delete(s, &id)).await
+}
+
+/// Every live label, flat with its parent id.
+#[tauri::command]
+pub async fn list_labels(app: tauri::AppHandle) -> Result<Vec<Label>, AppError> {
+    off_main_thread(app, label_list).await
+}
+
+/// Adds a note (`id` null) or replaces a note's text, with at least one label.
+#[tauri::command]
+pub async fn save_labelled_note(
+    app: tauri::AppHandle,
+    id: Option<String>,
+    body: String,
+    label_ids: Vec<String>,
+) -> Result<LabelledNote, AppError> {
+    off_main_thread(app, move |s| {
+        labelled_note_save(s, id.as_deref(), &body, &label_ids)
+    })
+    .await
+}
+
+/// One page of notes, newest change first: of a label and its child labels, or all (null).
+#[tauri::command]
+pub async fn list_labelled_notes(
+    app: tauri::AppHandle,
+    label_id: Option<String>,
+    page: ChangePageRequest,
+) -> Result<ChangePage<LabelledNote>, AppError> {
+    off_main_thread(app, move |s| {
+        labelled_note_list(s, label_id.as_deref(), &page)
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -724,6 +854,59 @@ mod tests {
         assert_eq!(
             link_add(&state, &note, &note).unwrap_err().code,
             "invalid_input"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The calls the label and labelled-note commands make, on a temporary database.
+    #[test]
+    fn label_commands_create_save_list_move_and_delete_end_to_end() {
+        let (storage, dir) = temp_storage();
+        let state = AppStorage::new(Ok(storage));
+        let work = label_create(&state, None, "Work").unwrap();
+        let plans = label_create(&state, Some(&work.base.id), "Plans").unwrap();
+        assert_eq!(
+            label_create(&state, None, "work").unwrap_err().code,
+            "invalid_input"
+        );
+        let refused = labelled_note_save(&state, None, "text", &[]).unwrap_err();
+        assert_eq!(refused.code, "invalid_input");
+        assert_eq!(refused.message, "A note needs at least one label.");
+        let saved =
+            labelled_note_save(&state, None, "# Plan", std::slice::from_ref(&plans.base.id))
+                .unwrap();
+        let page = ChangePageRequest {
+            limit: 10,
+            after: None,
+        };
+        let listed = labelled_note_list(&state, Some(&work.base.id), &page).unwrap();
+        assert_eq!(listed.items, vec![saved.clone()]);
+        let json = serde_json::to_value(&listed).unwrap();
+        assert_eq!(json["items"][0]["note"]["body"], "# Plan");
+        assert_eq!(json["items"][0]["labelIds"][0], plans.base.id.as_str());
+        assert_eq!(
+            label_move(&state, &work.base.id, Some(&plans.base.id))
+                .unwrap_err()
+                .code,
+            "invalid_input"
+        );
+        let renamed = label_rename(&state, &plans.base.id, "Goals").unwrap();
+        assert_eq!(renamed.name, "Goals");
+        let out = label_delete(&state, &plans.base.id).unwrap();
+        assert_eq!(out.moved_notes, 1);
+        assert_eq!(
+            serde_json::to_value(&out).unwrap()["parentId"],
+            work.base.id.as_str()
+        );
+        let labels = label_list(&state).unwrap();
+        assert_eq!(labels.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&labels[0]).unwrap()["parentId"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            label_delete(&state, &plans.base.id).unwrap_err().code,
+            "not_found"
         );
         let _ = std::fs::remove_dir_all(dir);
     }

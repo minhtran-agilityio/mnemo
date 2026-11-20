@@ -13,13 +13,20 @@ vi.mock("@tauri-apps/api/core", () => ({
 import {
   addBookmark,
   addLink,
+  createLabel,
   deleteBookmark,
+  deleteLabel,
   errorMessage,
   getBookmark,
   isAppError,
   listBookmarks,
+  listLabelledNotes,
+  listLabels,
   listLinks,
+  moveLabel,
   removeLink,
+  renameLabel,
+  saveLabelledNote,
   updateBookmark,
 } from "./api";
 
@@ -144,4 +151,72 @@ test("arguments Tauri could not read reject with a plain string and get the fall
   );
   expect(isAppError(err)).toBe(false);
   expect(errorMessage(err)).toBe("Something went wrong. Try again.");
+});
+
+// #33: the label and labelled-note wrappers send the argument names the Rust commands take
+// (Tauri maps camelCase to the snake_case parameters). The Rust test
+// `label_commands_create_save_list_move_and_delete_end_to_end` runs the same calls.
+test("the label wrappers send each command with its arguments", async () => {
+  invoke.mockResolvedValue(null);
+  await createLabel(null, "Work");
+  await createLabel("lab-1", "Plans");
+  await renameLabel("lab-2", "Goals");
+  await moveLabel("lab-2", null);
+  await deleteLabel("lab-2");
+  await listLabels();
+  expect(invoke.mock.calls).toEqual([
+    ["create_label", { parentId: null, name: "Work" }],
+    ["create_label", { parentId: "lab-1", name: "Plans" }],
+    ["rename_label", { id: "lab-2", name: "Goals" }],
+    ["move_label", { id: "lab-2", parentId: null }],
+    ["delete_label", { id: "lab-2" }],
+    ["list_labels"],
+  ]);
+});
+
+test("the labelled-note wrappers send the note, its labels and the page", async () => {
+  const note = {
+    note: {
+      id: ID,
+      createdAt: AT,
+      updatedAt: AT,
+      deletedAt: null,
+      body: "# Hi",
+    },
+    labelIds: ["lab-1"],
+  };
+  invoke.mockResolvedValueOnce(note);
+  expect(await saveLabelledNote(ID, "# Hi", ["lab-1"])).toEqual(note);
+  invoke.mockResolvedValueOnce({ items: [note], next: null });
+  await listLabelledNotes(null);
+  invoke.mockResolvedValueOnce({ items: [], next: null });
+  const after = { updatedAt: AT, id: ID };
+  await listLabelledNotes("lab-1", { limit: 20, after });
+  expect(invoke.mock.calls).toEqual([
+    ["save_labelled_note", { id: ID, body: "# Hi", labelIds: ["lab-1"] }],
+    [
+      "list_labelled_notes",
+      { labelId: null, page: { limit: 100, after: null } },
+    ],
+    ["list_labelled_notes", { labelId: "lab-1", page: { limit: 20, after } }],
+  ]);
+});
+
+test("a refused label call reaches the caller as the core's { code, message }", async () => {
+  const refusal = {
+    code: "invalid_input",
+    message: "A label cannot move under itself or one of its own labels.",
+  };
+  invoke.mockRejectedValueOnce(refusal);
+  const caught = await moveLabel("lab-1", "lab-1").catch((e: unknown) => e);
+  expect(isAppError(caught)).toBe(true);
+  expect(errorMessage(caught)).toBe(refusal.message);
+  invoke.mockRejectedValueOnce({
+    code: "invalid_input",
+    message: "A note needs at least one label.",
+  });
+  const refused = await saveLabelledNote(null, "text", []).catch(
+    (e: unknown) => e,
+  );
+  expect(errorMessage(refused)).toBe("A note needs at least one label.");
 });
