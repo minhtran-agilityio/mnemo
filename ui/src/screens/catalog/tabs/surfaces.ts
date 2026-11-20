@@ -289,6 +289,7 @@ export const renderSurfaces: TabRenderer = (panel, ctx) => {
         ] as const;
         return {
           column: true,
+          wide: true,
           nodes: bars.map((bar) =>
             state(
               doc,
@@ -516,8 +517,11 @@ export const renderSurfaces: TabRenderer = (panel, ctx) => {
       tooltip: () => {
         const anchor = button(doc, "btn", "Copy");
         const tip = createTooltip(anchor, "Copy link");
+        // Room above the anchor, so the tip is drawn inside the example and no scroll box cuts it.
+        const room = el(doc, "div", "tip-room");
+        room.append(tip.element);
         return [
-          state(doc, "live: hover or focus the button", tip.element),
+          state(doc, "live: hover or focus the button", room),
           state(doc, "shown", createStaticTooltip("Copy link")),
         ];
       },

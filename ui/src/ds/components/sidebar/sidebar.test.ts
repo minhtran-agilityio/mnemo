@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { Bookmark, Settings, StickyNote, Video } from "lucide";
 import { beforeEach, expect, test, vi } from "vitest";
+import { cssRule, MARKS_ROOM } from "../../../css-rule";
 import { createSidebar, type Sidebar, type SidebarOptions } from "./sidebar";
 
 let toggled: boolean[];
@@ -201,4 +202,29 @@ test("labels go in as text, and a long label stays whole in the name", () => {
   });
   expect(sidebar.element.querySelector("b")).toBeNull();
   expect(q("a[data-item=a]").textContent).toBe(long);
+});
+
+// The Limits tab fix (issue 113)es: a long label is cut with an ellipsis and keeps room for stacked marks, and the
+// sidebar clips sideways only, so the scrolling list does the cutting above and below.
+test("a long unbroken label is whole text in .sidebar-text, which has room for stacked marks", () => {
+  const label = `${"ẪẬẲỖỮỰ".repeat(10)}${"s".repeat(90)}`;
+  build({
+    groups: [{ id: "g", label: "Group", items: [link("long", label)] }],
+  });
+  const el = q('[data-item="long"] .sidebar-text');
+  expect(el.textContent).toBe(label);
+  const rule = cssRule(
+    import.meta.dirname,
+    "sidebar.css",
+    ".sidebar-item .sidebar-text",
+  );
+  expect(rule).toMatchObject(MARKS_ROOM);
+  expect(rule["text-overflow"]).toBe("ellipsis");
+  expect(rule["min-width"]).toBe("0");
+});
+
+test("the sidebar box clips sideways only", () => {
+  const rule = cssRule(import.meta.dirname, "sidebar.css", ".sidebar");
+  expect(rule["overflow-x"]).toBe("clip");
+  expect(rule["overflow-y"]).toBe("visible");
 });

@@ -47,6 +47,16 @@ export const LIMITS = [
       "Capitals with two marks need room above. A tight line height clips them.",
   },
   {
+    name: "long values in parts",
+    tab: "Limits",
+    variants: NONE,
+    states: ["overflow"],
+    source: "ds",
+    className: "tags",
+    notes:
+      "One very long unbroken value and Vietnamese capitals with stacked marks in each part that cuts a line: tag list, choice list, source list, section list, folder tree, sidebar, list row second line.",
+  },
+  {
     name: "empty content",
     tab: "Limits",
     variants: NONE,

@@ -298,7 +298,7 @@ test("Find a part lists tokens and ignores Vietnamese marks", () => {
 test("the Limits tab builds 1000 rows on request and every Limits row is a real part", () => {
   mount();
   const panel = panelFor("Limits");
-  expect(panel?.querySelectorAll(".cat-row").length).toBe(7);
+  expect(panel?.querySelectorAll(".cat-row").length).toBe(8);
   expect(panel?.textContent).not.toContain("Not built yet: planned");
   const build = [...(panel?.querySelectorAll("button") ?? [])].find(
     (b) => b.textContent === "Build 1000 rows",

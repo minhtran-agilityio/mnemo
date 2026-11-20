@@ -117,9 +117,13 @@ pub fn run() {
                 .ok_or_else(|| "tauri.conf.json has no main window".to_string())
                 .and_then(|mut config| {
                     config.url = start_url(error_code, config.url);
-                    WebviewWindowBuilder::from_config(app.handle(), &config)
+                    let built = WebviewWindowBuilder::from_config(app.handle(), &config)
                         .and_then(|b| b.build())
-                        .map_err(|e| e.to_string())
+                        .map_err(|e| e.to_string())?;
+                    // The window-state plugin has restored the saved size by now. One saved before
+                    // the minimum existed may be smaller; grow it to max(saved, minimum).
+                    system::window::enforce_minimum(&built, config.min_width, config.min_height);
+                    Ok(())
                 });
             if let Err(why) = window {
                 eprintln!("Mnemo could not open its window: {why}");

@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, test } from "vitest";
+import { cssRule } from "../../../css-rule";
 import { type ChoiceList, createChoiceList } from "./choice-list";
 
 type Theme = "system" | "light" | "dark";
@@ -105,4 +106,31 @@ test("long hints and markup stay text", () => {
   expect(odd.element.querySelector(".choice-list-hint")?.textContent).toBe(
     long,
   );
+});
+
+// The Limits tab fix (issue 113): a long hint wraps inside its column instead of widening the group.
+test("a long unbroken hint stays whole text in the second column, which may shrink below its content", () => {
+  const hint = `Một ${"ẪẬẲỖỮỰ".repeat(10)} ${"h".repeat(120)}`;
+  const long = createChoiceList<Theme>(document, {
+    legend: "Colours",
+    name: "long",
+    choices: [{ value: "system", label: "System", hint }],
+    value: "system",
+  });
+  document.body.append(long.element);
+  expect(long.element.querySelector(".choice-list-hint")?.textContent).toBe(
+    hint,
+  );
+  const row = cssRule(
+    import.meta.dirname,
+    "choice-list.css",
+    ".choice-list-row",
+  );
+  expect(row["grid-template-columns"]).toBe("auto minmax(0, 1fr)");
+  const group = cssRule(
+    import.meta.dirname,
+    "choice-list.css",
+    ".choice-list-group",
+  );
+  expect(group["min-width"]).toBe("0");
 });

@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, test } from "vitest";
+import { cssRule, MARKS_ROOM } from "../../../css-rule";
 import { createSectionList, type SectionList } from "./section-list";
 
 let list: SectionList;
@@ -86,4 +87,23 @@ test("a forced state draws hover or focus for the UI Catalog", () => {
 test("text goes in as text, never as markup", () => {
   list.setValue("ai", "<b>bold</b>");
   expect(list.element.querySelector("b")).toBeNull();
+});
+
+// The Limits tab fix (issue 113): a long value is cut with an ellipsis and keeps room for stacked marks.
+test("a long unbroken value is whole text in .section-list-value, which has room for stacked marks", () => {
+  const value = `${"ẪẬẲỖỮỰ".repeat(12)}${"z".repeat(90)}`;
+  list.setValue("ai", value);
+  const el = row("AI").querySelector(".section-list-value") as HTMLElement;
+  expect(el.textContent).toBe(value);
+  expect(el.title).toBe(value);
+  const rule = cssRule(
+    import.meta.dirname,
+    "section-list.css",
+    ".section-list-value",
+  );
+  expect(rule).toMatchObject(MARKS_ROOM);
+  expect(rule["max-width"]).toBe("100%");
+  expect(rule.overflow).toBe("hidden");
+  const nav = cssRule(import.meta.dirname, "section-list.css", ".section-list");
+  expect(nav["max-width"]).toBe("100%");
 });

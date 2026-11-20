@@ -147,46 +147,50 @@ export const renderLists: TabRenderer = (panel, ctx) => {
             ),
           ],
           column: true,
+          wide: true,
         };
       },
-      table: () => [
-        createTable(doc, {
-          label: "Saved links, sortable",
-          columns: [
-            { label: "Title" },
-            { label: "Source" },
-            { label: "Saved" },
-            { label: "Opens", numeric: true },
-          ],
-          rows: [
-            [
-              { text: "Tauri 2: capabilities" },
-              { text: "Telegram" },
-              { text: "19 Nov", sort: 20261119 },
-              { text: "4" },
+      table: () => ({
+        wide: true,
+        nodes: [
+          createTable(doc, {
+            label: "Saved links, sortable",
+            columns: [
+              { label: "Title" },
+              { label: "Source" },
+              { label: "Saved" },
+              { label: "Opens", numeric: true },
             ],
-            [
-              { text: "Hướng dẫn sao lưu dữ liệu" },
-              { text: "Zalo" },
-              { text: "18 Nov", sort: 20261118 },
-              { text: "12" },
+            rows: [
+              [
+                { text: "Tauri 2: capabilities" },
+                { text: "Telegram" },
+                { text: "19 Nov", sort: 20261119 },
+                { text: "4" },
+              ],
+              [
+                { text: "Hướng dẫn sao lưu dữ liệu" },
+                { text: "Zalo" },
+                { text: "18 Nov", sort: 20261118 },
+                { text: "12" },
+              ],
+              [
+                { text: "Write-ahead log explained" },
+                { text: "GitHub" },
+                { text: "7 Nov", sort: 20261107 },
+                { text: "1" },
+              ],
+              [
+                { text: "Weekly sync notes" },
+                { text: "Slack" },
+                { text: "30 Oct", sort: 20261030 },
+                { text: "0" },
+              ],
             ],
-            [
-              { text: "Write-ahead log explained" },
-              { text: "GitHub" },
-              { text: "7 Nov", sort: 20261107 },
-              { text: "1" },
-            ],
-            [
-              { text: "Weekly sync notes" },
-              { text: "Slack" },
-              { text: "30 Oct", sort: 20261030 },
-              { text: "0" },
-            ],
-          ],
-          sort: { column: 2, direction: "descending" },
-        }),
-      ],
+            sort: { column: 2, direction: "descending" },
+          }),
+        ],
+      }),
       tree: () => [
         state(
           doc,

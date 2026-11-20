@@ -124,8 +124,9 @@ const bridgeScript = (mode) => `(() => {
 async function openApp({ w = 800, h = 560, dsf = 1, scheme = 'light', reduce = false, mode = 'ok' } = {}) {
   await ensureServer();
   const dir = mkdtempSync(join(tmpdir(), 'mnemo-ds09-chrome-'));
-  const proc = spawn(CHROME, ['--headless=new', '--no-sandbox', '--disable-gpu', '--no-first-run', '--remote-debugging-port=0', `--user-data-dir=${dir}`, `--window-size=${w},${h}`, 'about:blank'], { stdio: 'ignore' });
-  const cleanup = () => { try { proc.kill('SIGKILL'); } catch { /* gone */ } try { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* temp dir, left for the OS */ } };
+  // detached: Chrome leads its own process group, so one kill takes the crashpad and zygote helpers too.
+  const proc = spawn(CHROME, ['--headless=new', '--no-sandbox', '--disable-gpu', '--no-first-run', '--disable-crash-reporter', '--disable-breakpad', '--remote-debugging-port=0', `--user-data-dir=${dir}`, `--window-size=${w},${h}`, 'about:blank'], { stdio: 'ignore', detached: true });
+  const cleanup = () => { try { process.kill(-proc.pid, 'SIGKILL'); } catch { try { proc.kill('SIGKILL'); } catch { /* gone */ } } try { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* temp dir, left for the OS */ } };
   try {
     let wsUrl;
     for (let i = 0; i < 300 && !wsUrl; i++) {
@@ -139,7 +140,9 @@ async function openApp({ w = 800, h = 560, dsf = 1, scheme = 'light', reduce = f
     let id = 0;
     const pending = new Map();
     ws.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && pending.has(d.id)) { const { ok, bad } = pending.get(d.id); pending.delete(d.id); d.error ? bad(new Error(JSON.stringify(d.error))) : ok(d.result); } };
-    const send = (method, params = {}, sessionId) => new Promise((ok, bad) => { const i = ++id; pending.set(i, { ok, bad }); ws.send(JSON.stringify({ id: i, method, params, sessionId })); });
+    // when the socket closes (Chrome crashed or was closed) every call still waiting fails at once
+    ws.onclose = () => { for (const { bad } of pending.values()) bad(new Error('Chrome closed the DevTools connection')); pending.clear(); };
+    const send = (method, params = {}, sessionId) => new Promise((ok, bad) => { if (ws.readyState !== 1) return bad(new Error('Chrome closed the DevTools connection')); const i = ++id; pending.set(i, { ok, bad }); ws.send(JSON.stringify({ id: i, method, params, sessionId })); });
     const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
     const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
     const S = (m, pr) => send(m, pr, sessionId);
@@ -198,8 +201,11 @@ async function withApp(opts, fn) {
 // ---- in-page audits
 // scroll: horizontal scroll of the document, and in app screens of any visible scroll box (the catalog's own
 //   specimen frames are fixed-size windows on purpose, so inside the catalog only the document counts)
-// hclip: overflow-x hidden or clip boxes that hide text without an ellipsis
-// vclip: text whose line box, plus 15% of the font size for stacked marks, leaves a clipping ancestor
+// hclip: text cut sideways: an overflow hidden or clip box that hides its own text without an ellipsis, or text
+//   whose line box leaves (even wholly) a hidden, clip or non-scrolling ancestor on the left or right
+// vclip: text whose line box, plus 15% of the font size for stacked marks, leaves a clipping ancestor above or below
+// Skipped on purpose: a real scroll box that does scroll, a line clamp, a text-overflow ellipsis on the text's own
+// inline line, and the one specimen element that a caption calls a counter-example.
 const AUDIT = `(() => {
   const IN_CATALOG = location.hash.startsWith('#/ui-catalog');
   const out = { scroll: [], hclip: [], vclip: [] };
@@ -208,38 +214,70 @@ const AUDIT = `(() => {
   if (document.body.scrollWidth > de.clientWidth + 1) out.scroll.push('body ' + document.body.scrollWidth + ' > ' + de.clientWidth);
   const vis = (el) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 1 && r.height > 1 && cs.visibility !== 'hidden' && cs.display !== 'none'; };
   const label = (el) => el.tagName.toLowerCase() + (typeof el.className === 'string' && el.className ? '.' + el.className.trim().split(' ')[0] : '') + ' "' + (el.textContent || '').trim().slice(0, 30) + '"';
+  const scrolls = (cs) => cs === 'auto' || cs === 'scroll';
   const range = document.createRange();
   for (const el of document.querySelectorAll('body *')) {
     if (!vis(el)) continue;
-    // a deliberate counter-example (its caption starts with 'counter-example') is meant to be cut
-    let demo = false;
-    for (let a = el, i = 0; a && i < 4; a = a.parentElement, i++) { const nx = a.nextElementSibling; if (nx && /^counter-example/i.test((nx.textContent || '').trim())) demo = true; }
-    if (demo) continue;
+    // the specimen of a deliberate counter-example (the next sibling is its caption, which starts with 'counter-example') is meant to be cut
+    const nx = el.nextElementSibling;
+    if (nx && nx.classList.contains('cap') && /^counter-example/i.test((nx.textContent || '').trim())) continue;
     const cs = getComputedStyle(el);
     const hasText = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
     const wide = el.scrollWidth > el.clientWidth + 1;
-    if (!IN_CATALOG && (cs.overflowX === 'auto' || cs.overflowX === 'scroll') && wide) out.scroll.push(label(el) + ' ' + el.scrollWidth + ' > ' + el.clientWidth);
+    if (!IN_CATALOG && scrolls(cs.overflowX) && wide) out.scroll.push(label(el) + ' ' + el.scrollWidth + ' > ' + el.clientWidth);
     if ((cs.overflowX === 'hidden' || cs.overflowX === 'clip') && hasText && wide && cs.textOverflow !== 'ellipsis') out.hclip.push(label(el) + ' ' + el.scrollWidth + ' > ' + el.clientWidth);
     const own = [...el.childNodes].filter((n) => n.nodeType === 3 && n.textContent.trim());
     if (!own.length) continue;
     const fs = parseFloat(cs.fontSize);
     const pad = 0.15 * fs;
-    let flagged = false;
+    const inline = (a) => { for (let n = el; n && n !== a; n = n.parentElement) if (getComputedStyle(n).display !== 'inline') return false; return true; };
+    let hFlag = false;
+    let vFlag = false;
     for (const n of own) {
       range.selectNodeContents(n);
       for (const r of range.getClientRects()) {
-        if (r.width < 1 || flagged) continue;
-        for (let a = el; a && a !== de; a = a.parentElement) {
+        if (r.width < 1) continue;
+        // The part of this line that can still be seen. A box that scrolls the text, a text-overflow ellipsis or a
+        // line clamp cuts it by design, so the visible part shrinks to that box and the outer boxes are tested with
+        // what is left. A box that cuts it any other way, even wholly, is a finding.
+        let hl = r.left;
+        let hr = r.right;
+        let vt = r.top - pad;
+        let vb = r.bottom + pad;
+        let hDone = false;
+        let vDone = false;
+        for (let a = el; a && a !== de && !(hDone && vDone); a = a.parentElement) {
           const acs = getComputedStyle(a);
-          if (acs.overflowY === 'visible') continue;
+          if (acs.overflowX === 'visible' && acs.overflowY === 'visible') continue;
           const ar = a.getBoundingClientRect();
           if (ar.width <= 1 || ar.height <= 1) continue;
-          if ((acs.overflowY === 'auto' || acs.overflowY === 'scroll') && a.scrollHeight > a.clientHeight + 1) continue;
-          if (acs.webkitLineClamp && acs.webkitLineClamp !== 'none') continue;
-          const top = ar.top + parseFloat(acs.borderTopWidth);
-          const bottom = ar.bottom - parseFloat(acs.borderBottomWidth);
-          if (r.bottom < top || r.top > bottom) continue; // scrolled or laid out away from this box: not cut by it
-          if (r.top - pad < top - 0.5 || r.bottom + pad > bottom + 0.5) { out.vclip.push(label(el) + ' inside ' + label(a) + ' text ' + Math.round(r.top) + '-' + Math.round(r.bottom) + ' box ' + Math.round(top) + '-' + Math.round(bottom)); flagged = true; break; }
+          const clamped = acs.webkitLineClamp && acs.webkitLineClamp !== 'none';
+          if (!vDone && acs.overflowY !== 'visible') {
+            const top = ar.top + parseFloat(acs.borderTopWidth);
+            const bottom = ar.bottom - parseFloat(acs.borderBottomWidth);
+            if (clamped || (scrolls(acs.overflowY) && a.scrollHeight > a.clientHeight + 1)) {
+              vt = Math.max(vt, top);
+              vb = Math.min(vb, bottom);
+              if (vt >= vb) vDone = true;
+            } else if (vt < top - 0.5 || vb > bottom + 0.5) {
+              if (!vFlag) out.vclip.push(label(el) + ' inside ' + label(a) + ' text ' + Math.round(r.top) + '-' + Math.round(r.bottom) + ' box ' + Math.round(top) + '-' + Math.round(bottom));
+              vFlag = true;
+              vDone = true;
+            }
+          }
+          if (!hDone && acs.overflowX !== 'visible') {
+            const left = ar.left + parseFloat(acs.borderLeftWidth);
+            const right = ar.right - parseFloat(acs.borderRightWidth);
+            if ((scrolls(acs.overflowX) && a.scrollWidth > a.clientWidth + 1) || (acs.textOverflow === 'ellipsis' && inline(a))) {
+              hl = Math.max(hl, left);
+              hr = Math.min(hr, right);
+              if (hl >= hr) hDone = true;
+            } else if (hl < left - 0.5 || hr > right + 0.5) {
+              if (!hFlag) out.hclip.push(label(el) + ' inside ' + label(a) + ' text ' + Math.round(r.left) + '-' + Math.round(r.right) + ' box ' + Math.round(left) + '-' + Math.round(right));
+              hFlag = true;
+              hDone = true;
+            }
+          }
         }
       }
     }
@@ -301,34 +339,39 @@ const errorPage = async (app, fn) => {
   await fn('error page', await app.eval(AUDIT));
 };
 
-const collect = (kind) => async (scheme) => {
-  const problems = [];
-  for (const s of SIZES) {
-    await withApp({ ...s, scheme }, async (app) => {
-      await eachAppScreen(app, (l, r) => { for (const x of r[kind]) problems.push(`${l} @ ${s.label}: ${x}`); });
-    });
-    await withApp({ ...s, scheme, mode: 'down' }, async (app) => {
-      await errorPage(app, (l, r) => { for (const x of r[kind]) problems.push(`${l} @ ${s.label}: ${x}`); });
-    });
-    await withApp({ ...s, scheme }, async (app) => {
-      await eachCatalogTab(app, (l, r) => { for (const x of r[kind]) problems.push(`${l} @ ${s.label}: ${x}`); });
-    });
+// One collection per colour scheme, shared by AC2 and the two AC3 tests: every size, app screen, error page
+// and catalog tab is opened once, and each problem is filed under its kind (scroll, hclip, vclip).
+const collected = new Map();
+const collectAll = (scheme) => {
+  if (!collected.has(scheme)) {
+    collected.set(scheme, (async () => {
+      const problems = { scroll: [], hclip: [], vclip: [] };
+      const add = (l, s, r) => { for (const kind of Object.keys(problems)) for (const x of r[kind]) problems[kind].push(`${l} @ ${s.label}: ${x}`); };
+      for (const s of SIZES) {
+        await withApp({ ...s, scheme }, (app) => eachAppScreen(app, (l, r) => add(l, s, r)));
+        await withApp({ ...s, scheme, mode: 'down' }, (app) => errorPage(app, (l, r) => add(l, s, r)));
+        await withApp({ ...s, scheme }, (app) => eachCatalogTab(app, (l, r) => add(l, s, r)));
+      }
+      return problems;
+    })());
   }
-  return problems;
+  return collected.get(scheme);
 };
 
 // ---------------------------------------------------------------- AC2
 for (const scheme of ['light', 'dark']) {
   test(`AC2: no horizontal scroll at 800 x 560 and at 200% zoom on any app screen or catalog tab (${scheme})`, UI, async () => {
-    assert.deepEqual(await collect('scroll')(scheme), []);
+    assert.deepEqual((await collectAll(scheme)).scroll, []);
   });
 }
 
 // ---------------------------------------------------------------- AC3
 for (const scheme of ['light', 'dark']) {
-  test(`AC3: no text is clipped sideways without an ellipsis, and no line is cut above or below (marks safe) (${scheme})`, UI, async () => {
-    const problems = [...(await collect('hclip')(scheme)), ...(await collect('vclip')(scheme))];
-    assert.deepEqual(problems, []);
+  test(`AC3: no text is clipped sideways without an ellipsis, by its own box or an ancestor (${scheme})`, UI, async () => {
+    assert.deepEqual((await collectAll(scheme)).hclip, []);
+  });
+  test(`AC3: no line is cut above or below, marks safe, by its own box or an ancestor (${scheme})`, UI, async () => {
+    assert.deepEqual((await collectAll(scheme)).vclip, []);
   });
 }
 
@@ -424,7 +467,58 @@ test('AC5: with the catalog Motion switch off nothing animates or transitions on
     assert.deepEqual(problems, []);
   }));
 
-test('AC5: control, with motion on and no reduced-motion setting the catalog does animate (so the checks above can fail)', UI, () =>
+// Each animation and transition the design system has, by name. Every selector must match something in the
+// catalog (or the check would pass for nothing), and with reduced motion none of the matches may move.
+const NAMED_MOTION = [
+  ['spinner', '.spinner'],
+  ['skeleton', '.skel span'],
+  ['pulse (dot, status light)', '.dot.pulse'],
+  ['toast entry', '.toast-region .toast'],
+  ['progress (indeterminate)', '.progress.indet > span'],
+  ['nav-rail width', '.rail'],
+  ['sidebar width', '.sidebar'],
+  ['tooltip', '.tip'],
+  ['transitions (tab, switch track, switch knob, button)', '.cat-tab, .cat-switch-track, .cat-switch-knob, .btn'],
+];
+const NAMED_PROBE = `(() => NAMED.map(([name, sel]) => {
+  const els = [...document.querySelectorAll(sel)];
+  const runs = (v) => v.split(',').some((x) => parseFloat(x) > 0);
+  const moving = els.filter((e) => { const cs = getComputedStyle(e); return (cs.animationName !== 'none' && runs(cs.animationDuration)) || (cs.transitionProperty !== 'none' && runs(cs.transitionDuration)); }).length;
+  return { name, count: els.length, moving };
+}))()`.replace('NAMED', JSON.stringify(NAMED_MOTION));
+
+// Opens every catalog tab, shows a toast from the live demo on the Feedback tab, and adds up the named probe.
+async function namedMotion(app) {
+  const total = new Map(NAMED_MOTION.map(([name]) => [name, { count: 0, moving: 0 }]));
+  const take = async () => { for (const r of await app.eval(NAMED_PROBE)) { const t = total.get(r.name); t.count += r.count; t.moving += r.moving; } };
+  for (const t of await catalogTabs(app)) {
+    await app.click(t);
+    await sleep(300);
+    if (t === 'Feedback') {
+      assert.ok(await app.click('Delete "Notes on FTS5"'), 'no live toast demo button on the Feedback tab');
+      await app.until(`!!document.querySelector('.toast-region .toast')`, 'a toast on screen');
+    }
+    await take();
+  }
+  return total;
+}
+
+test('AC5: with reduced motion emulated and the catalog Motion switch forced on, every ds animation and transition is still', UI, () =>
+  withApp({ reduce: true }, async (app) => {
+    await app.goto('/#/ui-catalog', CATALOG_READY);
+    // The catalog turns its own Motion switch off under reduced motion; force it on so only the ds rules are tested.
+    assert.ok(await app.eval(`(() => { const sw = document.querySelector('[role="switch"]'); if (sw.getAttribute('aria-checked') !== 'true') sw.click(); return sw.getAttribute('aria-checked') === 'true' && !document.documentElement.hasAttribute('data-motion'); })()`), 'Motion switch did not turn on');
+    const problems = [];
+    const total = await namedMotion(app);
+    for (const [name, t] of total) {
+      if (t.count === 0) problems.push(`${name}: nothing in the catalog matches, so it was not checked`);
+      if (t.moving > 0) problems.push(`${name}: ${t.moving} element(s) still animate or transition with reduced motion`);
+    }
+    for (const t of await catalogTabs(app)) { await app.click(t); await motionAudit(app, `reduced motion, Motion switch on, catalog ${t}`, problems); }
+    assert.deepEqual(problems, []);
+  }));
+
+test('AC5: control, with motion on and no reduced-motion setting every named animation and transition is present (so the check above can fail)', UI, () =>
   withApp({}, async (app) => {
     await app.goto('/#/ui-catalog', CATALOG_READY);
     let animated = 0;
@@ -434,4 +528,7 @@ test('AC5: control, with motion on and no reduced-motion setting the catalog doe
       animated += (await app.eval(MOTION)).running.length;
     }
     assert.ok(animated > 0, 'nothing animates even with motion on: spinner, skeleton or pulse missing from the catalog');
+    const total = await namedMotion(app);
+    const still = [...total].filter(([, t]) => t.moving === 0).map(([name]) => name);
+    assert.deepEqual(still, [], 'these parts do not move even with motion on, so the reduced-motion check proves nothing for them');
   }));

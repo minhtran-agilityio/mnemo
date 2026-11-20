@@ -35,6 +35,8 @@ a.cite:hover {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  /* A long unbroken title would make the list as wide as the title; it stays inside its container. */
+  max-width: 100%;
   margin: 0;
   padding: 0;
   list-style: none;

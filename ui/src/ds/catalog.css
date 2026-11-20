@@ -346,18 +346,56 @@
   font-size: var(--text-sm);
 }
 
-/* A wide sample (a menu, a card, a board) scrolls in its own box and never widens the page. */
-.ui-catalog .cat-ex {
+/* A sample that is really wide (a table, a board, a status bar, the narrow-width preview) takes
+   .is-wide and scrolls sideways in its own box. Every other example stays visible, so a live menu,
+   popover or tooltip is not clipped. The inline padding keeps the focus ring (and its offset) of the
+   first and last control inside the scroll box. */
+.ui-catalog .cat-ex.is-wide {
+  padding-inline: calc(var(--focus-ring) + var(--space-1));
   padding-block: var(--space-2);
+  margin-inline: calc(-1 * (var(--focus-ring) + var(--space-1)));
   overflow-x: auto;
   scrollbar-width: thin;
 }
 
-/* A clamped title keeps its hidden lines below the card, so a box that clips would flag them: the
-   cards shrink to the column instead and need no scroll box. */
-.ui-catalog .cat-ex:has(.views) {
-  padding-block: 0;
-  overflow: visible;
+/* In a very small window (200% zoom at the smallest size) the example column is about 60px wide and
+   almost any control is wider, so there every example scrolls in its own box and keeps the width its
+   parts need. A live menu or popover that opens past the box scrolls inside it only there; at 720px
+   and wider only the examples marked wide scroll. */
+@media (max-width: 720px) {
+  .ui-catalog .cat-ex {
+    /* The focus ring and its offset (5px) fit, and so does a tooltip that is centred on a small
+       control at the left edge (about 14px). */
+    padding-inline: var(--space-4);
+    padding-block: var(--space-2);
+    margin-inline: calc(-1 * var(--space-4));
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .ui-catalog .cat-ex > .st {
+    min-width: min-content;
+  }
+
+  /* A stacked list, card or board keeps room for an icon, some title and its meta. */
+  .ui-catalog .cat-ex.col > * {
+    min-width: var(--size-basis-column);
+  }
+}
+
+.ui-catalog .cat-switches {
+  /* The tab bar is the one place where a label may break inside a word: at 200% zoom it has about
+     90px. Body text keeps break-word. */
+  overflow-wrap: anywhere;
+}
+
+.ui-catalog .cat-ex.is-wide > .st {
+  min-width: min-content;
+}
+
+/* Room above a live tooltip, so it is drawn inside its example box and a scroll box does not cut it. */
+.ui-catalog .tip-room {
+  padding-top: var(--space-6);
 }
 
 .ui-catalog .cat-ex .seg {

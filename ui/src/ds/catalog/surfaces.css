@@ -5,7 +5,10 @@
   display: flex;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  /* The window is a fixed-width sample: in a column narrower than it, it scrolls sideways instead of
+     cutting the sidebar or the rail. The corners still clip. */
+  overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid var(--edge);
   border-radius: var(--radius-lg);
   background: var(--paper);

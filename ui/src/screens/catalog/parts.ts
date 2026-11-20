@@ -28,7 +28,9 @@ export interface TabContext {
 export type TabRenderer = (panel: HTMLElement, ctx: TabContext) => void;
 
 /** What a row renderer returns: the live examples, or the examples and a layout choice. */
-export type RowExamples = Node[] | { nodes: Node[]; column?: boolean };
+export type RowExamples =
+  | Node[]
+  | { nodes: Node[]; column?: boolean; wide?: boolean };
 
 /** Draws the examples of one built entry. */
 export type RowRenderer = (ctx: TabContext) => RowExamples;
@@ -100,13 +102,14 @@ export function state(
 
 /**
  * One row: on the left the label, the source tag and the notes; on the right the examples.
- * `column` stacks the examples instead of letting them wrap.
+ * `column` stacks the examples instead of letting them wrap. `wide` marks examples that are really
+ * wider than a small window (a table, a board, a status bar): they scroll sideways in their own box.
  */
 export function catRow(
   doc: Document,
   entry: CatalogEntry,
   examples: Node[],
-  options: { column?: boolean } = {},
+  options: { column?: boolean; wide?: boolean } = {},
 ): HTMLElement {
   const row = el(doc, "div", "cat-row");
   row.dataset.part = entry.name;
@@ -121,7 +124,13 @@ export function catRow(
     meta.append(
       el(doc, "p", "cat-states", `States: ${entry.states.join(", ")}`),
     );
-  const ex = el(doc, "div", options.column ? "cat-ex col" : "cat-ex");
+  const ex = el(
+    doc,
+    "div",
+    ["cat-ex", options.column ? "col" : "", options.wide ? "is-wide" : ""]
+      .filter(Boolean)
+      .join(" "),
+  );
   ex.append(...examples);
   row.append(meta, ex);
   return row;
@@ -161,6 +170,7 @@ export function entryRows<T extends CatalogTab>(
     box.append(
       catRow(doc, entry, parts.nodes, {
         column: "column" in parts && parts.column,
+        wide: "wide" in parts && parts.wide,
       }),
     );
   }
