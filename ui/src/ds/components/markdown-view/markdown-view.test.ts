@@ -146,17 +146,62 @@ test("unclosed marks and deep nesting stay bounded and keep their text", () => {
   expect(v.querySelectorAll("blockquote").length).toBeLessThanOrEqual(9);
 });
 
-const clickKinds = ["click", "auxclick", "contextmenu"] as const;
+const linkOf = (source: string, extra = {}) =>
+  view(source, extra).querySelector("a") as HTMLAnchorElement;
 
-test.each(clickKinds)("a %s on a link is stopped and reported", (kind) => {
+test("a click and a middle click are stopped and reported", () => {
   const onLinkClick = vi.fn();
-  const a = view("[x](https://example.com/a)", { onLinkClick }).querySelector(
-    "a",
-  ) as HTMLAnchorElement;
-  const event = new MouseEvent(kind, { bubbles: true, cancelable: true });
+  const a = linkOf("[x](https://example.com/a)", { onLinkClick });
+  const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+  a.dispatchEvent(click);
+  const middle = new MouseEvent("auxclick", {
+    bubbles: true,
+    cancelable: true,
+    button: 1,
+  });
+  a.dispatchEvent(middle);
+  expect(click.defaultPrevented).toBe(true);
+  expect(middle.defaultPrevented).toBe(true);
+  expect(onLinkClick).toHaveBeenCalledTimes(2);
+});
+
+test("another mouse button is stopped but not reported as a click", () => {
+  const onLinkClick = vi.fn();
+  const a = linkOf("[x](https://example.com/a)", { onLinkClick });
+  const right = new MouseEvent("auxclick", {
+    bubbles: true,
+    cancelable: true,
+    button: 2,
+  });
+  a.dispatchEvent(right);
+  expect(right.defaultPrevented).toBe(true);
+  expect(onLinkClick).not.toHaveBeenCalled();
+});
+
+test("the context menu goes to its own callback and the native menu is stopped", () => {
+  const onLinkClick = vi.fn();
+  const onLinkMenu = vi.fn();
+  const a = linkOf("[x](https://example.com/a)", { onLinkClick, onLinkMenu });
+  const event = new MouseEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+  });
   a.dispatchEvent(event);
   expect(event.defaultPrevented).toBe(true);
-  expect(onLinkClick).toHaveBeenCalledWith("https://example.com/a", event);
+  expect(onLinkMenu).toHaveBeenCalledWith("https://example.com/a", event);
+  expect(onLinkClick).not.toHaveBeenCalled();
+});
+
+test("the native context menu stays only when the screen allows it", () => {
+  const a = linkOf("[x](https://example.com/a)", {
+    allowNativeLinkMenu: true,
+  });
+  const event = new MouseEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+  });
+  a.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(false);
 });
 
 test("a ctrl click is reported and not followed", () => {
@@ -234,4 +279,96 @@ test("underscores inside words are not emphasis, also inside bold", () => {
   expect(v.querySelector("em")?.textContent).toBe("real");
   expect(v.querySelector("strong")?.textContent).toBe("use my_var_name here");
   expect(v.textContent).toContain("snake_case_name");
+});
+
+test("a heading with a long run of spaces is read in one pass", () => {
+  const gap = " ".repeat(20000);
+  const v = view(`# a${gap}b`);
+  expect(v.querySelector("h2")?.textContent).toBe(`a${gap}b`);
+});
+
+test("other lines with long runs of spaces still render", () => {
+  const gap = " ".repeat(20000);
+  for (const line of [`- a${gap}b`, `- ${gap}x`, `-${gap}-${gap}x`]) {
+    const v = view(line);
+    expect(v.querySelector("li")).not.toBeNull();
+    expect(v.textContent?.replace(/\s+/g, "")).toMatch(/[abx]$/);
+  }
+  expect(view(`\`\`\`${gap}x`).querySelector("pre")).not.toBeNull();
+});
+
+test("a paragraph past the inline limit shows as plain text", () => {
+  const v = view(`*a* ${"x ".repeat(6000)}`);
+  expect(v.querySelector("em")).toBeNull();
+  expect(v.querySelector("p")?.textContent?.startsWith("*a* x")).toBe(true);
+});
+
+test("mixed lists and quotes stop at the depth cap and keep their text", () => {
+  let lines = ["x"];
+  for (let k = 0; k < 4000; k++) {
+    lines =
+      k % 2
+        ? lines.map((l) => `> ${l}`)
+        : ["- a", ...lines.map((l) => `  ${l}`)];
+  }
+  const v = view(lines.join("\n"));
+  expect(v.textContent).toContain("x");
+  let deepest = 0;
+  for (const node of v.querySelectorAll("*")) {
+    let d = 0;
+    for (let n: Element | null = node; n; n = n.parentElement) d += 1;
+    deepest = Math.max(deepest, d);
+  }
+  expect(deepest).toBeLessThan(80);
+});
+
+test("tabs inside code stay as typed and tab indents nest lists", () => {
+  const v = view("```\n\tindented\n```\n\nuse `a\tb` here\n\n- a\n\t- b");
+  expect(v.querySelector("pre")?.textContent).toBe("\tindented");
+  expect(v.querySelector("p code")?.textContent).toBe("a\tb");
+  expect(v.querySelectorAll("ul ul")).toHaveLength(1);
+});
+
+test("a very long list of blocks is appended without a spread", () => {
+  const v = view("---\n".repeat(150000));
+  expect(v.children).toHaveLength(150000);
+}, 60000);
+
+test("a link label keeps its marks and an address keeps one level of parentheses", () => {
+  const a = linkOf("[**docs**](https://en.wikipedia.org/wiki/Tab_(key))");
+  expect(a.getAttribute("href")).toBe(
+    "https://en.wikipedia.org/wiki/Tab_(key)",
+  );
+  expect(a.querySelector("strong")?.textContent).toBe("docs");
+  expect(a.textContent).not.toContain("*");
+});
+
+test("a link label holds no second link", () => {
+  const v = view("[see [x](https://a.test)](https://b.test)");
+  expect(v.querySelector("a a")).toBeNull();
+});
+
+test("an unclosed fence in an item ends where the indent falls back", () => {
+  const v = view("- a\n  ```\n  code\nnext paragraph");
+  expect(v.querySelector("li pre code")?.textContent).toBe("code");
+  const p = v.querySelector(":scope > p");
+  expect(p?.textContent).toBe("next paragraph");
+});
+
+test("a rule inside a list ends the list and is not a nested item", () => {
+  const v = view("- a\n- - -\n- b\n\n* * *");
+  expect(v.querySelectorAll("hr")).toHaveLength(2);
+  expect(v.querySelectorAll("ul")).toHaveLength(2);
+  expect(v.querySelectorAll("li")).toHaveLength(2);
+});
+
+test("a task with no text is still a task", () => {
+  const li = view("- [x]\n- [ ]").querySelectorAll("li");
+  expect(li).toHaveLength(2);
+  expect(li[0].querySelector("[role=img]")?.getAttribute("aria-label")).toBe(
+    "Done",
+  );
+  expect(li[1].querySelector("[role=img]")?.getAttribute("aria-label")).toBe(
+    "Not done",
+  );
 });
