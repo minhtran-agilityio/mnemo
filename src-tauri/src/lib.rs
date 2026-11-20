@@ -177,6 +177,7 @@ pub fn run() {
             commands::list_ideas,
             commands::update_idea,
             commands::delete_idea,
+            commands::turn_idea_into_project,
             commands::add_project,
             commands::get_project,
             commands::list_projects,
