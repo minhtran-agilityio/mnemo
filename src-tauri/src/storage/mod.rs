@@ -53,6 +53,11 @@ impl Storage {
                 "could not turn on WAL mode (got {mode})"
             )));
         }
+        // WAL with NORMAL syncs the log less often, so a commit holds the write lock for
+        // a shorter time and a busy disk does not push a waiting writer past the busy
+        // timeout. A power cut can lose the last commits; it cannot corrupt the file.
+        conn.execute_batch("PRAGMA synchronous = NORMAL")
+            .map_err(|e| StorageError::Open(e.to_string()))?;
         migrate::run(&mut conn, migrate::MIGRATIONS)?;
         Ok(Storage { conn })
     }
@@ -69,6 +74,13 @@ impl Storage {
         Ok(self
             .conn
             .query_row("PRAGMA busy_timeout", [], |r| r.get(0))?)
+    }
+
+    /// The synchronous level: 0 OFF, 1 NORMAL, 2 FULL. Expected to be 1.
+    pub fn synchronous_level(&self) -> Result<u32, StorageError> {
+        Ok(self
+            .conn
+            .query_row("PRAGMA synchronous", [], |r| r.get(0))?)
     }
 
     /// Rolls back a transaction left open by code that panicked while holding the
@@ -141,6 +153,7 @@ mod tests {
         assert!(p.exists());
         assert_eq!(s.journal_mode().unwrap(), "wal");
         assert_eq!(s.busy_timeout_ms().unwrap(), 5000);
+        assert_eq!(s.synchronous_level().unwrap(), 1, "NORMAL");
         assert_eq!(s.schema_version().unwrap(), 4);
     }
 

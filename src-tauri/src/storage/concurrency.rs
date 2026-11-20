@@ -1,6 +1,10 @@
 //! Two-writer safety. Each writer (the window, a background job) opens its own
 //! `Storage`, so it has its own connection. The tests prove that parallel writers
-//! lose nothing and never get a "database is locked" error.
+//! lose nothing and never get a "database is locked" error. They run on the exact
+//! connection `Storage::open` returns, with no setting changed.
+//!
+//! This replaces the older two-writer test in `items.rs` (#14): the same check
+//! (two handles, one table, nothing lost) with more cases.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -46,10 +50,6 @@ fn run_writers<R: Send + 'static>(
             let barrier = Arc::clone(&barrier);
             thread::spawn(move || {
                 let s = Storage::open(&path).unwrap();
-                // Test only: no fsync per commit. On a busy disk an fsync can hold the
-                // write lock for longer than the 5 s busy timeout, which would make this
-                // test depend on the machine. The locking under test is unchanged.
-                s.conn.execute_batch("PRAGMA synchronous = OFF").unwrap();
                 barrier.wait();
                 job(s)
             })
