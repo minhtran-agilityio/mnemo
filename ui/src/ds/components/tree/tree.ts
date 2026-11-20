@@ -59,7 +59,16 @@ export interface TreeForcedState {
 }
 
 export interface TreeActionsOptions {
-  readonly onAction: (event: TreeActionEvent) => void;
+  /**
+   * The screen does the work. For "rename" and "create" it may refuse: return a message (or a
+   * promise of one) and the tree reverts the name and shows the message at the field, with the
+   * typed name kept. A rejected promise shows "Could not save. Try again." Return nothing when the
+   * work is done. The tree also checks names it has seen since it was drawn (renames and creates),
+   * but the screen should still re-render the tree from its own data after each change.
+   */
+  readonly onAction: (
+    event: TreeActionEvent,
+  ) => void | string | Promise<string | undefined | void>;
   /** An extra rule for a name. Return the message to show at the field, or nothing. */
   readonly validateName?: (
     name: string,
@@ -166,6 +175,9 @@ function menuFor(
     haspopup: "menu",
     signal: build.actions?.signal,
     firstFocus: () => rows[0] ?? null,
+    held:
+      build.actions?.forced?.state === "menu" &&
+      build.actions.forced.id === idOf(node),
   });
   // Escape closes the menu (the popover does that); focus goes back to the node, not the "..." button.
   pop.anchor.addEventListener("keydown", (event) => {
@@ -230,9 +242,31 @@ function buildNodes(
 type Edit = (
   mode: "create" | "rename",
   target: HTMLButtonElement | null,
-  options?: { value?: string; focus?: boolean },
+  options?: {
+    value?: string;
+    focus?: boolean;
+    /** A message to show at the field at once (a refusal by the screen). */
+    error?: string;
+    /** The catalog's held example: leaving the field does not close it. */
+    held?: boolean;
+  },
 ) => void;
 
+/** Without actions: the plain list, as before. */
+export function createTree(
+  doc: Document,
+  label: string,
+  nodes: readonly TreeNode[],
+  onSelect?: (label: string) => void,
+): HTMLUListElement;
+/** With actions: a box that holds the list, the empty state and the New label button. */
+export function createTree(
+  doc: Document,
+  label: string,
+  nodes: readonly TreeNode[],
+  onSelect: ((label: string) => void) | undefined,
+  actions: TreeActionsOptions,
+): HTMLElement;
 export function createTree(
   doc: Document,
   label: string,
@@ -243,6 +277,8 @@ export function createTree(
   // The actions need the finished tree (to find a row), so `run` reads `startEdit` when called.
   let startEdit: Edit = () => {};
   let openField: HTMLInputElement | null = null;
+  // Names created since the tree was drawn, by parent (null: top level), for the duplicate check.
+  const created = new Map<TreeNode | null, string[]>();
   const build: Build = {
     meta: new WeakMap(),
     menus: new WeakMap(),
@@ -431,13 +467,13 @@ export function createTree(
     const problem = (typed: string): string | undefined => {
       const name = typed.trim();
       if (!name) return "Type a name before you save.";
-      if (
-        siblings.some(
-          (s) =>
-            labelOf(build, s) !== current &&
-            nameKey(labelOf(build, s)) === nameKey(name),
-        )
-      )
+      const taken = [
+        ...siblings
+          .map((s) => labelOf(build, s))
+          .filter((label) => label !== current),
+        ...(mode === "create" ? (created.get(meta?.node ?? null) ?? []) : []),
+      ];
+      if (taken.some((label) => nameKey(label) === nameKey(name)))
         return `A label named "${name}" already exists here.`;
       return actions.validateName?.(name, mode);
     };
@@ -456,7 +492,11 @@ export function createTree(
         if (createdList) list?.remove();
       }
       sync();
-      if (returnFocus) (target ?? newLabel).focus();
+      // On an empty tree the New label button is hidden, so focus goes to the empty state's.
+      if (returnFocus)
+        (
+          target ?? (newLabel.hidden ? empty.querySelector("button") : newLabel)
+        )?.focus();
     };
     const save = () => {
       const found = problem(input.value);
@@ -466,38 +506,65 @@ export function createTree(
         return;
       }
       const name = input.value.trim();
-      if (mode === "rename" && meta && target) {
-        if (name !== current) {
-          // Keep the tree's own state in step: the shown name, the menu names and later checks.
-          build.names.set(meta.node, name);
-          const text = target.querySelector<HTMLElement>(".tname");
-          if (text) {
-            text.textContent = name;
-            text.title = name;
-          }
-          const anchor = build.menus.get(target)?.anchor;
-          anchor
-            ?.querySelector(".tmore")
-            ?.setAttribute("aria-label", `Actions for ${name}`);
-          anchor
-            ?.querySelector(".tmenu")
-            ?.setAttribute("aria-label", `Actions for ${name}`);
-          actions.onAction({
-            action: "rename",
-            id: idOf(meta.node),
-            label: current,
-            name,
-          });
-        }
-      } else {
-        actions.onAction({
-          action: "create",
-          id: meta ? idOf(meta.node) : null,
-          label: meta ? labelOf(build, meta.node) : "",
-          name,
-        });
+      if (mode === "rename" && name === current) {
+        close(true);
+        return;
       }
+      // Keep the tree's own state in step: the shown name, the menu names and later checks.
+      const showName = (text: string) => {
+        if (!meta || !target) return;
+        if (text === meta.node.label) build.names.delete(meta.node);
+        else build.names.set(meta.node, text);
+        const shown = target.querySelector<HTMLElement>(".tname");
+        if (shown) {
+          shown.textContent = text;
+          shown.title = text;
+        }
+        const anchor = build.menus.get(target)?.anchor;
+        for (const sel of [".tmore", ".tmenu"])
+          anchor
+            ?.querySelector(sel)
+            ?.setAttribute("aria-label", `Actions for ${text}`);
+      };
+      const parent = meta?.node ?? null;
+      const outcome = actions.onAction(
+        mode === "rename" && meta
+          ? { action: "rename", id: idOf(meta.node), label: current, name }
+          : {
+              action: "create",
+              id: meta ? idOf(meta.node) : null,
+              label: meta ? labelOf(build, meta.node) : "",
+              name,
+            },
+      );
+      // The screen refused at once: nothing changes, the message shows at the field.
+      if (typeof outcome === "string") {
+        showError(outcome);
+        input.focus();
+        return;
+      }
+      if (mode === "rename") showName(name);
+      else created.set(parent, [...(created.get(parent) ?? []), name]);
       close(true);
+      // The screen refused later (a promise): undo the change and give the field back, with the
+      // typed name and the reason.
+      if (outcome instanceof Promise) {
+        const undo = (reason: string) => {
+          if (mode === "rename") showName(current);
+          else
+            created.set(
+              parent,
+              (created.get(parent) ?? []).filter((n) => n !== name),
+            );
+          startEdit(mode, target, { value: name, error: reason });
+        };
+        outcome.then(
+          (reason) => {
+            if (typeof reason === "string") undo(reason);
+          },
+          () => undo("Could not save. Try again."),
+        );
+      }
     };
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
@@ -517,7 +584,7 @@ export function createTree(
     // only Escape or Enter ends it, so a typed name is never lost to a stray click.
     edit.addEventListener("focusout", (e) => {
       const to = e.relatedTarget;
-      if (to instanceof Node && edit.contains(to)) return;
+      if (options.held || (to instanceof Node && edit.contains(to))) return;
       const typed = input.value.trim();
       if (typed === "" || typed === current) close(false);
       else {
@@ -542,7 +609,8 @@ export function createTree(
       input.focus();
       input.select();
     }
-    if (options.value !== undefined) showError(problem(options.value));
+    if (options.error !== undefined) showError(options.error);
+    else if (options.value !== undefined) showError(problem(options.value));
   };
 
   const forced = actions.forced;
@@ -555,14 +623,15 @@ export function createTree(
     );
     if (btn) {
       if (forced.state === "renaming" || forced.state === "error")
-        startEdit("rename", btn, { value: forced.value, focus: false });
+        startEdit("rename", btn, {
+          value: forced.value,
+          focus: false,
+          held: true,
+        });
       else if (forced.state === "menu") {
-        // Held open through the popover itself, so the first click on "..." closes it. Focus
-        // stays where it was; the menu closes on the first click outside it, as any menu does.
-        const prev = doc.activeElement;
+        // The popover was built held for this node (see menuFor): open through it, so a click on
+        // "..." or Escape closes it, and no outside click or focus move does.
         build.menus.get(btn)?.open();
-        const now = doc.activeElement;
-        if (now && now !== prev) (now as HTMLElement).blur();
       } else btn.classList.add(`is-${forced.state}`);
     }
   }

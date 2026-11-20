@@ -122,7 +122,9 @@ const withActions = (
 ) => {
   const events: TreeActionEvent[] = [];
   const t = createTree(document, "Labels", list, undefined, {
-    onAction: (e) => events.push(e),
+    onAction: (e) => {
+      events.push(e);
+    },
     ...extra,
   });
   document.body.append(t);
@@ -291,16 +293,115 @@ test("error messages have unique ids", () => {
   b.t.remove();
 });
 
-test("the held-open menu is the popover's own: a click on its button closes it", () => {
+test("the held-open menu is the popover's own: a click on its button closes it", async () => {
   const { t } = withActions(actionNodes, {
     forced: { id: "Mnemo", state: "menu" },
   });
+  await new Promise((r) => setTimeout(r, 0));
   const trigger = node(t, "Mnemo")
     .closest(".trow")
     ?.querySelector<HTMLButtonElement>(".tmore");
   expect(trigger?.getAttribute("aria-expanded")).toBe("true");
   trigger?.click();
   expect(trigger?.getAttribute("aria-expanded")).toBe("false");
+  t.remove();
+});
+
+test("without actions createTree is typed as the plain list; with actions as the box", () => {
+  const plain: HTMLUListElement = createTree(document, "x", []);
+  expect(plain.tagName).toBe("UL");
+  const box: HTMLElement = createTree(document, "x", [], undefined, {
+    onAction: () => {},
+  });
+  expect(box.classList.contains("tree-box")).toBe(true);
+});
+
+test("on an empty tree focus returns to the empty state button after Escape and after a save", () => {
+  const { t } = withActions([]);
+  const emptyButton = t.querySelector<HTMLButtonElement>(".state-box button");
+  emptyButton?.click();
+  key(field(t), "Escape");
+  expect(document.activeElement).toBe(emptyButton);
+  emptyButton?.click();
+  key(typeIn(t, "Work"), "Enter");
+  expect(document.activeElement).toBe(emptyButton);
+  t.remove();
+});
+
+test("a create checks names created since the tree was drawn", () => {
+  const { t } = withActions();
+  const newLabel = t.querySelector<HTMLButtonElement>(".tree-new");
+  newLabel?.click();
+  key(typeIn(t, "Personal"), "Enter");
+  newLabel?.click();
+  key(typeIn(t, "personal"), "Enter");
+  expect(t.querySelector(".err-text")?.textContent).toContain("already exists");
+  t.remove();
+});
+
+test("a held renaming example stays open when focus leaves", () => {
+  const { t } = withActions(actionNodes, {
+    forced: { id: "Mnemo", state: "renaming" },
+  });
+  field(t).dispatchEvent(
+    new FocusEvent("focusout", { bubbles: true, relatedTarget: null }),
+  );
+  expect(t.querySelector(".tedit")).not.toBeNull();
+  t.remove();
+});
+
+test("the screen can refuse a rename at once: the name is kept out and the message shows", () => {
+  const { t } = withActions(actionNodes, {
+    onAction: () => "Could not save: the file is locked.",
+  });
+  const mnemo = node(t, "Mnemo");
+  key(mnemo, "F2");
+  key(typeIn(t, "Mnemo 2"), "Enter");
+  expect(t.querySelector(".tedit .err-text")?.textContent).toContain(
+    "file is locked",
+  );
+  expect(mnemo.querySelector(".tname")?.textContent).toBe("Mnemo");
+  expect(field(t).value).toBe("Mnemo 2");
+  t.remove();
+});
+
+test("a refusal that comes later reverts the rename and reopens the field with the reason", async () => {
+  const { t } = withActions(actionNodes, {
+    onAction: () => Promise.resolve("Could not save: the file is locked."),
+  });
+  const mnemo = node(t, "Mnemo");
+  key(mnemo, "F2");
+  key(typeIn(t, "Mnemo 2"), "Enter");
+  await new Promise((r) => setTimeout(r, 0));
+  expect(mnemo.querySelector(".tname")?.textContent).toBe("Mnemo");
+  expect(field(t).value).toBe("Mnemo 2");
+  expect(t.querySelector(".tedit .err-text")?.textContent).toContain(
+    "file is locked",
+  );
+  key(field(t), "Escape");
+  expect(
+    mnemo.closest(".trow")?.querySelector(".tmore")?.getAttribute("aria-label"),
+  ).toBe("Actions for Mnemo");
+  t.remove();
+});
+
+test("a rejected save reverts a create and shows a plain line", async () => {
+  const { t } = withActions(actionNodes, {
+    onAction: () => Promise.reject(new Error("boom")),
+  });
+  t.querySelector<HTMLButtonElement>(".tree-new")?.click();
+  key(typeIn(t, "Personal"), "Enter");
+  await new Promise((r) => setTimeout(r, 0));
+  expect(t.querySelector(".tedit .err-text")?.textContent).toContain(
+    "Try again",
+  );
+  // The name is free again.
+  key(field(t), "Escape");
+  t.querySelector<HTMLButtonElement>(".tree-new")?.click();
+  key(typeIn(t, "Personal"), "Enter");
+  expect(t.querySelector(".err-text")?.textContent ?? "").not.toContain(
+    "already exists",
+  );
   t.remove();
 });
 
@@ -389,7 +490,7 @@ test("Shift+F10 and the context menu key open the node menu; Escape closes it ba
   t.remove();
 });
 
-test("forced states show renaming, the error, the open menu and a held hover", () => {
+test("forced states show renaming, the error, the open menu and a held hover", async () => {
   const rename = withActions(actionNodes, {
     forced: { id: "Mnemo", state: "renaming" },
   });
@@ -403,6 +504,7 @@ test("forced states show renaming, the error, the open menu and a held hover", (
   const menu = withActions(actionNodes, {
     forced: { id: "Mnemo", state: "menu" },
   });
+  await new Promise((r) => setTimeout(r, 0));
   expect(menu.t.querySelectorAll(".tmenu:not([hidden])")).toHaveLength(1);
   menu.t.remove();
   const hover = withActions(actionNodes, {

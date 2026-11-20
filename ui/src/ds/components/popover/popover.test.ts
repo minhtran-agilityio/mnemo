@@ -21,6 +21,25 @@ test("starts closed and wires aria-expanded, aria-controls and aria-haspopup", (
   expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
 });
 
+test("a held panel stays open on an outside click, and its trigger still closes it", () => {
+  const trigger = createButton(document, { label: "Why?" });
+  const panel = document.createElement("div");
+  const pop = createPopover(document, {
+    trigger,
+    panel,
+    haspopup: "dialog",
+    held: true,
+  });
+  document.body.append(pop.anchor);
+  pop.open();
+  expect(panel.hidden).toBe(false);
+  document.body.click();
+  expect(panel.hidden).toBe(false);
+  trigger.click();
+  expect(panel.hidden).toBe(true);
+  pop.anchor.remove();
+});
+
 test("click opens, click again closes", () => {
   const { trigger, panel } = make();
   trigger.click();
