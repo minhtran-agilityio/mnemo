@@ -4,9 +4,11 @@ import "./style.css";
 import "./screens/settings/settings.css";
 import "./screens/ideas/ideas.css";
 import { getVersion } from "@tauri-apps/api/app";
+import { createToastRegion, type ToastRegion } from "./ds";
 import { renderEmptyState } from "./frame/empty-state";
+import { keepPlace } from "./frame/keep-place";
 import { EVERYTHING_ID, isRoadmapItem, UI_CATALOG_ID } from "./frame/nav";
-import { createRouter } from "./frame/router";
+import { createRouter, type Route } from "./frame/router";
 import {
   createSidebarFromSaved,
   ReadTimeoutError,
@@ -23,17 +25,26 @@ import {
 } from "./frame/theme";
 import { pingErrorText } from "./ping-text";
 import { renderIdeas } from "./screens/ideas/ideas";
+import { renderNotes } from "./screens/notes/notes";
 import { renderSettings } from "./screens/settings/settings";
 import {
   addIdea,
   checkAiHealth,
+  countLabelDeleteMoves,
+  createLabel,
+  deleteLabel,
   errorMessage,
   getAiHealth,
   getSetting,
   listBookmarks,
   listIdeas,
+  listLabelledNotes,
+  listLabels,
   listNotes,
+  moveLabel,
   ping,
+  renameLabel,
+  saveLabelledNote,
   setSetting,
   turnIdeaIntoProject,
   updateIdea,
@@ -44,6 +55,8 @@ import { versionErrorText, versionText } from "./version-text";
 const COLLAPSED_KEY = "sidebar_collapsed";
 /** The id of the sidebar item that opens Settings. */
 const SETTINGS_ID = "settings";
+/** The id of the sidebar item that opens Notes. */
+const NOTES_ID = "notes";
 /** The id of the sidebar item that opens Ideas (#34). */
 const IDEAS_ID = "ideas";
 
@@ -142,15 +155,56 @@ async function showVersion(): Promise<void> {
 
 /** Undoes what the open screen changed outside itself, before the next screen opens. */
 let leaveScreen: (() => void) | null = null;
+/**
+ * Asks the open screen whether it may close (Notes with unsaved changes asks the owner).
+ * Null when the screen can always close.
+ */
+let canLeaveScreen: (() => Promise<boolean>) | null = null;
+/** The address of the screen on show, so "Keep editing" can put it back. */
+let shownHash = "";
 /** Counts route changes, so a screen that finishes loading after the owner left is not shown. */
 let routeCount = 0;
+
+/** The app's one toast region, added to the page the first time a screen needs it. */
+let toastRegion: ToastRegion | null = null;
+function toast(message: string): void {
+  if (!toastRegion) {
+    toastRegion = createToastRegion();
+    document.body.append(toastRegion.element);
+  }
+  toastRegion.show(message);
+}
 
 async function start(): Promise<void> {
   if (!screen || !content || !frame) return;
   const router = createRouter(window, (route) => {
     const visit = ++routeCount;
+    // The address has already changed. A screen that must ask first keeps the old screen up
+    // until the owner answers; a newer route change while it asks wins (visit check).
+    const ask = canLeaveScreen;
+    if (ask) {
+      const back = shownHash;
+      void ask().then((ok) => {
+        if (visit !== routeCount) return;
+        if (ok) {
+          canLeaveScreen = null;
+          showRoute(route, visit);
+        } else {
+          // Stay: put the address back without a hashchange and without rewriting history.
+          keepPlace(window, back);
+        }
+      });
+      return;
+    }
+    showRoute(route, visit);
+  });
+
+  function showRoute(route: Route, visit: number): void {
+    if (!screen) return;
     leaveScreen?.();
     leaveScreen = null;
+    canLeaveScreen = null;
+    shownHash = window.location.hash;
     const { item } = route;
     sidebar.setCurrent(item.id);
     // The UI Catalog is dev only: a release build drops this branch and the catalog code with it,
@@ -172,7 +226,21 @@ async function start(): Promise<void> {
         });
       return;
     }
-    if (item.id === SETTINGS_ID) {
+    if (item.id === NOTES_ID) {
+      const notes = renderNotes(screen, {
+        listLabelledNotes,
+        listLabels,
+        saveLabelledNote,
+        createLabel,
+        renameLabel,
+        moveLabel,
+        deleteLabel,
+        countLabelDeleteMoves,
+        toast,
+      });
+      leaveScreen = notes.leave;
+      canLeaveScreen = notes.canLeave;
+    } else if (item.id === SETTINGS_ID) {
       renderSettings(screen, {
         getTheme: () => currentTheme,
         applyTheme: useTheme,
@@ -202,7 +270,7 @@ async function start(): Promise<void> {
       screen.textContent = `${item.label} has no screen yet.`;
     }
     document.title = `${item.label} - Mnemo`;
-  });
+  }
   // The theme and the sidebar state are read first, so the frame is built in its final state
   // and never shows in the wrong theme.
   const themeLoaded = loadTheme();

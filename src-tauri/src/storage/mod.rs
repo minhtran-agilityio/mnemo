@@ -5,6 +5,7 @@ mod error;
 pub mod files;
 pub mod ideas;
 pub mod items;
+pub mod labels;
 pub mod links;
 mod migrate;
 pub mod record;
