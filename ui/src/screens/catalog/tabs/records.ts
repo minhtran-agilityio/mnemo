@@ -15,6 +15,7 @@ import {
   createLinkCard,
   createLinkView,
   createList,
+  createMarkdownView,
   createMetaLine,
   createMissingCite,
   createNoteRow,
@@ -248,6 +249,26 @@ export const renderRecords: TabRenderer = (panel, ctx) => {
         ),
       ),
     ],
+    "markdown view": () => {
+      const sample =
+        "# Kế hoạch tuần 47\n- [ ] Viết test cho nhãn lồng nhau\n- [x] Đọc lại DEC-03\n\n```ts\nconst x = 1;\n```\n> Ghi chú: <script>alert(1)</script> <img src=x onerror=alert(1)>";
+      const rich =
+        "## Marks and lists\nSome **bold**, some *italic* and `inline code`, then a [link](https://example.com/docs) that only reports its click.\n\n- one\n  - nested\n    - deeper\n- two\n\n1. first\n2. second\n\n---\n\nAfter the rule.";
+      const long = `${"averyveryveryverylongwordwithoutspaces".repeat(4)} and a URL https://example.com/${"a/very/long/path/".repeat(8)}\n\n\`\`\`ts\nconst wide = "${"x".repeat(120)}";\n\`\`\``;
+      const md = (source: string, caption: string, extra = {}) =>
+        state(doc, caption, createMarkdownView(doc, { source, ...extra }), {
+          grow: true,
+        });
+      return {
+        nodes: [
+          md(sample, "default, sample with script and onerror shown as text"),
+          md(rich, "marks, lists, rule and a link"),
+          md("", "empty"),
+          md(long, "overflow: long word, long URL, wide code"),
+        ],
+        column: true,
+      };
+    },
     "metadata line": () => {
       const apps = el(doc, "div", "rec-hstack");
       for (const id of Object.keys(APP_LABELS) as AppId[])

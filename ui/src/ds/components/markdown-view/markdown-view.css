@@ -1,0 +1,128 @@
+/* Markdown view. Tokens only. Long lines, URLs and code stay inside the part. */
+.md {
+  max-width: var(--measure-sub);
+  min-width: 0;
+  color: var(--ink);
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
+  overflow-wrap: anywhere;
+}
+
+.md > :first-child {
+  margin-top: 0;
+}
+
+.md > :last-child {
+  margin-bottom: 0;
+}
+
+.md-p,
+.md-list,
+.md-quote,
+.md-pre {
+  margin: var(--space-2) 0;
+}
+
+.md-h {
+  margin: var(--space-3) 0 var(--space-1);
+  color: var(--ink);
+  font-weight: var(--weight-bold);
+}
+
+.md-h-1 {
+  font-size: var(--text-2xl);
+}
+
+.md-h-2 {
+  font-size: var(--text-xl);
+}
+
+.md-h-3 {
+  font-size: var(--text-lg);
+}
+
+.md-h-4,
+.md-h-5,
+.md-h-6 {
+  font-size: var(--text-base);
+}
+
+.md-strong {
+  font-weight: var(--weight-bold);
+}
+
+.md-em {
+  font-style: italic;
+}
+
+.md-list {
+  padding-left: var(--space-5);
+}
+
+.md-list .md-list {
+  margin: 0;
+}
+
+.md-item-task {
+  list-style: none;
+  margin-left: calc(-1 * var(--space-4));
+}
+
+.md-check {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+}
+
+.md-code {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--head);
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+}
+
+.md-pre {
+  max-width: 100%;
+  padding: var(--space-3);
+  overflow: auto;
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--head);
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  line-height: var(--leading-body);
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.md-pre:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--border-2);
+}
+
+.md-pre code {
+  font: inherit;
+}
+
+.md-quote {
+  padding: 0 0 0 var(--space-3);
+  border-left: var(--border-2) solid var(--edge);
+  color: var(--ink2);
+}
+
+.md-rule {
+  margin: var(--space-3) 0;
+  border: 0;
+  border-top: var(--border-1) solid var(--line);
+}
+
+.md-image {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.md-empty {
+  margin: 0;
+  color: var(--muted);
+}

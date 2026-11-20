@@ -71,6 +71,15 @@ export const RECORDS = [
     className: "tags",
   },
   {
+    name: "markdown view",
+    tab: "Records",
+    variants: ["default"],
+    states: ["default", "empty", "overflow", "focus"],
+    source: "ds",
+    className: "md",
+    notes: `A note's Markdown for reading, built from plain nodes with no sanitiser library: raw HTML shows as text and never runs, images are not loaded, and a link only reports its click to the screen (${ref(128)}). Loading, error, partial and AI off belong to the screen. Not editable, so hover, active and disabled do not apply.`,
+  },
+  {
     name: "metadata line",
     tab: "Records",
     variants: ["age, count, app", "app badges"],
