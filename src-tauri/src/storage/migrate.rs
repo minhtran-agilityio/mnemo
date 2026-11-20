@@ -166,7 +166,7 @@ mod tests {
             err,
             StorageError::SchemaTooNew {
                 found: 99,
-                supported: 5
+                supported: 6
             }
         );
     }
