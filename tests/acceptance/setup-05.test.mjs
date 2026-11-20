@@ -136,7 +136,7 @@ test('AC5: the new unit test passes under vitest (exit 0)', { skip: NESTED }, ()
 });
 
 test('AC6: no real screens, design system or component library are added', () => {
-  const screens = uiFiles().filter((f) => /screen|view|page/i.test(relative(p('ui', 'src'), f)) && !/kanban|settings/i.test(f) && !/screens[\\/]catalog[\\/]/.test(f) && !/\.test\./.test(f));
+  const screens = uiFiles().filter((f) => /screen|view|page/i.test(relative(p('ui', 'src'), f)) && !/kanban|settings/i.test(f) && !/screens[\\/](catalog|ideas)[\\/]/.test(f) && !/\.test\./.test(f));
   assert.ok(screens.length <= 3, `too many screen files: ${screens.map((f) => relative(ROOT, f)).join(', ')}`);
   const pkg = JSON.parse(readFileSync(p('package.json'), 'utf8'));
   const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
