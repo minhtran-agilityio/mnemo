@@ -83,17 +83,23 @@ const ETXTBSY: i32 = 26;
 
 /// Starts `program`. A program that was written a moment ago can be "text file busy" while
 /// another thread's fork still holds its write handle; that clears in milliseconds, so retry.
+/// The command for one check run. The subscription is used, so an API key in the environment
+/// must not change the answer.
+fn check_command(program: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .env_remove("ANTHROPIC_API_KEY")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    command
+}
+
 fn spawn_retrying_busy(program: &Path, args: &[&str]) -> Result<std::process::Child, ()> {
     let mut tries = 0;
     loop {
-        let spawned = Command::new(program)
-            .args(args)
-            // The subscription is used, so an API key in the environment must not change the answer.
-            .env_remove("ANTHROPIC_API_KEY")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn();
+        let spawned = check_command(program, args).spawn();
         match spawned {
             Ok(child) => return Ok(child),
             Err(e) if e.raw_os_error() == Some(ETXTBSY) && tries < 20 => {
@@ -619,14 +625,12 @@ esac"#;
 
         #[test]
         fn the_api_key_is_not_passed_to_the_child() {
-            let dir = temp_dir("env");
-            write_claude(&dir, r#"echo "key=[$ANTHROPIC_API_KEY]""#);
-            std::env::set_var("ANTHROPIC_API_KEY", "sk-test-not-real");
-            let cli = SystemClaude::new(vec![dir.clone()]);
-            let got = cli.run(&dir.join("claude"), &[]).unwrap();
-            std::env::remove_var("ANTHROPIC_API_KEY");
-            assert_eq!(got.stdout.trim(), "key=[]");
-            let _ = std::fs::remove_dir_all(dir);
+            // The command is inspected, so the test does not change the process environment.
+            let command = check_command(Path::new("/x/claude"), &["--version"]);
+            let key = command
+                .get_envs()
+                .find(|(name, _)| *name == "ANTHROPIC_API_KEY");
+            assert_eq!(key, Some((std::ffi::OsStr::new("ANTHROPIC_API_KEY"), None)));
         }
 
         #[test]
