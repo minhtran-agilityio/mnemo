@@ -75,6 +75,33 @@ pub trait ClaudeCli {
     fn run(&self, program: &Path, args: &[&str]) -> Result<CliOutput, ()>;
 }
 
+/// The OS error "text file busy" (the same number on Linux and macOS).
+const ETXTBSY: i32 = 26;
+
+/// Starts `program`. A program that was written a moment ago can be "text file busy" while
+/// another thread's fork still holds its write handle; that clears in milliseconds, so retry.
+fn spawn_retrying_busy(program: &Path, args: &[&str]) -> Result<std::process::Child, ()> {
+    let mut tries = 0;
+    loop {
+        let spawned = Command::new(program)
+            .args(args)
+            // The subscription is used, so an API key in the environment must not change the answer.
+            .env_remove("ANTHROPIC_API_KEY")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn();
+        match spawned {
+            Ok(child) => return Ok(child),
+            Err(e) if e.raw_os_error() == Some(ETXTBSY) && tries < 20 => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => return Err(()),
+        }
+    }
+}
+
 /// Runs the start check and maps it to one of the four states.
 pub fn check(cli: &dyn ClaudeCli) -> AiHealth {
     AiHealth::of(check_state(cli))
@@ -289,15 +316,7 @@ impl ClaudeCli for SystemClaude {
     }
 
     fn run(&self, program: &Path, args: &[&str]) -> Result<CliOutput, ()> {
-        let mut child = Command::new(program)
-            .args(args)
-            // The subscription is used, so an API key in the environment must not change the answer.
-            .env_remove("ANTHROPIC_API_KEY")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|_| ())?;
+        let mut child = spawn_retrying_busy(program, args)?;
         let stdout = child.stdout.take().ok_or(())?;
         let reader = std::thread::spawn(move || {
             let mut text = String::new();
