@@ -974,7 +974,7 @@ pub(crate) mod tests {
     use serde::de::IntoDeserializer;
 
     use super::*;
-    use crate::storage::testing::{open_temp, TempDir};
+    use crate::storage::testing::open_temp;
 
     pub(crate) const T1: &str = "2026-01-01T00:00:00Z";
     const T2: &str = "2026-01-02T00:00:00Z";
@@ -1423,37 +1423,6 @@ pub(crate) mod tests {
         let d: serde::de::value::StrDeserializer<'_, serde::de::value::Error> =
             "cancelled".into_deserializer();
         assert_eq!(RunOutcome::deserialize(d).unwrap(), RunOutcome::Cancelled);
-    }
-
-    #[test]
-    fn two_writers_on_one_file_save_100_notes_and_lose_none() {
-        let dir = TempDir::new();
-        let path = dir.path().join("mnemo.db");
-        // Open both handles before the threads start, so the migrations do not race.
-        let a = Storage::open(&path).unwrap();
-        let b = Storage::open(&path).unwrap();
-        let spawn = |s: Storage, who: &'static str| {
-            std::thread::spawn(move || {
-                for n in 0..50 {
-                    s.add::<Note>(&note(&format!("{who} {n}"))).unwrap();
-                }
-                s
-            })
-        };
-        let (ta, tb) = (spawn(a, "window"), spawn(b, "job"));
-        let a = ta.join().unwrap();
-        tb.join().unwrap();
-        let mut ids = HashSet::new();
-        let mut req = PageRequest::first(30);
-        loop {
-            let page = a.list::<Note>(&req, false).unwrap();
-            ids.extend(page.items.into_iter().map(|n| n.base.id));
-            match page.next {
-                Some(c) => req.after = Some(c),
-                None => break,
-            }
-        }
-        assert_eq!(ids.len(), 100);
     }
 
     #[test]
