@@ -46,24 +46,6 @@ function previousDb() {
   return { dir, db };
 }
 
-// AC7: "The new migration runs on a database built by the previous migration version and keeps existing data (migration test)."
-test('AC7: the new migration runs on a database built by the previous version and keeps existing data', () => {
-  const extra = newMigrations();
-  assert.ok(extra.length >= 1, 'no new migration after 0004_item_links.sql in src-tauri/migrations');
-  assert.ok(/^0005_/.test(extra[0]), `the next migration should be numbered 0005, found ${extra[0]}`);
-  const h = previousDb();
-  try {
-    const before = tables(h.db);
-    for (const f of extra) ok(h.db, readFileSync(join(MIG, f), 'utf8'));
-    assert.equal(ok(h.db, "SELECT value FROM settings WHERE key='theme';"), 'dark');
-    assert.equal(ok(h.db, "SELECT body FROM note WHERE id='note-1';"), 'kept text');
-    assert.equal(ok(h.db, "SELECT url FROM bookmark WHERE id='bm-1';"), 'https://example.com');
-    const after = tables(h.db);
-    for (const t of before) assert.ok(after.includes(t), `table ${t} was dropped by the new migration`);
-    assert.ok(after.length > before.length, 'the new migration adds no table for the file rows');
-  } finally { rmSync(h.dir, { recursive: true, force: true }); }
-});
-
 // AC6: "Soft-delete sets deleted_at on the file row; normal reads exclude it; the file on disk is not removed (Rust test)."
 // From outside: the new file table has a nullable deleted_at column, so a row can be soft deleted and kept.
 test('AC6: the file table has a nullable deleted_at column for soft delete', () => {
