@@ -17,6 +17,24 @@ pub enum StorageError {
     /// The input was refused before anything was written. The text says why and is
     /// safe to show: it never names a file path or SQL.
     Invalid(String),
+    /// The file is larger than the limit. Nothing was written.
+    FileTooLarge { limit_bytes: u64 },
+    /// The file name is not usable, or a stored name points outside the files folder.
+    InvalidFileName,
+    /// The files folder could not be read or written. The text never names a path.
+    Files(String),
+}
+
+/// The limit as text for a person: whole megabytes when it is one, else bytes.
+fn limit_text(limit_bytes: u64) -> String {
+    const MB: u64 = 1024 * 1024;
+    if limit_bytes >= MB && limit_bytes % MB == 0 {
+        format!("{} MB", limit_bytes / MB)
+    } else if limit_bytes >= MB {
+        format!("{:.1} MB", limit_bytes as f64 / MB as f64)
+    } else {
+        format!("{limit_bytes} bytes")
+    }
 }
 
 impl fmt::Display for StorageError {
@@ -39,6 +57,13 @@ impl fmt::Display for StorageError {
                 write!(f, "There is no such {kind}. It may have been deleted.")
             }
             StorageError::Invalid(why) => write!(f, "{why}"),
+            StorageError::FileTooLarge { limit_bytes } => write!(
+                f,
+                "This file is larger than the limit of {}. Choose a smaller file.",
+                limit_text(*limit_bytes)
+            ),
+            StorageError::InvalidFileName => write!(f, "This file name cannot be used."),
+            StorageError::Files(why) => write!(f, "Mnemo could not read or save the file. Reason: {why}"),
         }
     }
 }

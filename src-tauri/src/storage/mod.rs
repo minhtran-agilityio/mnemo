@@ -1,5 +1,6 @@
 // Owns persistence: reading and writing Mnemo's local data. The only module that touches SQLite.
 mod error;
+pub mod files;
 pub mod items;
 pub mod links;
 mod migrate;
@@ -7,12 +8,13 @@ pub mod record;
 mod settings;
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rusqlite::Connection;
 
 pub use error::StorageError;
+pub use files::FileRecord;
 pub use items::Item;
 pub use links::ItemRef;
 pub use record::PageRequest;
@@ -23,6 +25,8 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// The open Mnemo database.
 pub struct Storage {
     conn: Connection,
+    /// The folder for images and attachments, beside the database. Made on the first save.
+    files_dir: PathBuf,
 }
 
 #[allow(dead_code)] // Status readers; callers arrive with later tickets.
@@ -52,7 +56,11 @@ impl Storage {
             )));
         }
         migrate::run(&mut conn, migrate::MIGRATIONS)?;
-        Ok(Storage { conn })
+        let files_dir = path
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join(files::FILES_DIR);
+        Ok(Storage { conn, files_dir })
     }
 
     /// The journal mode in use. Expected to be "wal".
