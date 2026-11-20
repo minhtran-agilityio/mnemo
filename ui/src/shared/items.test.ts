@@ -25,6 +25,20 @@ import {
 
 const ID = "4f1c2b7e-0000-4000-8000-000000000001";
 const AT = "2026-01-01T00:00:00Z";
+// The exact inputs the Rust test bookmark_commands_add_get_list_update_delete_end_to_end reads.
+const ADD_INPUT = {
+  url: "https://example.com",
+  title: null,
+  summary: null,
+  reason: null,
+  reasonIsGuess: false,
+};
+const UPDATE_INPUT = {
+  ...ADD_INPUT,
+  url: "https://example.com/docs",
+  title: "Docs",
+};
+
 const saved = {
   id: ID,
   createdAt: AT,
@@ -43,7 +57,7 @@ beforeEach(() => {
 
 test("the bookmark flow sends add, get, list, update and delete with the command arguments", async () => {
   invoke.mockResolvedValueOnce(saved);
-  const added = await addBookmark({ url: "https://example.com" });
+  const added = await addBookmark(ADD_INPUT);
   expect(added.id).toBe(ID);
 
   invoke.mockResolvedValueOnce(saved);
@@ -58,25 +72,19 @@ test("the bookmark flow sends add, get, list, update and delete with the command
     title: "Docs",
     updatedAt: "2026-01-02T00:00:00Z",
   });
-  await updateBookmark(added.id, {
-    url: "https://example.com/docs",
-    title: "Docs",
-  });
+  await updateBookmark(added.id, UPDATE_INPUT);
 
   invoke.mockResolvedValueOnce(null);
   await deleteBookmark(added.id);
 
   expect(invoke.mock.calls).toEqual([
-    ["add_bookmark", { input: { url: "https://example.com" } }],
+    ["add_bookmark", { input: ADD_INPUT }],
     ["get_bookmark", { id: ID }],
     [
       "list_bookmarks",
       { args: { limit: 10, after: null, includeDeleted: false } },
     ],
-    [
-      "update_bookmark",
-      { id: ID, input: { url: "https://example.com/docs", title: "Docs" } },
-    ],
+    ["update_bookmark", { id: ID, input: UPDATE_INPUT }],
     ["delete_bookmark", { id: ID }],
   ]);
 });
@@ -122,14 +130,18 @@ test("a not_found or invalid_input error reaches the caller as an AppError", asy
     code: "invalid_input",
     message: "The link must be a web address.",
   });
-  await expect(addBookmark({ url: "nope" })).rejects.toMatchObject({
+  await expect(
+    addBookmark({ ...ADD_INPUT, url: "nope" }),
+  ).rejects.toMatchObject({
     code: "invalid_input",
   });
 });
 
 test("arguments Tauri could not read reject with a plain string and get the fallback message", async () => {
   invoke.mockRejectedValueOnce("invalid args `input` for command `add_note`");
-  const err = await addBookmark({ url: "x" }).catch((e: unknown) => e);
+  const err = await addBookmark({ ...ADD_INPUT, url: "x" }).catch(
+    (e: unknown) => e,
+  );
   expect(isAppError(err)).toBe(false);
   expect(errorMessage(err)).toBe("Something went wrong. Try again.");
 });

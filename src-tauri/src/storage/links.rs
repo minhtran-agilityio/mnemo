@@ -29,11 +29,13 @@ pub struct Link {
 
 const LINK_NOT_FOUND: StorageError = StorageError::NotFound { kind: "link" };
 
-// Adds the pair, or brings a removed one back. A live pair keeps its updated_at.
+// Adds the pair, or brings a removed one back. A live pair keeps its times; a revived
+// pair gets the new time as created_at too, so it lists as just linked.
 const UPSERT_SQL: &str =
     "INSERT INTO item_link (id, a_kind, a_id, b_kind, b_id, created_at, updated_at)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
      ON CONFLICT (a_kind, a_id, b_kind, b_id) DO UPDATE SET
+         created_at = CASE WHEN deleted_at IS NULL THEN created_at ELSE excluded.created_at END,
          updated_at = CASE WHEN deleted_at IS NULL THEN updated_at ELSE excluded.updated_at END,
          deleted_at = NULL
      RETURNING id, created_at";
@@ -267,6 +269,8 @@ mod tests {
         let again = s.add_link_at(T3, &p, &b).unwrap();
         assert_eq!(again.id, first.id);
         assert_eq!(s.link_row(&first.id).unwrap(), (None, T3.to_string()));
+        // A revived link lists as just made.
+        assert_eq!(again.created_at, T3);
         assert_eq!(others(&s, &b), vec![p]);
     }
 

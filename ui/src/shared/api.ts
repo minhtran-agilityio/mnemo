@@ -83,12 +83,12 @@ export interface ListArgs {
 
 export interface BookmarkInput {
   url: string;
-  title?: string | null;
+  title: string | null;
   /** Null when the page could not be read. */
-  summary?: string | null;
-  reason?: string | null;
+  summary: string | null;
+  reason: string | null;
   /** True when the app wrote the reason: show it as a guess. */
-  reasonIsGuess?: boolean;
+  reasonIsGuess: boolean;
 }
 export interface Bookmark extends RecordBase {
   url: string;
@@ -109,7 +109,7 @@ export interface Note extends RecordBase {
 export type IdeaStage = "spark" | "shape" | "ready" | "project";
 export interface IdeaInput {
   title: string;
-  stage?: IdeaStage;
+  stage: IdeaStage;
 }
 export interface Idea extends RecordBase {
   title: string;
@@ -129,7 +129,7 @@ export interface Project extends RecordBase {
 export interface TaskInput {
   title: string;
   /** Marking a done task done again keeps the first `doneAt`. */
-  done?: boolean;
+  done: boolean;
 }
 export interface Task extends RecordBase {
   title: string;
@@ -153,10 +153,10 @@ export type RunOutcome = "ok" | "failed" | "cancelled";
 export interface RunInput {
   taskType: string;
   startedAt: string;
-  durationMs?: number | null;
+  durationMs: number | null;
   /** Null while the run is going. */
-  outcome?: RunOutcome | null;
-  error?: string | null;
+  outcome: RunOutcome | null;
+  error: string | null;
 }
 export interface Run extends RecordBase {
   taskType: string;
@@ -201,6 +201,7 @@ function itemClient<T, I>(kind: string, plural: string) {
     get: (id: string) => invoke<T>(`get_${kind}`, { id }),
     list: (args: ListArgs) =>
       invoke<Page<T>>(`list_${plural}`, { args: listArgs(args) }),
+    /** Replaces every field, so every field is required (send null to clear one). */
     update: (id: string, input: I) =>
       invoke<T>(`update_${kind}`, { id, input }),
     remove: (id: string) => invoke<void>(`delete_${kind}`, { id }),

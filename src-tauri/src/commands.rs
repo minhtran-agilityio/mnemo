@@ -530,8 +530,16 @@ mod tests {
         let (storage, dir) = temp_storage();
         let state = AppStorage::new(Ok(storage));
 
-        let added: Bookmark =
-            add_item::<Bookmark>(&state, &bookmark_input("https://example.com", None)).unwrap();
+        // The same JSON the UI test sends (ADD_INPUT and UPDATE_INPUT in items.test.ts).
+        let add_input: BookmarkInput = serde_json::from_str(
+            r#"{"url":"https://example.com","title":null,"summary":null,"reason":null,"reasonIsGuess":false}"#,
+        )
+        .unwrap();
+        let update_input: BookmarkInput = serde_json::from_str(
+            r#"{"url":"https://example.com/docs","title":"Docs","summary":null,"reason":null,"reasonIsGuess":false}"#,
+        )
+        .unwrap();
+        let added: Bookmark = add_item::<Bookmark>(&state, &add_input).unwrap();
         assert_eq!(added.url, "https://example.com");
         assert_eq!(added.base.created_at, added.base.updated_at);
         let id = added.base.id.clone();
@@ -542,12 +550,7 @@ mod tests {
         assert_eq!(page.items, vec![added.clone()]);
         assert_eq!(page.next, None);
 
-        let updated = update_item::<Bookmark>(
-            &state,
-            &id,
-            &bookmark_input("https://example.com/docs", Some("Docs")),
-        )
-        .unwrap();
+        let updated = update_item::<Bookmark>(&state, &id, &update_input).unwrap();
         assert_eq!(updated.title.as_deref(), Some("Docs"));
         assert_eq!(updated.base.created_at, added.base.created_at);
 

@@ -158,6 +158,8 @@ pub trait Item: sealed::Sealed + Sized {
     #[doc(hidden)]
     const LIST_SQL: &'static str;
     #[doc(hidden)]
+    const LIST_ALL_SQL: &'static str;
+    #[doc(hidden)]
     const UPDATE_SQL: &'static str;
     #[doc(hidden)]
     const DELETE_SQL: &'static str;
@@ -193,15 +195,25 @@ macro_rules! item_sql {
             $table,
             " WHERE id = ?1 AND deleted_at IS NULL"
         );
-        // ?1 include deleted, ?2 and ?3 the cursor (or NULL), ?4 the row limit.
+        // ?1 and ?2 the cursor (or NULL), ?3 the row limit. Live rows only, so the
+        // (deleted_at, created_at, id) index serves both the filter and the order.
         const LIST_SQL: &'static str = concat!(
             "SELECT id, created_at, updated_at, deleted_at, ",
             $cols,
             " FROM ",
             $table,
-            " WHERE (?1 OR deleted_at IS NULL)",
-            " AND (?2 IS NULL OR (created_at, id) < (?2, ?3))",
-            " ORDER BY created_at DESC, id DESC LIMIT ?4"
+            " WHERE deleted_at IS NULL",
+            " AND (?1 IS NULL OR (created_at, id) < (?1, ?2))",
+            " ORDER BY created_at DESC, id DESC LIMIT ?3"
+        );
+        // The same page with deleted rows included.
+        const LIST_ALL_SQL: &'static str = concat!(
+            "SELECT id, created_at, updated_at, deleted_at, ",
+            $cols,
+            " FROM ",
+            $table,
+            " WHERE (?1 IS NULL OR (created_at, id) < (?1, ?2))",
+            " ORDER BY created_at DESC, id DESC LIMIT ?3"
         );
         const UPDATE_SQL: &'static str = concat!(
             "UPDATE ",
@@ -242,6 +254,16 @@ fn text(v: &str) -> Value {
 
 fn opt_text(v: &Option<String>) -> Value {
     v.as_ref().map_or(Value::Null, |s| Value::Text(s.clone()))
+}
+
+/// An optional field that must still be sent, as a value or as null. Update replaces
+/// every field, so a field left out must not quietly become empty.
+fn nullable<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d)
 }
 
 // ---- Checks. Messages are shown to the owner as they are. ----
@@ -310,15 +332,22 @@ fn web_address(v: &str) -> Result<(), StorageError> {
             "The link is too long (at most {MAX_URL_CHARS} characters)."
         )));
     }
-    let rest = v
-        .strip_prefix("https://")
-        .or_else(|| v.strip_prefix("http://"))
-        .ok_or_else(bad)?;
+    // The scheme is case-insensitive (RFC 3986), so HTTPS:// is a web address too.
+    let lower = v.get(..8).unwrap_or(v).to_ascii_lowercase();
+    let rest = if lower.starts_with("https://") {
+        &v[8..]
+    } else if lower.starts_with("http://") {
+        &v[7..]
+    } else {
+        return Err(bad());
+    };
     if v.chars().any(char::is_whitespace) {
         return Err(bad());
     }
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    if host.is_empty() || host.starts_with(':') || host.starts_with('@') {
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    // The host comes after any `user@` part.
+    let host = authority.rsplit('@').next().unwrap_or("");
+    if host.is_empty() || host.starts_with(':') {
         return Err(bad());
     }
     Ok(())
@@ -343,10 +372,21 @@ fn utc_time(field: &str, v: &str) -> Result<(), StorageError> {
         && b[13] == b':'
         && b[16] == b':'
         && b[19] == b'Z';
+    let days_in_month = |y: u32, m: u32| -> u32 {
+        match m {
+            4 | 6 | 9 | 11 => 30,
+            2 if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 => 29,
+            2 => 28,
+            _ => 31,
+        }
+    };
     let ok = shape
-        && num(0, 4).is_some()
-        && num(5, 7).is_some_and(|m| (1..=12).contains(&m))
-        && num(8, 10).is_some_and(|d| (1..=31).contains(&d))
+        && num(0, 4).is_some_and(|y| {
+            num(5, 7).is_some_and(|m| {
+                (1..=12).contains(&m)
+                    && num(8, 10).is_some_and(|d| (1..=days_in_month(y, m)).contains(&d))
+            })
+        })
         && num(11, 13).is_some_and(|h| h <= 23)
         && num(14, 16).is_some_and(|m| m <= 59)
         && num(17, 19).is_some_and(|s| s <= 59);
@@ -380,13 +420,12 @@ pub struct Bookmark {
 #[serde(rename_all = "camelCase")]
 pub struct BookmarkInput {
     pub url: String,
-    #[serde(default)]
+    #[serde(deserialize_with = "nullable")]
     pub title: Option<String>,
-    #[serde(default)]
+    #[serde(deserialize_with = "nullable")]
     pub summary: Option<String>,
-    #[serde(default)]
+    #[serde(deserialize_with = "nullable")]
     pub reason: Option<String>,
-    #[serde(default)]
     pub reason_is_guess: bool,
 }
 
@@ -495,7 +534,6 @@ pub struct Idea {
 #[serde(rename_all = "camelCase")]
 pub struct IdeaInput {
     pub title: String,
-    #[serde(default)]
     pub stage: IdeaStage,
 }
 
@@ -596,7 +634,6 @@ pub struct Task {
 pub struct TaskInput {
     pub title: String,
     /// Marking a done task done again keeps the first `done_at`.
-    #[serde(default)]
     pub done: bool,
 }
 
@@ -713,11 +750,11 @@ pub struct Run {
 pub struct RunInput {
     pub task_type: String,
     pub started_at: String,
-    #[serde(default)]
+    #[serde(deserialize_with = "nullable")]
     pub duration_ms: Option<i64>,
-    #[serde(default)]
+    #[serde(deserialize_with = "nullable")]
     pub outcome: Option<RunOutcome>,
-    #[serde(default)]
+    #[serde(deserialize_with = "nullable")]
     pub error: Option<String>,
 }
 
@@ -875,12 +912,14 @@ impl Storage {
             Some(c) => (Some(c.created_at.as_str()), Some(c.id.as_str())),
             None => (None, None),
         };
-        let mut stmt = self.conn.prepare_cached(T::LIST_SQL)?;
+        let sql = if include_deleted {
+            T::LIST_ALL_SQL
+        } else {
+            T::LIST_SQL
+        };
+        let mut stmt = self.conn.prepare_cached(sql)?;
         let rows = stmt
-            .query_map(
-                params![include_deleted, at, id, page.limit + 1],
-                T::from_row,
-            )?
+            .query_map(params![at, id, page.limit + 1], T::from_row)?
             .collect::<Result<Vec<T>, _>>()?;
         Ok(into_page(rows, page.limit, |r: &T| Cursor {
             created_at: r.base().created_at.clone(),
@@ -1415,5 +1454,61 @@ pub(crate) mod tests {
             }
         }
         assert_eq!(ids.len(), 100);
+    }
+
+    #[test]
+    fn input_json_must_name_every_field_and_null_clears_one() {
+        // Update replaces every field, so a field left out is refused, not emptied.
+        let partial = r#"{"url":"https://a.example","title":"A"}"#;
+        assert!(serde_json::from_str::<BookmarkInput>(partial).is_err());
+        assert!(serde_json::from_str::<IdeaInput>(r#"{"title":"x"}"#).is_err());
+        assert!(serde_json::from_str::<TaskInput>(r#"{"title":"x"}"#).is_err());
+        assert!(serde_json::from_str::<RunInput>(
+            r#"{"taskType":"t","startedAt":"2026-01-01T00:00:00Z"}"#
+        )
+        .is_err());
+        let full = r#"{"url":"https://a.example","title":null,"summary":null,"reason":null,"reasonIsGuess":false}"#;
+        let b: BookmarkInput = serde_json::from_str(full).unwrap();
+        assert_eq!((b.title, b.summary, b.reason), (None, None, None));
+    }
+
+    #[test]
+    fn list_of_live_items_uses_the_index_without_a_sort() {
+        let (s, _dir) = open_temp();
+        for sql in [Note::LIST_SQL, Bookmark::LIST_SQL] {
+            let plan: Vec<String> = s
+                .conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .unwrap()
+                .query_map(params![T1, "x", 10], |r| r.get::<_, String>(3))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            let plan = plan.join(" | ");
+            assert!(plan.contains("USING INDEX"), "{plan}");
+            assert!(!plan.contains("TEMP B-TREE"), "{plan}");
+        }
+    }
+
+    #[test]
+    fn web_address_takes_any_scheme_case_and_needs_a_host_after_user() {
+        assert!(web_address("HTTPS://Example.com/page").is_ok());
+        assert!(web_address("Http://example.com").is_ok());
+        assert!(web_address("https://user@example.com/x").is_ok());
+        assert!(web_address("https://user@/x").is_err());
+        assert!(web_address("https:///x").is_err());
+        assert!(web_address("ftp://example.com").is_err());
+        assert!(web_address("httpsé").is_err());
+    }
+
+    #[test]
+    fn utc_time_refuses_days_the_month_does_not_have() {
+        assert!(utc_time("t", "2026-02-28T09:00:00Z").is_ok());
+        assert!(utc_time("t", "2026-02-29T09:00:00Z").is_err());
+        assert!(utc_time("t", "2028-02-29T09:00:00Z").is_ok());
+        assert!(utc_time("t", "2100-02-29T09:00:00Z").is_err());
+        assert!(utc_time("t", "2000-02-29T09:00:00Z").is_ok());
+        assert!(utc_time("t", "2026-04-31T09:00:00Z").is_err());
+        assert!(utc_time("t", "2026-12-31T23:59:59Z").is_ok());
     }
 }
