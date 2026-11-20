@@ -3,13 +3,18 @@
 // agent owns it with ds/catalog/surfaces.ts, ds/catalog/surfaces.css and ds/components/surfaces.ts.
 
 import {
+  Bell,
   Bookmark,
   CalendarDays,
   CirclePause,
   FileText,
+  Gauge,
   Kanban,
   MessageCircle,
+  Network,
+  Plus,
   PowerOff,
+  Settings,
   Share2,
   StickyNote,
   TriangleAlert,
@@ -31,11 +36,14 @@ import {
   createPage,
   createPageHeader,
   createPanel,
+  createSidebar,
   createStaticTooltip,
   createStatusBar,
   createTabs,
   createTooltip,
   type NavRailGroup,
+  type SidebarLink,
+  type SidebarOptions,
 } from "../../../ds/index";
 import { button, el, entryRows, state, type TabRenderer } from "../parts";
 
@@ -79,6 +87,77 @@ const NAV_GROUPS_COLLAPSED: readonly NavRailGroup[] = [
   },
 ];
 
+/** The sample content of the sidebar: a few of the app's own items. Links stay on the page. */
+const sbLink = (
+  id: string,
+  label: string,
+  icon: SidebarLink["icon"],
+  extra: Partial<SidebarLink> = {},
+): SidebarLink => ({ id, label, href: "#/ui-catalog", icon, ...extra });
+
+function sidebarSample(
+  prefix: string,
+  options: {
+    collapsed?: boolean;
+    bottomOpen?: boolean;
+    hover?: string;
+    focus?: string;
+    longLabel?: boolean;
+  } = {},
+): SidebarOptions {
+  const force = (id: string) =>
+    options.hover === id
+      ? { forceState: "hover" as const }
+      : options.focus === id
+        ? { forceState: "focus" as const }
+        : {};
+  return {
+    label: `Main, ${prefix} example`,
+    brand: "Mnemo",
+    brandMark: "M",
+    quick: sbLink("save", "Save or ask", Plus),
+    searchLabel: "Search everything",
+    idPrefix: prefix,
+    collapsed: options.collapsed ?? false,
+    bottomOpen: options.bottomOpen,
+    groups: [
+      {
+        id: "daily",
+        label: "Daily",
+        items: [
+          sbLink("today", "Today", CalendarDays, force("today")),
+          sbLink("ask", "Ask Mnemo", MessageCircle, force("ask")),
+        ],
+      },
+      {
+        id: "library",
+        label: "Library",
+        items: [
+          sbLink("bookmarks", "Bookmarks", Bookmark, force("bookmarks")),
+          sbLink("notes", "Notes", StickyNote, force("notes")),
+          sbLink("videos", "Videos", Video, { later: true }),
+          sbLink(
+            "quiet",
+            options.longLabel
+              ? "Quiet notifications from every connected app and calendar"
+              : "Quiet notifications",
+            Bell,
+          ),
+        ],
+      },
+    ],
+    bottom: {
+      label: "Apps and settings",
+      icon: Network,
+      items: [
+        sbLink("apps", "Apps and account", Network),
+        sbLink("ai", "AI control", Gauge),
+        sbLink("settings", "Settings", Settings),
+      ],
+    },
+  };
+}
+
 export const renderSurfaces: TabRenderer = (panel, ctx) => {
   const doc = ctx.doc;
   const text = (cls: string, value: string) => el(doc, "span", cls, value);
@@ -117,6 +196,47 @@ export const renderSurfaces: TabRenderer = (panel, ctx) => {
             },
           ),
           state(doc, "collapsed", frame(collapsed.element)),
+        ];
+      },
+
+      sidebar: () => {
+        const framed = (options: SidebarOptions, current: string) => {
+          const bar = createSidebar(doc, options);
+          bar.setCurrent(current);
+          const box = el(doc, "div", "frame frame-sidebar");
+          box.append(bar.element);
+          return box;
+        };
+        return [
+          state(
+            doc,
+            "open, current, hover (Notes), Later (live: the toggle folds it)",
+            framed(
+              sidebarSample("cat-sb-open", { hover: "notes" }),
+              "bookmarks",
+            ),
+          ),
+          state(
+            doc,
+            "collapsed: icons with tooltips",
+            framed(
+              sidebarSample("cat-sb-collapsed", { collapsed: true }),
+              "bookmarks",
+            ),
+          ),
+          state(
+            doc,
+            "focus-visible (Ask Mnemo), bottom list open",
+            framed(
+              sidebarSample("cat-sb-focus", { focus: "ask", bottomOpen: true }),
+              "settings",
+            ),
+          ),
+          state(
+            doc,
+            "long label: one line, cut by the sidebar",
+            framed(sidebarSample("cat-sb-long", { longLabel: true }), "quiet"),
+          ),
         ];
       },
 

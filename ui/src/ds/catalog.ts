@@ -201,7 +201,7 @@ export const TOKEN_GROUPS: readonly TokenGroup[] = [
   {
     group: "Motion",
     kind: "motion",
-    names: ["--ease", "--dur-fast", "--dur-base", "--dur-slow"],
+    names: ["--ease", "--dur-fast", "--dur-base", "--dur-slow", "--dur-nav"],
   },
   {
     group: "Type",
@@ -247,12 +247,24 @@ export const TOKEN_GROUPS: readonly TokenGroup[] = [
   {
     group: "Icons and borders",
     kind: "size",
-    names: ["--icon-sm", "--icon-md", "--border-1", "--border-2"],
+    names: [
+      "--icon-sm",
+      "--icon-md",
+      "--icon-nav",
+      "--icon-stroke-nav",
+      "--border-1",
+      "--border-2",
+    ],
   },
   {
     group: "Sidebar",
     kind: "size",
     names: ["--sidebar-width", "--sidebar-width-collapsed"],
+  },
+  {
+    group: "App frame",
+    kind: "size",
+    names: ["--size-frame-height", "--size-section-list-max"],
   },
   {
     group: "Catalog sizes",

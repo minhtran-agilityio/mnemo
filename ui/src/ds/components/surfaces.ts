@@ -9,6 +9,7 @@ export * from "./divider/divider";
 export * from "./heading-bar/heading-bar";
 export * from "./nav-rail/nav-rail";
 export * from "./panel/panel";
+export * from "./sidebar/sidebar";
 export * from "./status-bar/status-bar";
 export * from "./tabs/tabs";
 export * from "./tooltip/tooltip";

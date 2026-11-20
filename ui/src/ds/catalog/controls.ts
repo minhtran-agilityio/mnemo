@@ -149,4 +149,20 @@ export const CONTROLS = [
     notes:
       "Accent colour with an underline, so colour is not the only signal. An external link shows an icon and says it opens outside Mnemo. An unavailable link is text with the reason beside it.",
   },
+  {
+    name: "choice list",
+    className: "choice-list",
+    tab: "Controls",
+    variants: ["with hints"],
+    states: [
+      "default",
+      "checked",
+      "focus-visible",
+      "disabled",
+      "error",
+      "long hint",
+    ],
+    source: "ds",
+    notes: `One choice out of a few: native radios, each with a label and a hint. The error line under it says what went wrong. Hover is the radio's own. Settings uses it for Colours (${ref(111)}).`,
+  },
 ] as const satisfies readonly CatalogEntry[];

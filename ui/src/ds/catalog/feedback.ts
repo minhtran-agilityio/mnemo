@@ -136,4 +136,22 @@ export const FEEDBACK = [
     className: "state-box",
     notes: "Links still save and search still works.",
   },
+  {
+    name: "text",
+    tab: "Feedback",
+    variants: ["default", "muted", "muted small", "muted medium"],
+    states: ["default", "long content"],
+    source: "ds",
+    className: "text",
+    notes: `A line of plain text in a tone and a size: notes, meta lines and the status lines of the window. Not a control, and it holds no data of its own, so loading, error and AI off do not apply (${ref(111)}).`,
+  },
+  {
+    name: "later mark",
+    tab: "Feedback",
+    variants: ["default"],
+    states: ["default", "next to a name"],
+    source: "ds",
+    className: "later-mark",
+    notes: `The word Later next to a feature planned for later. A word, never colour alone, and never a count. Not a control (${ref(111)}).`,
+  },
 ] as const satisfies readonly CatalogEntry[];

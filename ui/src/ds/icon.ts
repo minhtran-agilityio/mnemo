@@ -7,12 +7,12 @@ import "./icon.css";
 
 /**
  * Draws one Lucide icon as a decorative inline SVG: hidden from screen readers, sized by the
- * `--icon-sm` or `--icon-md` token, never shrunk in a flex row. It carries the class `ic` and any
+ * `--icon-sm`, `--icon-md` or `--icon-nav` token (the sidebar's 18 px), never shrunk in a flex row. It carries the class `ic` and any
  * extra classes (`ic-muted` for the muted colour).
  */
 export function createIcon(
   node: IconNode,
-  size: "sm" | "md" = "sm",
+  size: "sm" | "md" | "nav" = "sm",
   ...classes: string[]
 ): SVGElement {
   const svg = createElement(node, {

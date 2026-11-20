@@ -9,6 +9,7 @@ import {
   createButton,
   createCheckbox,
   createChip,
+  createChoiceList,
   createField,
   createKbd,
   createLink,
@@ -37,6 +38,17 @@ import {
 } from "../parts";
 
 const AI_OFF = "AI is off. Turn it on in Settings › AI.";
+
+/** The theme choices of Settings, the sample content of the choice list. */
+const THEME_CHOICES = [
+  {
+    value: "system",
+    label: "System",
+    hint: "Matches your computer, and follows it when it changes.",
+  },
+  { value: "light", label: "Light", hint: "Light background, dark text." },
+  { value: "dark", label: "Dark", hint: "Dark background, light text." },
+] as const;
 const LINK = "https://vnexpress.net/ai";
 
 /** A line of states that wraps, like the prototype's nested example rows. */
@@ -485,6 +497,63 @@ export const renderControls: TabRenderer = (panel, ctx) => {
               unavailable: "Telegram is not connected.",
             }),
           ),
+        ];
+      },
+      "choice list": () => {
+        // Each example has its own name, so the radio groups and the ids never clash.
+        const live = createChoiceList(doc, {
+          legend: "Colours",
+          name: "cat-choice-live",
+          choices: THEME_CHOICES,
+          value: "system",
+          onChange: (value) => ctx.toast(`Chose ${value}. Catalog only.`),
+        });
+        const focus = createChoiceList(doc, {
+          legend: "Colours",
+          name: "cat-choice-focus",
+          choices: THEME_CHOICES,
+          value: "dark",
+          forceState: { value: "dark", state: "focus" },
+        });
+        const disabled = createChoiceList(doc, {
+          legend: "Colours",
+          name: "cat-choice-off",
+          choices: THEME_CHOICES,
+          value: "light",
+          disabled: true,
+        });
+        const error = createChoiceList(doc, {
+          legend: "Colours",
+          name: "cat-choice-error",
+          choices: THEME_CHOICES,
+          value: "dark",
+        });
+        error.setError(
+          "Mnemo could not save the theme, so it applies only until Mnemo quits. The data file could not be written.",
+        );
+        const long = createChoiceList(doc, {
+          legend: "Summary length for links saved from very long pages",
+          name: "cat-choice-long",
+          choices: [
+            {
+              value: "short",
+              label: "Short",
+              hint: "Two or three sentences that say what the page is about, written by AI and labelled as a guess so you can tell it from your own notes.",
+            },
+            {
+              value: "none",
+              label: "No summary",
+              hint: "Saves the link only.",
+            },
+          ],
+          value: "short",
+        });
+        return [
+          state(doc, "default, checked (live)", live.element),
+          state(doc, "focus-visible", focus.element),
+          state(doc, "disabled", disabled.element),
+          state(doc, "error", error.element),
+          state(doc, "long hint", long.element),
         ];
       },
       "shortcut hint": () => {

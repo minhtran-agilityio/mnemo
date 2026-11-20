@@ -116,6 +116,7 @@
   --dur-fast: 120ms;
   --dur-base: 200ms;
   --dur-slow: 1200ms;
+  --dur-nav: 150ms;
 
   /* Dialog backdrop: --player at 55% opacity. color-mix() in WebKitGTK on Ubuntu 22.04 is
      Unverified, so the first declaration is a fallback (the light --player at 55%), and the
@@ -168,12 +169,19 @@
   /* Icon sizes and border widths */
   --icon-sm: 16px;
   --icon-md: 20px;
+  --icon-nav: 18px;
+  --icon-stroke-nav: 1.8;
   --border-1: 1px;
   --border-2: 2px;
 
   /* Sidebar width, open and collapsed */
   --sidebar-width: 260px;
   --sidebar-width-collapsed: 72px;
+
+  /* App frame: the window height the frame and the sticky sidebar fill, and the widest the
+     Settings section list grows */
+  --size-frame-height: 100vh;
+  --size-section-list-max: 14rem;
 
   /* Catalog sizes: fixed lengths the UI Catalog tabs and the parts they build need. One group so
      parallel work never edits this file again. Values come from UI Catalog prototype v3 and are

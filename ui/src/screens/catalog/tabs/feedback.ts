@@ -13,11 +13,13 @@ import {
   buildEmptyState,
   buildErrorState,
   buildKeyHint,
+  buildLaterMark,
   buildPill,
   buildProgress,
   buildRunCount,
   buildSkeleton,
   buildSpinner,
+  buildText,
   buildToast,
   buildTrustLabel,
   buildUsageMeter,
@@ -304,6 +306,71 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
         ),
         state(doc, "at limit", buildAiOffState({ reason: "limit" })),
       ],
+      text: () => {
+        const word = el(doc, "strong", undefined, "zebra");
+        return [
+          state(
+            doc,
+            "default",
+            buildText(doc, { content: "Not built yet. It comes in Phase 2." }),
+          ),
+          state(
+            doc,
+            "muted",
+            buildText(doc, {
+              tone: "muted",
+              size: "base",
+              content: "Changes are saved at once.",
+            }),
+          ),
+          state(
+            doc,
+            "muted medium, with a Later mark",
+            buildText(doc, {
+              tone: "muted",
+              size: "md",
+              content: [
+                el(doc, "span", undefined, "Phase 7"),
+                " ",
+                buildLaterMark(doc),
+              ],
+            }),
+          ),
+          state(
+            doc,
+            "muted small (status line)",
+            buildText(doc, {
+              tone: "muted",
+              size: "sm",
+              content: "pong · Version 0.1.0",
+            }),
+          ),
+          state(
+            doc,
+            "nodes: the searched word",
+            buildText(doc, { content: ["You searched for: ", word] }),
+          ),
+          state(
+            doc,
+            "long content wraps",
+            buildText(doc, {
+              tone: "muted",
+              size: "md",
+              content:
+                "Mnemo could not read the saved sidebar setting, so the sidebar is open. The data file could not be read: https://example.com/a/very/long/path/that/keeps/going/and/going",
+            }),
+            { grow: true },
+          ),
+        ];
+      },
+      "later mark": () => {
+        const named = el(doc, "span", undefined, "Videos");
+        named.append(" ", buildLaterMark(doc));
+        return [
+          state(doc, "default", buildLaterMark(doc)),
+          state(doc, "next to a name", named),
+        ];
+      },
     }),
   );
 };

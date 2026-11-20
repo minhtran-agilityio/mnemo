@@ -53,4 +53,13 @@ export const LISTS = [
     className: "tree",
     notes: "Folders and nested labels.",
   },
+  {
+    name: "section list",
+    tab: "Lists",
+    variants: ["default"],
+    states: ["default", "hover", "focus-visible", "current", "long value"],
+    source: "ds",
+    className: "section-list",
+    notes: `Rows of a name and its current value; one row is current. A long value is cut with an ellipsis and its full text is the title. Narrow windows put the rows side by side (${ref(111)}).`,
+  },
 ] as const satisfies readonly CatalogEntry[];
