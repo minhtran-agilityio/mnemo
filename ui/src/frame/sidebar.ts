@@ -5,11 +5,11 @@
 import {
   APPS_ITEMS,
   APPS_LABEL,
-  GROUPS,
   hashItemPath,
   type IconShape,
-  type NavItem,
   SAVE_OR_ASK,
+  SIDEBAR_GROUPS,
+  type SidebarItem,
 } from "./nav";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -72,7 +72,7 @@ function make<K extends keyof HTMLElementTagNameMap>(
 
 function link(
   doc: Document,
-  item: NavItem,
+  item: SidebarItem,
   className: string,
 ): HTMLAnchorElement {
   const a = make(doc, "a", className);
@@ -154,7 +154,7 @@ export function createSidebar(doc: Document, options: SidebarOptions): Sidebar {
 
   // The groups.
   const scroll = make(doc, "div", "sb-scroll");
-  for (const group of GROUPS) {
+  for (const group of SIDEBAR_GROUPS) {
     const heading = make(doc, "h2", "sb-label", group.label);
     heading.id = `sb-group-${group.id}`;
     const list = make(doc, "ul", "sidenav");

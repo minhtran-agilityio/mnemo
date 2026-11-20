@@ -1,11 +1,17 @@
 // @vitest-environment happy-dom
 import { expect, test } from "vitest";
-import { ALL_ITEMS, EVERYTHING_ID } from "./nav";
+import { ALL_ITEMS, EVERYTHING_ID, UI_CATALOG_ID } from "./nav";
 import { createRouter, hashFor, parseHash, splitHash } from "./router";
 
 test("every item has an address that opens it", () => {
   for (const item of ALL_ITEMS)
     expect(parseHash(hashFor(item.id)).item.id).toBe(item.id);
+});
+
+test("the UI Catalog address opens the dev-only catalog item (Vitest runs in dev mode)", () => {
+  const route = parseHash(hashFor(UI_CATALOG_ID));
+  expect(route.item.id).toBe(UI_CATALOG_ID);
+  expect(route.query).toBeNull();
 });
 
 test("an unknown or empty address falls back to Today", () => {

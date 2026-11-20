@@ -1,9 +1,12 @@
 // The screen every item shows until its own screen is built: its name and the phase it
 // comes in. Everything shows the searched word. All text goes in as text, never as markup.
-import type { Route } from "./router";
+import type { NavItem } from "./nav";
 
-/** Fills `container` with the empty state for `route`. */
-export function renderEmptyState(container: HTMLElement, route: Route): void {
+/** Fills `container` with the empty state for a roadmap screen and its searched word. */
+export function renderEmptyState(
+  container: HTMLElement,
+  route: { item: NavItem; query: string | null },
+): void {
   const doc = container.ownerDocument;
   const { item, query } = route;
 

@@ -1,5 +1,15 @@
 import { expect, test } from "vitest";
-import { ALL_ITEMS, APPS_ITEMS, findItem, GROUPS, SAVE_OR_ASK } from "./nav";
+import {
+  ALL_ITEMS,
+  APPS_ITEMS,
+  DEV_GROUPS,
+  DEV_ITEMS,
+  findItem,
+  GROUPS,
+  isRoadmapItem,
+  SAVE_OR_ASK,
+  SIDEBAR_GROUPS,
+} from "./nav";
 
 const labels = (id: string) =>
   GROUPS.find((g) => g.id === id)?.items.map((i) => i.label);
@@ -70,4 +80,23 @@ test("there is no Tags group and no count or badge in the data", () => {
     expect(Object.keys(item).sort()).toEqual(
       ["icon", "id", "label", "phase", ...(item.later ? ["later"] : [])].sort(),
     );
+});
+
+test("the dev-only Storehouse group has one UI Catalog item, with no phase and a unique id", () => {
+  // Vitest runs in dev mode, so the dev-only groups are present here.
+  expect(DEV_GROUPS.map((g) => g.label)).toEqual(["Storehouse"]);
+  expect(DEV_ITEMS.map((i) => i.label)).toEqual(["UI Catalog"]);
+  for (const item of DEV_ITEMS) {
+    expect(isRoadmapItem(item)).toBe(false);
+    expect(Object.keys(item).sort()).toEqual(["icon", "id", "label"]);
+  }
+  const ids = [...ALL_ITEMS, ...DEV_ITEMS].map((i) => i.id);
+  expect(new Set(ids).size).toBe(ids.length);
+  // ALL_ITEMS holds roadmap screens only, so findItem never returns a dev-only tool.
+  expect(findItem("ui-catalog")).toBeUndefined();
+  for (const item of ALL_ITEMS) expect(isRoadmapItem(item)).toBe(true);
+});
+
+test("the sidebar shows the roadmap groups, then the dev-only groups", () => {
+  expect(SIDEBAR_GROUPS).toEqual([...GROUPS, ...DEV_GROUPS]);
 });
