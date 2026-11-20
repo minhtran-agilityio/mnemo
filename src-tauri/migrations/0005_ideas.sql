@@ -14,10 +14,13 @@ ALTER TABLE idea ADD COLUMN why TEXT NULL;
 ALTER TABLE idea ADD COLUMN outline TEXT NULL;
 
 -- One row per tag of an idea. Removing a tag is a soft delete; adding it again brings
--- the same row back. #31 unifies tags across item types later.
+-- the same row back. #31 unifies tags across item types later. There is no REFERENCES
+-- clause: SQLite foreign keys are off in Mnemo, so the core keeps idea_tag consistent. It
+-- writes a tag only for an idea it has just checked, in the same transaction, and soft
+-- deletes an idea's tags with the idea.
 CREATE TABLE idea_tag (
     id         TEXT PRIMARY KEY NOT NULL,
-    idea_id    TEXT NOT NULL REFERENCES idea (id),
+    idea_id    TEXT NOT NULL,
     tag        TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,

@@ -29,6 +29,8 @@ pub const MAX_TAG_CHARS: usize = 40;
 pub const MAX_TAGS: usize = 20;
 /// Longest "why" line, in characters.
 pub const MAX_WHY_CHARS: usize = 500;
+/// Longest record id accepted from the UI, in bytes. The core writes 36-character UUIDs.
+pub const MAX_ID_BYTES: usize = 64;
 /// The status of a project made from an idea, until PROJ-01 names the values.
 pub const NEW_PROJECT_STATUS: &str = "planned";
 
@@ -194,6 +196,9 @@ fn validate(i: &IdeaInput) -> Result<Vec<String>, StorageError> {
                 return Err(invalid(
                     "The source must be a saved link or a note.".to_string(),
                 ));
+            }
+            if item.id.is_empty() || item.id.len() > MAX_ID_BYTES {
+                return Err(invalid("The source item id is not valid.".to_string()));
             }
         }
         None => {}
@@ -363,7 +368,9 @@ fn complete(conn: &rusqlite::Connection, row: Row0) -> Result<Idea, StorageError
         why: row.why,
         outline: row.outline,
         tags,
-        stage: row.stage,
+        // Computed on read as well, so the stage follows the checks even when something
+        // outside the idea changes them (a source item deleted later).
+        stage: stage_for(&checks, row.stage == IdeaStage::Project),
         checks,
         project_id,
     })
@@ -411,10 +418,17 @@ fn restage(tx: &Transaction<'_>, id: &str) -> Result<(), StorageError> {
     Ok(())
 }
 
-/// The source item must exist and be live when it is saved.
-fn require_source(tx: &Transaction<'_>, s: &Option<IdeaSource>) -> Result<(), StorageError> {
+/// A newly chosen source item must exist and be live. An unchanged source is not checked
+/// again, so an idea whose source was deleted later can still be saved (it never blocks).
+fn require_source(
+    tx: &Transaction<'_>,
+    s: &Option<IdeaSource>,
+    stored: Option<&IdeaSource>,
+) -> Result<(), StorageError> {
     if let Some(IdeaSource::Item { item }) = s {
-        require_live(tx, item)?;
+        if stored != s.as_ref() {
+            require_live(tx, item)?;
+        }
     }
     Ok(())
 }
@@ -448,7 +462,7 @@ impl Storage {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_source(&tx, &input.source)?;
+        require_source(&tx, &input.source, None)?;
         tx.execute(
             INSERT_SQL,
             params_from_iter(write_values(&base.id, now, input)),
@@ -515,7 +529,11 @@ impl Storage {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_source(&tx, &input.source)?;
+        let stored = tx
+            .query_row(GET_SQL, [id], row0)
+            .optional()?
+            .ok_or(NOT_FOUND)?;
+        require_source(&tx, &input.source, stored.source.as_ref())?;
         if tx.execute(UPDATE_SQL, params_from_iter(write_values(id, now, input)))? == 0 {
             return Err(NOT_FOUND);
         }
@@ -929,6 +947,40 @@ mod tests {
         let after = s.get_idea(&idea.base.id).unwrap();
         assert!(!after.checks.has_source);
         assert_eq!(after.source, i.source, "the pointer is kept");
+        // Tag + source was Shape; with the source gone only the tag counts: Spark, on read too.
+        assert_eq!(idea.stage, IdeaStage::Shape);
+        assert_eq!(after.stage, IdeaStage::Spark);
+        let listed = s.list_ideas(&PageRequest::first(10), false).unwrap().items;
+        assert_eq!(listed[0].stage, IdeaStage::Spark);
+        // The same input saves fine: an unchanged dangling source never blocks the owner.
+        let mut again = i.clone();
+        again.title = "Fixed a typo".into();
+        let saved = s.update_idea_at(T2, &idea.base.id, &again).unwrap();
+        assert_eq!(saved.stage, IdeaStage::Spark);
+        assert_eq!(saved.title, "Fixed a typo");
+        // A newly chosen source must still be live.
+        let mut other = i.clone();
+        other.source = Some(IdeaSource::Item {
+            item: ItemRef {
+                kind: ItemKind::Note,
+                id: "missing".into(),
+            },
+        });
+        assert!(matches!(
+            s.update_idea_at(T2, &idea.base.id, &other),
+            Err(StorageError::NotFound { kind: "note" })
+        ));
+        let mut long_id = i.clone();
+        long_id.source = Some(IdeaSource::Item {
+            item: ItemRef {
+                kind: ItemKind::Note,
+                id: "x".repeat(MAX_ID_BYTES + 1),
+            },
+        });
+        assert!(matches!(
+            s.update_idea_at(T2, &idea.base.id, &long_id),
+            Err(StorageError::Invalid(_))
+        ));
         s.delete_idea_at(T3, &idea.base.id).unwrap();
         let live: i64 = s
             .conn
