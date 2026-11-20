@@ -9,7 +9,7 @@
 
 .notes-layout {
   display: grid;
-  grid-template-columns: minmax(0, var(--size-basis-decisions)) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   gap: var(--space-5);
   align-items: start;
 }
@@ -33,6 +33,10 @@
 .notes-banner:empty,
 .notes-dirty:empty {
   display: none;
+}
+
+.notes-field {
+  max-width: none;
 }
 
 .notes-field textarea {
