@@ -11,7 +11,8 @@ paths:
 - The prototype is the visual source of truth. Read `PRODUCT.md` and `DESIGN.md` (when present) before UI work. Do not introduce a new palette, font or component style without updating the design record.
 - Every colour, font, size, radius, shadow and spacing value comes from a token. Add a token before using a new value.
 - Pick-only: UI comes from `ui/src/ds` only. Look the part up in the UI Catalog (`#/ui-catalog`) and import it from `ui/src/ds`. Never define a new part, variant or style in a screen.
-- A missing part goes through a UI component request (DESIGN.md §8, template `.github/ISSUE_TEMPLATE/ui-component-request.md`). The feature agent stops its UI work, files the request, and continues after the design pull request merges. It adds no temporary style.
+- Before UI work, ask the Storehouse keeper session `Mnemo Storehouse` about each part you need (`ListAgents`, then `SendMessage` with a `UI-ASK`; forms in `.claude/storehouse-keeper.md`). On `UI-EXISTS`, use that part. On `UI-QUEUED`, stop the UI that needs it and continue after `UI-READY`. Add no temporary style.
+- A missing part goes through a UI component request (DESIGN.md §8, template `.github/ISSUE_TEMPLATE/ui-component-request.md`). The keeper files it; if the keeper session is not running, file it yourself and say so in your pull request.
 - Only the ui-designer agent (`.claude/agents/ui-designer.md`) edits `ui/src/ds/**`, in its own pull request with the label `design-system`. CI fails a pull request that changes `ui/src/ds/**` without that label.
 - CSS outside `ui/src/ds` sets layout only (display, grid, flex, gap, padding, margin, sizes, position, overflow) with token values; colour, font, border, radius and shadow fail `tests/ds-screen-css.test.mjs`. There are no known exceptions (#111 moved the old screens into `ui/src/ds`); only the UI Catalog dev tool files are listed in `tests/lib/ds-guard.mjs`.
 
