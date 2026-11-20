@@ -7,6 +7,7 @@ export * from "./choice-list/choice-list";
 export * from "./field/field";
 export * from "./input/input";
 export * from "./kbd/kbd";
+export * from "./label-picker/label-picker";
 export * from "./link/link";
 export * from "./menu/menu";
 export * from "./popover/popover";

@@ -47,11 +47,11 @@ export const RECORDS = [
   {
     name: "kanban card",
     tab: "Records",
-    variants: ["default", "AI working"],
-    states: ["rest", "hover", "focus", "dragging"],
+    variants: ["default", "AI working", "button (opens, never moves)"],
+    states: ["rest", "hover", "focus", "dragging", "open now"],
     source: "ds",
     className: "kcard",
-    notes: "Focus a card, then Alt+Left or Alt+Right moves it (see Lists).",
+    notes: `Focus a card, then Alt+Left or Alt+Right moves it (see Lists). The button card (option onOpen, ${ref(129)}) opens an item with click, Enter or Space and marks the open one with aria-current and a check. Disabled, loading and AI off do not apply.`,
   },
   {
     name: "citation",
@@ -69,6 +69,15 @@ export const RECORDS = [
     states: ["default", "overflow"],
     source: "ds",
     className: "tags",
+  },
+  {
+    name: "markdown view",
+    tab: "Records",
+    variants: ["default"],
+    states: ["default", "empty", "overflow", "focus"],
+    source: "ds",
+    className: "md",
+    notes: `A note's Markdown for reading, built from plain nodes with no sanitiser library: raw HTML shows as text and never runs, images are not loaded, and a link only reports its click to the screen (${ref(128)}). Loading, error, partial and AI off belong to the screen. Not editable, so hover, active and disabled do not apply.`,
   },
   {
     name: "metadata line",

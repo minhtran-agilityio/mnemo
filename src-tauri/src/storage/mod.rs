@@ -2,6 +2,7 @@
 #[cfg(test)]
 mod concurrency;
 mod error;
+pub mod files;
 pub mod items;
 pub mod links;
 mod migrate;
@@ -9,12 +10,13 @@ pub mod record;
 mod settings;
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rusqlite::Connection;
 
 pub use error::StorageError;
+pub use files::FileRecord;
 pub use items::Item;
 pub use links::ItemRef;
 pub use record::PageRequest;
@@ -25,6 +27,8 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// The open Mnemo database.
 pub struct Storage {
     conn: Connection,
+    /// The folder for images and attachments, beside the database. Made on the first save.
+    files_dir: PathBuf,
 }
 
 #[allow(dead_code)] // Status readers; callers arrive with later tickets.
@@ -59,7 +63,11 @@ impl Storage {
         conn.execute_batch("PRAGMA synchronous = NORMAL")
             .map_err(|e| StorageError::Open(e.to_string()))?;
         migrate::run(&mut conn, migrate::MIGRATIONS)?;
-        Ok(Storage { conn })
+        let files_dir = path
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join(files::FILES_DIR);
+        Ok(Storage { conn, files_dir })
     }
 
     /// The journal mode in use. Expected to be "wal".
@@ -154,7 +162,7 @@ mod tests {
         assert_eq!(s.journal_mode().unwrap(), "wal");
         assert_eq!(s.busy_timeout_ms().unwrap(), 5000);
         assert_eq!(s.synchronous_level().unwrap(), 1, "NORMAL");
-        assert_eq!(s.schema_version().unwrap(), 4);
+        assert_eq!(s.schema_version().unwrap(), 5);
     }
 
     #[test]
@@ -162,7 +170,7 @@ mod tests {
         let (_d, p) = temp_db();
         drop(Storage::open(&p).unwrap());
         let s = Storage::open(&p).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 4);
+        assert_eq!(s.schema_version().unwrap(), 5);
     }
 
     #[test]

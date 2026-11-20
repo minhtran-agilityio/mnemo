@@ -3,6 +3,7 @@
 export * from "./citation/citation";
 export * from "./kanban-card/kanban-card";
 export * from "./link-card/link-card";
+export * from "./markdown-view/markdown-view";
 export * from "./metadata-line/metadata-line";
 export * from "./note-row/note-row";
 export * from "./tag-list/tag-list";

@@ -13,6 +13,7 @@ import {
   createSectionList,
   createTable,
   createTree,
+  type TreeActionsOptions,
   type TreeNode,
 } from "../../../ds/index";
 import { el, entryRows, state, type TabRenderer } from "../parts";
@@ -41,6 +42,64 @@ const TREE: TreeNode[] = [
   },
   { label: "Đọc sau", kind: "folder", count: 42 },
 ];
+
+const LABELS: TreeNode[] = [
+  {
+    label: "Work",
+    kind: "label",
+    expanded: true,
+    children: [
+      { label: "Mnemo", kind: "label", expanded: true, current: true },
+      {
+        label: "Design notes",
+        kind: "label",
+        refused: {
+          delete: "This label still holds notes that have no other label",
+        },
+      },
+    ],
+  },
+  {
+    label: "Personal",
+    kind: "label",
+    expanded: true,
+    children: [
+      {
+        label: "Sức khoẻ",
+        kind: "label",
+        expanded: true,
+        children: [{ label: "Tập luyện buổi sáng", kind: "label" }],
+      },
+    ],
+  },
+];
+
+const LONG_LABELS: TreeNode[] = [
+  {
+    label: "Ghi chú dài về kiến trúc lưu trữ cục bộ và đồng bộ ngoại tuyến",
+    kind: "label",
+    count: 12,
+  },
+];
+
+/** Room under a tree whose menu is held open, so the menu does not cover the caption. */
+const wrapRoom = (doc: Document, tree: HTMLElement): HTMLElement => {
+  const room = el(doc, "div", "lst-menu-room");
+  room.append(tree);
+  return room;
+};
+
+/** The live example: it reports to a toast, the way a screen would do the work. */
+const labelActions = (
+  toast: (text: string) => void,
+  signal: AbortSignal,
+): TreeActionsOptions => ({
+  signal,
+  onAction: (e) =>
+    toast(
+      `${e.action} ${e.label || e.name || "top level"}. Catalog only, nothing changed.`,
+    ),
+});
 
 export const renderLists: TabRenderer = (panel, ctx) => {
   const doc = ctx.doc;
@@ -136,9 +195,59 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           ],
           { drag: true },
         );
+        const idea = (title: string, current = false) =>
+          createKanbanCard(doc, {
+            title,
+            meta: ["3 of 4 checks", "2 tags"],
+            onOpen: () => {},
+            current,
+          });
+        const stage = (name: string, cards: HTMLElement[]) => ({
+          name,
+          cards,
+          emptyText: "No idea here yet.",
+        });
+        const garden = "Garden robot that waters by soil moisture";
+        const ideas = createKanbanBoard(
+          doc,
+          "Idea board example",
+          [
+            stage("Spark", [
+              idea(garden, true),
+              idea(
+                "A very long idea title that keeps going to show how a title wraps inside the card",
+              ),
+            ]),
+            stage("Shape", [idea("Weekly review ritual")]),
+            stage("Ready", []),
+            stage("Project", [idea("Reading list export")]),
+          ],
+          { move: false },
+        );
+        const many = createKanbanBoard(
+          doc,
+          "Idea board with many cards",
+          [
+            stage(
+              "Spark",
+              Array.from({ length: 12 }, (_, i) =>
+                idea(`Idea number ${i + 1}`),
+              ),
+            ),
+          ],
+          { move: false },
+        );
         return {
           nodes: [
             board,
+            el(
+              doc,
+              "p",
+              "cat-note",
+              "No-move board (move: false), button cards: click, Enter or Space opens an idea; the open one has a check and aria-current. Ready shows the empty state; the last board shows many cards scrolling in the column.",
+            ),
+            ideas,
+            many,
             el(
               doc,
               "p",
@@ -196,6 +305,103 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           doc,
           "expanded, collapsed, current (click or use the arrow keys)",
           createTree(doc, "Folders", TREE),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "with actions, live: F2 renames, Delete is reported, Shift+F10 opens the menu",
+          createTree(
+            doc,
+            "Labels, live example",
+            LABELS,
+            undefined,
+            labelActions(ctx.toast, ctx.signal),
+          ),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "empty: no labels yet",
+          createTree(doc, "Labels, empty example", [], undefined, {
+            onAction: () => {},
+            signal: ctx.signal,
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "menu open, one action refused with its reason",
+          wrapRoom(
+            doc,
+            createTree(doc, "Labels, menu example", LABELS, undefined, {
+              onAction: () => {},
+              signal: ctx.signal,
+              forced: { id: '[["Work",0],["Design notes",1]]', state: "menu" },
+            }),
+          ),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "renaming (Enter saves, Escape cancels)",
+          createTree(doc, "Labels, rename example", LABELS, undefined, {
+            onAction: () => {},
+            signal: ctx.signal,
+            forced: { id: '[["Work",0],["Mnemo",0]]', state: "renaming" },
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "rename refused: duplicate name at the field",
+          createTree(doc, "Labels, rename error example", LABELS, undefined, {
+            onAction: () => {},
+            signal: ctx.signal,
+            forced: {
+              id: '[["Work",0],["Mnemo",0]]',
+              state: "error",
+              value: "Design notes",
+            },
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "hover",
+          createTree(doc, "Labels, hover example", LABELS, undefined, {
+            onAction: () => {},
+            signal: ctx.signal,
+            forced: { id: '[["Work",0],["Mnemo",0]]', state: "hover" },
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "focus-visible",
+          createTree(doc, "Labels, focus example", LABELS, undefined, {
+            onAction: () => {},
+            signal: ctx.signal,
+            forced: { id: '[["Work",0],["Mnemo",0]]', state: "focus" },
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "active (pressed)",
+          createTree(doc, "Labels, active example", LABELS, undefined, {
+            onAction: () => {},
+            signal: ctx.signal,
+            forced: { id: '[["Work",0],["Mnemo",0]]', state: "active" },
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "overflow: long Vietnamese name, 60 characters, cut with the full name as title",
+          createTree(doc, "Labels, long name example", LONG_LABELS, undefined, {
+            onAction: () => {},
+            signal: ctx.signal,
+          }),
           { grow: true },
         ),
       ],
