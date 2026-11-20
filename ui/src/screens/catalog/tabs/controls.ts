@@ -10,8 +10,11 @@ import {
   createCheckbox,
   createChip,
   createChoiceList,
+  createDialog,
+  createDialogButton,
   createField,
   createKbd,
+  createLabelPicker,
   createLink,
   createMenu,
   createMenuPanel,
@@ -27,9 +30,11 @@ import {
   createTextInput,
   createToggle,
   createTooltip,
+  type LabelPickerNode,
   setButtonBusy,
 } from "../../../ds/index";
 import {
+  button,
   el,
   entryRows,
   state,
@@ -50,6 +55,14 @@ const THEME_CHOICES = [
   { value: "dark", label: "Dark", hint: "Dark background, light text." },
 ] as const;
 const LINK = "https://vnexpress.net/ai";
+
+/** The label tree of the label picker's sample content. */
+const LABEL_TREE: readonly LabelPickerNode[] = [
+  { name: "Work", children: [{ name: "Mnemo", current: true }] },
+  { name: "Personal" },
+  { name: "Cá nhân", children: [{ name: "Sức khoẻ" }] },
+];
+const LABEL_CHOSEN = ["Work / Mnemo", "Cá nhân / Sức khoẻ"];
 
 /** A line of states that wraps, like the prototype's nested example rows. */
 function line(doc: Document, ...states: HTMLElement[]): HTMLElement {
@@ -554,6 +567,123 @@ export const renderControls: TabRenderer = (panel, ctx) => {
           state(doc, "disabled", disabled.element),
           state(doc, "error", error.element),
           state(doc, "long hint", long.element),
+        ];
+      },
+      "label picker": () => {
+        const single = createLabelPicker(doc, {
+          label: "Move “Design notes” under",
+          mode: "single",
+          topLevel: true,
+          nodes: LABEL_TREE,
+          value: ["Work / Mnemo"],
+          onChange: (p) =>
+            ctx.toast(`Chose ${p[0] || "(Top level)"}. Catalog only.`),
+        });
+        const forced = (label: string, st: "hover" | "focus" | "active") =>
+          createLabelPicker(doc, {
+            label,
+            mode: "single",
+            nodes: LABEL_TREE,
+            forceState: { path: "Personal", state: st },
+          });
+        const disabledNodes = createLabelPicker(doc, {
+          label: "Move “Work” under",
+          mode: "single",
+          topLevel: true,
+          value: [""],
+          nodes: [
+            {
+              name: "Work",
+              disabled: "A label cannot go under itself.",
+              children: [
+                {
+                  name: "Mnemo",
+                  disabled: "A label cannot go under its own child.",
+                  current: true,
+                },
+              ],
+            },
+            { name: "Personal" },
+          ],
+        });
+        const multiple = createLabelPicker(doc, {
+          label: "Labels",
+          mode: "multiple",
+          nodes: LABEL_TREE,
+          value: LABEL_CHOSEN,
+        });
+        const error = createLabelPicker(doc, {
+          label: "Labels",
+          mode: "multiple",
+          nodes: LABEL_TREE,
+        });
+        error.setError("Choose at least one label before saving");
+        const empty = createLabelPicker(doc, {
+          label: "Labels",
+          mode: "multiple",
+          nodes: [],
+        });
+        const off = createLabelPicker(doc, {
+          label: "Labels",
+          mode: "multiple",
+          nodes: LABEL_TREE,
+          value: LABEL_CHOSEN,
+          disabled: true,
+        });
+        const long = createLabelPicker(doc, {
+          label: "Labels",
+          mode: "multiple",
+          value: [
+            "Dự án nghiên cứu / Tài liệu tham khảo về trí tuệ nhân tạo và học máy / Ghi chú rất dài của tháng mười",
+          ],
+          nodes: [
+            {
+              name: "Dự án nghiên cứu",
+              children: [
+                {
+                  name: "Tài liệu tham khảo về trí tuệ nhân tạo và học máy",
+                  children: [
+                    { name: "Ghi chú rất dài của tháng mười" },
+                    { name: "Nguyễn Thị Minh Khai" },
+                  ],
+                },
+              ],
+            },
+            ...Array.from({ length: 12 }, (_, i) => ({
+              name: `Label ${i + 1}`,
+            })),
+          ],
+        });
+        const dialogPicker = createLabelPicker(doc, {
+          label: "Move “Design notes” under",
+          mode: "single",
+          topLevel: true,
+          nodes: LABEL_TREE,
+          value: ["Work / Mnemo"],
+        });
+        const dialog = createDialog({
+          title: "Move label",
+          children: [dialogPicker.element],
+          actions: (close) => [
+            createDialogButton("Cancel", "default", close, doc),
+            createDialogButton("Move label", "primary", close, doc),
+          ],
+        });
+        ctx.signal.addEventListener("abort", () => dialog.close());
+        const open = button(doc, "btn", "Move label…");
+        open.addEventListener("click", () => dialog.open(open));
+        return [
+          state(doc, "single, current parent, default (live)", single.element),
+          state(doc, "hover", forced("Hover", "hover").element),
+          state(doc, "focus-visible", forced("Focus-visible", "focus").element),
+          state(doc, "active", forced("Active", "active").element),
+          state(doc, "disabled nodes with reason", disabledNodes.element),
+          state(doc, "multiple, chosen chips (live)", multiple.element),
+          state(doc, "error: no label chosen", error.element),
+          state(doc, "empty", empty.element),
+          state(doc, "disabled", off.element),
+          state(doc, "overflow, deep and long Vietnamese paths", long.element),
+          state(doc, "in a dialog (Escape cancels, focus trapped)", open),
         ];
       },
       "shortcut hint": () => {

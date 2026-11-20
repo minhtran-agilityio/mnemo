@@ -10,6 +10,11 @@ export interface PopoverOptions {
   /** Which element takes focus on open. Defaults to the first input or button in the panel. */
   readonly firstFocus?: () => HTMLElement | null;
   readonly onOpen?: () => void;
+  /**
+   * A panel the catalog holds open to show it: no focus moves in, and a click outside or focus
+   * leaving does not close it. The trigger and Escape still do.
+   */
+  readonly held?: boolean;
   /** When it aborts, the popover closes and drops its document listener. */
   readonly signal?: AbortSignal;
 }
@@ -46,6 +51,7 @@ export function createPopover(doc: Document, options: PopoverOptions): Popover {
   // to the document click listener.
   anchor.addEventListener("focusout", (event) => {
     const to = event.relatedTarget;
+    if (options.held) return;
     if (isOpen() && to instanceof Node && !anchor.contains(to)) close(false);
   });
 
@@ -57,6 +63,11 @@ export function createPopover(doc: Document, options: PopoverOptions): Popover {
     if (isOpen()) return;
     panel.hidden = false;
     trigger.setAttribute("aria-expanded", "true");
+    if (options.held) {
+      // Nothing inside the panel has focus, so Escape is read on the document.
+      doc.addEventListener("keydown", heldEscape);
+      return;
+    }
     doc.addEventListener("click", outside);
     options.onOpen?.();
     const first =
@@ -70,7 +81,25 @@ export function createPopover(doc: Document, options: PopoverOptions): Popover {
     panel.hidden = true;
     trigger.setAttribute("aria-expanded", "false");
     doc.removeEventListener("click", outside);
+    doc.removeEventListener("keydown", heldEscape);
     if (returnFocus) trigger.focus();
+  }
+
+  function heldEscape(event: KeyboardEvent): void {
+    // The panel left the page (its screen was drawn again): stop listening.
+    if (!anchor.isConnected) {
+      doc.removeEventListener("keydown", heldEscape);
+      return;
+    }
+    // Not an Escape another part already used (a field, a dialog) or that came from inside one.
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    const from = event.target;
+    if (
+      from instanceof Element &&
+      from.closest("input, textarea, select, dialog, [role='dialog']")
+    )
+      return;
+    close(false);
   }
 
   trigger.addEventListener("click", () => (isOpen() ? close(false) : open()));

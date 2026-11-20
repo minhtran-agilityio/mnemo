@@ -47,11 +47,11 @@ export const RECORDS = [
   {
     name: "kanban card",
     tab: "Records",
-    variants: ["default", "AI working"],
-    states: ["rest", "hover", "focus", "dragging"],
+    variants: ["default", "AI working", "button (opens, never moves)"],
+    states: ["rest", "hover", "focus", "dragging", "open now"],
     source: "ds",
     className: "kcard",
-    notes: "Focus a card, then Alt+Left or Alt+Right moves it (see Lists).",
+    notes: `Focus a card, then Alt+Left or Alt+Right moves it (see Lists). The button card (option onOpen, ${ref(129)}) opens an item with click, Enter or Space and marks the open one with aria-current and a check. Disabled, loading and AI off do not apply.`,
   },
   {
     name: "citation",

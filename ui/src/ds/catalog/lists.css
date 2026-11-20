@@ -7,3 +7,9 @@
   width: var(--size-section-list-max);
   max-width: 100%;
 }
+
+/* The tree example that holds a node menu open: room for the menu under the tree. */
+.ui-catalog .lst-menu-room {
+  width: 100%;
+  min-height: calc(var(--size-row-menu) * 11);
+}

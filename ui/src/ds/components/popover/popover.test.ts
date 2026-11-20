@@ -21,6 +21,76 @@ test("starts closed and wires aria-expanded, aria-controls and aria-haspopup", (
   expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
 });
 
+test("a held panel stays open on an outside click, and its trigger still closes it", () => {
+  const trigger = createButton(document, { label: "Why?" });
+  const panel = document.createElement("div");
+  const pop = createPopover(document, {
+    trigger,
+    panel,
+    haspopup: "dialog",
+    held: true,
+  });
+  document.body.append(pop.anchor);
+  pop.open();
+  expect(panel.hidden).toBe(false);
+  document.body.click();
+  expect(panel.hidden).toBe(false);
+  trigger.click();
+  expect(panel.hidden).toBe(true);
+  pop.open();
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  expect(panel.hidden).toBe(true);
+  pop.open();
+  // An Escape that came from a field, or that another part already used, is not for the panel.
+  const field = document.createElement("input");
+  document.body.append(field);
+  field.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  expect(panel.hidden).toBe(false);
+  const used = new KeyboardEvent("keydown", {
+    key: "Escape",
+    bubbles: true,
+    cancelable: true,
+  });
+  document.addEventListener("keydown", (e) => e.preventDefault(), {
+    once: true,
+    capture: true,
+  });
+  document.body.dispatchEvent(used);
+  expect(panel.hidden).toBe(false);
+  document.body.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  expect(panel.hidden).toBe(true);
+  field.remove();
+  pop.anchor.remove();
+});
+
+test("a held panel that left the page ignores Escape and drops its listener", () => {
+  const trigger = createButton(document, { label: "Why?" });
+  const panel = document.createElement("div");
+  const pop = createPopover(document, {
+    trigger,
+    panel,
+    haspopup: "dialog",
+    held: true,
+  });
+  document.body.append(pop.anchor);
+  pop.open();
+  pop.anchor.remove();
+  document.body.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  expect(panel.hidden).toBe(false); // not closed by the stale listener
+  document.body.append(pop.anchor);
+  document.body.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  expect(panel.hidden).toBe(false); // the listener removed itself
+  pop.anchor.remove();
+});
+
 test("click opens, click again closes", () => {
   const { trigger, panel } = make();
   trigger.click();
