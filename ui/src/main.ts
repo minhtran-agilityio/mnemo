@@ -5,7 +5,7 @@ import "./frame/sidebar.css";
 import "./screens/settings/settings.css";
 import { getVersion } from "@tauri-apps/api/app";
 import { renderEmptyState } from "./frame/empty-state";
-import { EVERYTHING_ID } from "./frame/nav";
+import { EVERYTHING_ID, UI_CATALOG_ID } from "./frame/nav";
 import { createRouter, splitHash } from "./frame/router";
 import {
   createSidebarFromSaved,
@@ -136,12 +136,12 @@ async function start(): Promise<void> {
     leaveScreen?.();
     leaveScreen = null;
     // The UI Catalog is dev only: a release build drops this branch and the catalog code with it.
-    // It is not a sidebar item, so no item is marked current while it is open.
+    // Its Storehouse sidebar item is marked current while it is open.
     if (
       import.meta.env.DEV &&
-      splitHash(window.location.hash).path === "ui-catalog"
+      splitHash(window.location.hash).path === UI_CATALOG_ID
     ) {
-      sidebar.setCurrent("");
+      sidebar.setCurrent(UI_CATALOG_ID);
       document.title = "UI Catalog - Mnemo";
       screen.textContent = "Loading the UI Catalog...";
       import("./screens/catalog/catalog")
