@@ -79,7 +79,7 @@ pub enum AiMode {
 /// `MNEMO_FAKE_AI`.
 pub struct AiRunnerState {
     // Read by the AI features of issue #19 and later; today only the mode is read.
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "read by the AI features of issue #19")]
     pub runner: Arc<dyn AiRunner>,
     pub fake: bool,
 }
