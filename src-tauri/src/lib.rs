@@ -24,6 +24,7 @@ fn startup_code(e: &StorageError) -> &'static str {
         StorageError::Invalid(_) => "database",
         StorageError::FileTooLarge { .. }
         | StorageError::InvalidFileName
+        | StorageError::FileMissing
         | StorageError::Files(_) => "database",
     }
 }

@@ -21,6 +21,9 @@ pub enum StorageError {
     FileTooLarge { limit_bytes: u64 },
     /// The file name is not usable, or a stored name points outside the files folder.
     InvalidFileName,
+    /// The row is live but its file is gone from the files folder. This is data loss,
+    /// not a deletion, so it has its own message (honest failure).
+    FileMissing,
     /// The files folder could not be read or written. The text never names a path.
     Files(String),
 }
@@ -63,6 +66,10 @@ impl fmt::Display for StorageError {
                 limit_text(*limit_bytes)
             ),
             StorageError::InvalidFileName => write!(f, "This file name cannot be used."),
+            StorageError::FileMissing => write!(
+                f,
+                "Mnemo has a record of this file, but the file is missing from the files folder. Nothing was deleted by Mnemo."
+            ),
             StorageError::Files(why) => write!(f, "Mnemo could not read or save the file. Reason: {why}"),
         }
     }

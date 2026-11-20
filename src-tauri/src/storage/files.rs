@@ -248,12 +248,14 @@ impl Storage {
         if name.is_absolute() || !single_normal {
             return Err(StorageError::InvalidFileName);
         }
-        let not_found = |e: io::Error| match e.kind() {
-            io::ErrorKind::NotFound => StorageError::NotFound { kind: "file" },
+        // Only a live row reaches here, so a folder or file gone from disk is lost
+        // data, not a deleted file.
+        let missing = |e: io::Error| match e.kind() {
+            io::ErrorKind::NotFound => StorageError::FileMissing,
             _ => io_failed(e),
         };
-        let root = fs::canonicalize(&self.files_dir).map_err(not_found)?;
-        let full = fs::canonicalize(root.join(stored_name)).map_err(not_found)?;
+        let root = fs::canonicalize(&self.files_dir).map_err(missing)?;
+        let full = fs::canonicalize(root.join(stored_name)).map_err(missing)?;
         if !full.starts_with(&root) {
             return Err(StorageError::InvalidFileName);
         }
@@ -507,10 +509,16 @@ mod tests {
     }
 
     #[test]
-    fn a_row_whose_file_is_missing_gives_not_found() {
+    fn a_row_whose_file_is_missing_gives_file_missing_not_deleted() {
         let (s, d) = open_temp();
         let rec = s.save_file("a.txt", b"a").unwrap();
         fs::remove_file(files_dir(&d).join(stored_name(&s, &rec.id))).unwrap();
+        assert_eq!(s.read_file(&rec.id).unwrap_err(), StorageError::FileMissing);
+        // The whole folder gone is the same: lost data, not a deleted file.
+        fs::remove_dir_all(files_dir(&d)).unwrap();
+        assert_eq!(s.read_file(&rec.id).unwrap_err(), StorageError::FileMissing);
+        // A soft-deleted row is still "not found".
+        s.delete_file(&rec.id).unwrap();
         assert_eq!(
             s.read_file(&rec.id).unwrap_err(),
             StorageError::NotFound { kind: "file" }

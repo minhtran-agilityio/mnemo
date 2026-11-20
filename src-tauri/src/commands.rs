@@ -294,6 +294,10 @@ fn file_failed(e: StorageError) -> AppError {
             code: "invalid_file_name",
             message: e.to_string(),
         },
+        StorageError::FileMissing => AppError {
+            code: "file_missing",
+            message: e.to_string(),
+        },
         StorageError::NotFound { .. } => AppError {
             code: "file_not_found",
             message: "There is no such file. It may have been deleted.".to_string(),
@@ -654,6 +658,26 @@ mod tests {
         assert_eq!(
             read_file_item(&state, &rec.id).unwrap_err().code,
             "file_not_found"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_file_lost_from_disk_gives_file_missing_not_deleted() {
+        let (state, dir) = app_storage();
+        let rec = save_file_item(&state, Some("a.png"), b"png").unwrap();
+        std::fs::remove_dir_all(dir.join("files")).unwrap();
+        let err = read_file_item(&state, &rec.id).unwrap_err();
+        assert_eq!(err.code, "file_missing");
+        assert!(
+            !err.message.contains("may have been deleted"),
+            "{}",
+            err.message
+        );
+        assert!(
+            !err.message.contains('/'),
+            "no path may reach the UI: {}",
+            err.message
         );
         let _ = std::fs::remove_dir_all(dir);
     }
