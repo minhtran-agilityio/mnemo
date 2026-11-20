@@ -139,7 +139,7 @@ mod tests {
         assert!(p.exists());
         assert_eq!(s.journal_mode().unwrap(), "wal");
         assert_eq!(s.busy_timeout_ms().unwrap(), 5000);
-        assert_eq!(s.schema_version().unwrap(), 4);
+        assert_eq!(s.schema_version().unwrap(), 5);
     }
 
     #[test]
@@ -147,7 +147,7 @@ mod tests {
         let (_d, p) = temp_db();
         drop(Storage::open(&p).unwrap());
         let s = Storage::open(&p).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 4);
+        assert_eq!(s.schema_version().unwrap(), 5);
     }
 
     #[test]

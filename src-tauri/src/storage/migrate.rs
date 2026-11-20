@@ -29,6 +29,10 @@ pub const MIGRATIONS: &[Migration] = &[
         number: 4,
         sql: include_str!("../../migrations/0004_item_links.sql"),
     },
+    Migration {
+        number: 5,
+        sql: include_str!("../../migrations/0005_labels.sql"),
+    },
 ];
 
 /// Reads the schema version stored in the database (0 for a new file).
@@ -87,7 +91,7 @@ mod tests {
     fn real_migrations_set_the_version() {
         let mut c = mem();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 4);
+        assert_eq!(current_version(&c).unwrap(), 5);
     }
 
     #[test]
@@ -158,7 +162,7 @@ mod tests {
             err,
             StorageError::SchemaTooNew {
                 found: 99,
-                supported: 4
+                supported: 5
             }
         );
     }
@@ -214,13 +218,90 @@ mod tests {
             [T],
         )
         .unwrap();
-        run(&mut c, MIGRATIONS).unwrap();
+        run(&mut c, &MIGRATIONS[..4]).unwrap();
         assert_eq!(current_version(&c).unwrap(), 4);
         assert!(table_exists(&c, "item_link"));
         let body: String = c
             .query_row("SELECT body FROM note WHERE id = 'n1'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(body, "kept");
+    }
+
+    fn index_exists(conn: &Connection, name: &str) -> bool {
+        conn.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='index' AND name=?1",
+            [name],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap()
+            > 0
+    }
+
+    #[test]
+    fn migration_5_adds_labels_to_a_database_built_by_migration_4() {
+        let mut c = mem();
+        run(&mut c, &MIGRATIONS[..4]).unwrap();
+        c.execute(
+            "INSERT INTO note (id, created_at, updated_at, body) VALUES ('n1', ?1, ?1, 'kept')",
+            [T],
+        )
+        .unwrap();
+        assert!(!table_exists(&c, "label"));
+        run(&mut c, &MIGRATIONS[..5]).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 5);
+        let body: String = c
+            .query_row(
+                "SELECT body FROM note WHERE id = 'n1' AND deleted_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(body, "kept");
+        assert!(table_exists(&c, "label"));
+        assert!(table_exists(&c, "note_label"));
+        assert_eq!(
+            columns(&c, "label"),
+            [
+                "id",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+                "name",
+                "parent_id"
+            ]
+        );
+        for i in [
+            "uq_label_child",
+            "uq_label_top",
+            "idx_label_parent",
+            "idx_note_label_label",
+            "idx_note_label_note",
+            "idx_note_changed",
+        ] {
+            assert!(index_exists(&c, i), "index {i} missing");
+        }
+    }
+
+    #[test]
+    fn migration_5_label_names_are_unique_per_parent_ignoring_case() {
+        let mut c = mem();
+        run(&mut c, MIGRATIONS).unwrap();
+        let add = |id: &str, name: &str, parent: Option<&str>, deleted: Option<&str>| {
+            c.execute(
+                "INSERT INTO label (id, created_at, updated_at, deleted_at, name, parent_id)
+                 VALUES (?1, ?2, ?2, ?3, ?4, ?5)",
+                rusqlite::params![id, T, deleted, name, parent],
+            )
+        };
+        add("t1", "Work", None, None).unwrap();
+        assert!(add("t2", "work", None, None).is_err());
+        add("t3", "Home", None, None).unwrap();
+        add("c1", "Plans", Some("t1"), None).unwrap();
+        assert!(add("c2", "PLANS", Some("t1"), None).is_err());
+        add("c3", "Plans", Some("t3"), None).unwrap();
+        // A deleted label frees its name.
+        add("t4", "Old", None, Some(T)).unwrap();
+        add("t5", "Old", None, None).unwrap();
     }
 
     #[test]
@@ -233,7 +314,7 @@ mod tests {
         )
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 4);
+        assert_eq!(current_version(&c).unwrap(), 5);
         for t in KINDS.iter().chain(["item_link", "settings"].iter()) {
             assert!(table_exists(&c, t), "table {t} missing");
         }
