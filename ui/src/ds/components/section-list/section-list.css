@@ -3,6 +3,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  /* A long value never makes the list wider than its container. */
+  max-width: 100%;
   padding: var(--space-2);
   border: var(--border-1) solid var(--line);
   border-radius: var(--radius-lg);
@@ -47,6 +49,10 @@
 }
 
 .section-list-value {
+  /* Room above and below the line for stacked Vietnamese marks, taken back by the margin so the
+     layout does not move. */
+  padding-block: var(--border-2);
+  margin-block: calc(-1 * var(--border-2));
   max-width: 100%;
   overflow: hidden;
   color: var(--muted);

@@ -35,6 +35,8 @@ a.cite:hover {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  /* A long unbroken title would make the list as wide as the title; it stays inside its container. */
+  max-width: 100%;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -49,6 +51,10 @@ a.cite:hover {
 }
 
 .srcs .src-title {
+  /* Room above and below the line for stacked Vietnamese marks, taken back by the margin so the
+     layout does not move. */
+  padding-block: var(--border-2);
+  margin-block: calc(-1 * var(--border-2));
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

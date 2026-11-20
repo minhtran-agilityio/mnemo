@@ -8,7 +8,10 @@
   gap: var(--space-2);
   width: var(--sidebar-width);
   padding: var(--space-3);
-  overflow: hidden;
+  /* Contained on both axes, with no clip value (older WebKitGTK does not know it). In a window too
+     short for the content the box scrolls, so nothing spills below it and every row stays reachable. */
+  overflow-x: hidden;
+  overflow-y: auto;
   border-right: var(--border-1) solid var(--line);
   background: var(--card);
   transition: width var(--dur-nav) var(--ease);
@@ -205,6 +208,10 @@
    taken back by the margin, keeps the clip box from cutting the edges of the first and last
    glyphs, so a short label draws exactly as before. */
 .sidebar-item .sidebar-text {
+  /* Room above and below the line for stacked Vietnamese marks, taken back by the margin so the
+     layout does not move. */
+  padding-block: var(--border-2);
+  margin-block: calc(-1 * var(--border-2));
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

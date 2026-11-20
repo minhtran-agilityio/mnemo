@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { expect, test } from "vitest";
+import { cssRule, MARKS_ROOM } from "../../../css-rule";
 import {
   createCompactRow,
   createLinkCard,
@@ -83,4 +84,40 @@ test("a compact row shows the site and keeps the full url in a tooltip", () => {
   expect(row.querySelector(".dom")?.textContent).toBe("v2.tauri.app");
   expect(row.querySelector<HTMLElement>(".dom")?.title).toBe(read.url);
   expect(row.tabIndex).toBe(0);
+});
+
+// The Limits tab fix for issue 113: the url line has room for stacked marks, the trust label wraps inside a narrow card,
+// and the cards view never asks for more than its container.
+test("a messy url is whole text in .url, which has room for stacked marks, and the card keeps the full value", () => {
+  const url = `example.com/${"ẪẬẲỖỮỰ".repeat(6)}/${"a".repeat(120)}?x=1&y=${"b".repeat(60)}`;
+  const card = createLinkCard(document, { ...unread, url });
+  const el = card.querySelector(".url") as HTMLElement;
+  expect(el.textContent).toBe(url);
+  expect(el.title).toBe(url);
+  const rule = cssRule(import.meta.dirname, "link-card.css", ".lcard .url");
+  expect(rule).toMatchObject(MARKS_ROOM);
+  expect(rule["text-overflow"]).toBe("ellipsis");
+  expect(rule["white-space"]).toBe("nowrap");
+  // The title and the summary hold long words with overflow-wrap: anywhere.
+  for (const sel of [".lcard .title", ".lcard .sum"])
+    expect(
+      cssRule(import.meta.dirname, "link-card.css", sel)["overflow-wrap"],
+    ).toBe("anywhere");
+});
+
+test("the trust label of a summary can wrap and never grows wider than its card", () => {
+  const card = createLinkCard(document, read);
+  expect(card.querySelector(":scope > .trust")).not.toBeNull();
+  const rule = cssRule(import.meta.dirname, "link-card.css", ".lcard .trust");
+  expect(rule["max-width"]).toBe("100%");
+  expect(rule["white-space"]).toBe("normal");
+});
+
+test("the cards view has columns that shrink to the container, so a narrow window needs no sideways scroll", () => {
+  const view = createLinkView(document, "cards", [read, unread]);
+  expect(view.className).toBe("views cards");
+  const rule = cssRule(import.meta.dirname, "link-card.css", ".views.cards");
+  expect(rule["grid-template-columns"]).toContain(
+    "min(var(--size-basis-column), 100%)",
+  );
 });

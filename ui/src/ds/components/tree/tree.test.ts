@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { expect, test } from "vitest";
+import { cssRule, MARKS_ROOM } from "../../../css-rule";
 import { createTree, type TreeNode } from "./tree";
 
 const nodes: TreeNode[] = [
@@ -71,4 +72,19 @@ test("arrow keys move between visible nodes and open or close a group", () => {
   key(clients, "ArrowUp");
   expect(document.activeElement).toBe(node(t, "Mnemo"));
   t.remove();
+});
+
+// The Limits tab fix (issue 113): a long folder name is cut with an ellipsis and keeps room for stacked marks.
+test("a long folder name is whole text in .tname, which has room for stacked marks and shrinks", () => {
+  const label = `${"ẪẬẲỖỮỰ".repeat(10)}/${"w".repeat(100)}`;
+  const t = createTree(document, "Folders", [
+    { label, kind: "folder", count: 3 },
+  ]);
+  const el = t.querySelector(".tname") as HTMLElement;
+  expect(el.textContent).toBe(label);
+  expect(el.title).toBe(label);
+  const rule = cssRule(import.meta.dirname, "tree.css", ".tnode .tname");
+  expect(rule).toMatchObject(MARKS_ROOM);
+  expect(rule["min-width"]).toBe("0");
+  expect(rule["text-overflow"]).toBe("ellipsis");
 });

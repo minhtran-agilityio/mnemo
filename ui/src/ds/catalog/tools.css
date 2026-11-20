@@ -10,6 +10,10 @@
   padding-bottom: var(--space-6);
 }
 
+.ui-catalog .specimen {
+  container-type: inline-size;
+}
+
 .ui-catalog .spec-bar {
   display: flex;
   flex-wrap: wrap;
@@ -113,6 +117,21 @@
   width: 62%;
   height: 100%;
   background: var(--warn-ink);
+}
+
+/* Below about 480px the window would be a miniature nobody can read: the stage goes and a note stays. */
+.ui-catalog .spec-narrow {
+  display: none;
+}
+
+@container (max-width: 480px) {
+  .ui-catalog .spec-stage {
+    display: none;
+  }
+
+  .ui-catalog .spec-narrow {
+    display: block;
+  }
 }
 
 /* The hotspots lie over the window and take the pointer; the window under them is inert. */

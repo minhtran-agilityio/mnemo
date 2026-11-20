@@ -9,6 +9,7 @@ main.cat-screen {
 
 .cat-layout {
   width: 100%;
+  min-width: 0;
   max-width: var(--size-page-max);
   margin: 0 auto;
 }
@@ -19,6 +20,7 @@ main.cat-screen {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  min-width: 0;
 }
 
 .cat-head,
@@ -75,6 +77,15 @@ main.cat-screen {
 .cat-tabbar {
   justify-content: space-between;
   gap: var(--space-3);
+}
+
+.cat-head > *,
+.cat-legend > *,
+.cat-status > *,
+.cat-tabbar > *,
+.cat-intro > *,
+.cov > * {
+  min-width: 0;
 }
 
 .cat-tabs {

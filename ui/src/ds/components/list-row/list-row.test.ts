@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { Link } from "lucide";
 import { expect, test } from "vitest";
+import { cssRule, MARKS_ROOM } from "../../../css-rule";
 import { createListRow } from "./list-row";
 
 test("it renders the title and meta as text and keeps the full title in the tooltip", () => {
@@ -41,4 +42,17 @@ test("a forced state adds its class", () => {
   expect(
     createListRow(document, { title: "A", forceState: "hover" }).classList,
   ).toContain("is-hover");
+});
+
+// The Limits tab fix (issue 113): a second line cut with an ellipsis must not cut the stacked marks of Vietnamese capitals.
+test("a long unbroken second line stays whole text in the element that has room for stacked marks", () => {
+  const sub = `${"ẪẬẲỖỮỰ".repeat(12)}-${"x".repeat(80)}`;
+  const li = createListRow(document, { title: "Title", sub });
+  const el = li.querySelector(".row-sub") as HTMLElement;
+  expect(el.textContent).toBe(sub);
+  expect(el.title).toBe(sub);
+  const rule = cssRule(import.meta.dirname, "list-row.css", ".row-sub");
+  expect(rule).toMatchObject(MARKS_ROOM);
+  expect(rule["text-overflow"]).toBe("ellipsis");
+  expect(rule["white-space"]).toBe("nowrap");
 });

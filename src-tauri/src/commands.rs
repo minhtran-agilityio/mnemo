@@ -2,11 +2,17 @@
 
 use std::sync::{Mutex, MutexGuard};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
 use crate::ai::health::{self, AiHealth};
-use crate::storage::{Storage, StorageError};
+use crate::storage::items::{
+    Bookmark, BookmarkInput, Event, EventInput, Idea, IdeaInput, Memory, MemoryInput, Note,
+    NoteInput, Project, ProjectInput, Run, RunInput, Task, TaskInput,
+};
+use crate::storage::links::Link;
+use crate::storage::record::{Cursor, Page};
+use crate::storage::{Item, ItemRef, PageRequest, Storage, StorageError};
 
 /// The one error shape every command returns: a stable machine `code` and a plain
 /// `message`. It never carries file paths, stack traces or raw error text.
@@ -239,6 +245,212 @@ pub async fn check_ai_health(app: tauri::AppHandle) -> Result<AiHealth, AppError
     Ok(refresh_ai_health(app).await)
 }
 
+// ---- Items and links ----
+
+/// The arguments of every list command: page size (1 to 100), where the page starts
+/// (null for the first page) and whether deleted items are included.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListArgs {
+    pub limit: u32,
+    #[serde(default)]
+    pub after: Option<Cursor>,
+    #[serde(default)]
+    pub include_deleted: bool,
+}
+
+/// The error the UI sees for an item or link call. A missing record and refused input
+/// keep their own codes; any other reason stays in the log.
+fn item_failed(e: StorageError) -> AppError {
+    match e {
+        StorageError::NotFound { kind } => AppError {
+            code: "not_found",
+            message: format!("There is no such {kind}. It may have been deleted."),
+        },
+        StorageError::Invalid(message) => AppError {
+            code: "invalid_input",
+            message,
+        },
+        other => {
+            log::error!("item storage call failed: {other}");
+            AppError {
+                code: "storage_error",
+                message: "Mnemo could not read or save this item. Nothing was deleted.".to_string(),
+            }
+        }
+    }
+}
+
+fn add_item<T: Item>(storage: &AppStorage, input: &T::Input) -> Result<T, AppError> {
+    storage.get()?.add::<T>(input).map_err(item_failed)
+}
+
+fn get_item<T: Item>(storage: &AppStorage, id: &str) -> Result<T, AppError> {
+    storage.get()?.get::<T>(id).map_err(item_failed)
+}
+
+fn list_items<T: Item>(storage: &AppStorage, args: &ListArgs) -> Result<Page<T>, AppError> {
+    let page = PageRequest {
+        limit: args.limit,
+        after: args.after.clone(),
+    };
+    storage
+        .get()?
+        .list::<T>(&page, args.include_deleted)
+        .map_err(item_failed)
+}
+
+fn update_item<T: Item>(storage: &AppStorage, id: &str, input: &T::Input) -> Result<T, AppError> {
+    storage.get()?.update::<T>(id, input).map_err(item_failed)
+}
+
+fn delete_item<T: Item>(storage: &AppStorage, id: &str) -> Result<(), AppError> {
+    storage.get()?.delete::<T>(id).map_err(item_failed)
+}
+
+/// The five commands of one item type. Each runs off the main thread and calls one
+/// storage function; checks of the fields happen in storage before any write.
+macro_rules! item_commands {
+    ($rec:ty, $input:ty, $add:ident, $get:ident, $list:ident, $update:ident, $delete:ident) => {
+        /// Adds an item. The core sets its id and times.
+        #[tauri::command]
+        pub async fn $add(app: tauri::AppHandle, input: $input) -> Result<$rec, AppError> {
+            off_main_thread(app, move |s| add_item::<$rec>(s, &input)).await
+        }
+
+        /// The live item with this id.
+        #[tauri::command]
+        pub async fn $get(app: tauri::AppHandle, id: String) -> Result<$rec, AppError> {
+            off_main_thread(app, move |s| get_item::<$rec>(s, &id)).await
+        }
+
+        /// One page of items, newest first.
+        #[tauri::command]
+        pub async fn $list(app: tauri::AppHandle, args: ListArgs) -> Result<Page<$rec>, AppError> {
+            off_main_thread(app, move |s| list_items::<$rec>(s, &args)).await
+        }
+
+        /// Replaces every field of a live item.
+        #[tauri::command]
+        pub async fn $update(
+            app: tauri::AppHandle,
+            id: String,
+            input: $input,
+        ) -> Result<$rec, AppError> {
+            off_main_thread(app, move |s| update_item::<$rec>(s, &id, &input)).await
+        }
+
+        /// Soft deletes an item and removes its links.
+        #[tauri::command]
+        pub async fn $delete(app: tauri::AppHandle, id: String) -> Result<(), AppError> {
+            off_main_thread(app, move |s| delete_item::<$rec>(s, &id)).await
+        }
+    };
+}
+
+item_commands!(
+    Bookmark,
+    BookmarkInput,
+    add_bookmark,
+    get_bookmark,
+    list_bookmarks,
+    update_bookmark,
+    delete_bookmark
+);
+item_commands!(
+    Note,
+    NoteInput,
+    add_note,
+    get_note,
+    list_notes,
+    update_note,
+    delete_note
+);
+item_commands!(
+    Idea,
+    IdeaInput,
+    add_idea,
+    get_idea,
+    list_ideas,
+    update_idea,
+    delete_idea
+);
+item_commands!(
+    Project,
+    ProjectInput,
+    add_project,
+    get_project,
+    list_projects,
+    update_project,
+    delete_project
+);
+item_commands!(
+    Task,
+    TaskInput,
+    add_task,
+    get_task,
+    list_tasks,
+    update_task,
+    delete_task
+);
+item_commands!(
+    Event,
+    EventInput,
+    add_event,
+    get_event,
+    list_events,
+    update_event,
+    delete_event
+);
+item_commands!(Run, RunInput, add_run, get_run, list_runs, update_run, delete_run);
+item_commands!(
+    Memory,
+    MemoryInput,
+    add_memory,
+    get_memory,
+    list_memories,
+    update_memory,
+    delete_memory
+);
+
+fn link_add(storage: &AppStorage, a: &ItemRef, b: &ItemRef) -> Result<Link, AppError> {
+    storage.get()?.add_link(a, b).map_err(item_failed)
+}
+
+fn link_list(
+    storage: &AppStorage,
+    item: &ItemRef,
+    page: &PageRequest,
+) -> Result<Page<Link>, AppError> {
+    storage.get()?.list_links(item, page).map_err(item_failed)
+}
+
+fn link_remove(storage: &AppStorage, id: &str) -> Result<(), AppError> {
+    storage.get()?.remove_link(id).map_err(item_failed)
+}
+
+/// Links two live items of any type. Linking a linked pair again returns that link.
+#[tauri::command]
+pub async fn add_link(app: tauri::AppHandle, a: ItemRef, b: ItemRef) -> Result<Link, AppError> {
+    off_main_thread(app, move |s| link_add(s, &a, &b)).await
+}
+
+/// One page of the live links of an item, each naming the item at the other end.
+#[tauri::command]
+pub async fn list_links(
+    app: tauri::AppHandle,
+    item: ItemRef,
+    page: PageRequest,
+) -> Result<Page<Link>, AppError> {
+    off_main_thread(app, move |s| link_list(s, &item, &page)).await
+}
+
+/// Removes a link.
+#[tauri::command]
+pub async fn remove_link(app: tauri::AppHandle, id: String) -> Result<(), AppError> {
+    off_main_thread(app, move |s| link_remove(s, &id)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -405,6 +617,182 @@ mod tests {
         assert_eq!(
             state.get().map(|h| h.state),
             Some(health::AiState::NotSignedIn)
+        );
+    }
+
+    fn bookmark_input(url: &str, title: Option<&str>) -> BookmarkInput {
+        BookmarkInput {
+            url: url.into(),
+            title: title.map(Into::into),
+            summary: None,
+            reason: None,
+            reason_is_guess: false,
+        }
+    }
+
+    fn first_page() -> ListArgs {
+        ListArgs {
+            limit: 10,
+            after: None,
+            include_deleted: false,
+        }
+    }
+
+    /// The same five calls the UI test makes (ui/src/shared/items.test.ts), run through
+    /// the functions the commands call, on a temporary database.
+    #[test]
+    fn bookmark_commands_add_get_list_update_delete_end_to_end() {
+        let (storage, dir) = temp_storage();
+        let state = AppStorage::new(Ok(storage));
+
+        // The same JSON the UI test sends (ADD_INPUT and UPDATE_INPUT in items.test.ts).
+        let add_input: BookmarkInput = serde_json::from_str(
+            r#"{"url":"https://example.com","title":null,"summary":null,"reason":null,"reasonIsGuess":false}"#,
+        )
+        .unwrap();
+        let update_input: BookmarkInput = serde_json::from_str(
+            r#"{"url":"https://example.com/docs","title":"Docs","summary":null,"reason":null,"reasonIsGuess":false}"#,
+        )
+        .unwrap();
+        let added: Bookmark = add_item::<Bookmark>(&state, &add_input).unwrap();
+        assert_eq!(added.url, "https://example.com");
+        assert_eq!(added.base.created_at, added.base.updated_at);
+        let id = added.base.id.clone();
+
+        assert_eq!(get_item::<Bookmark>(&state, &id).unwrap(), added);
+
+        let page = list_items::<Bookmark>(&state, &first_page()).unwrap();
+        assert_eq!(page.items, vec![added.clone()]);
+        assert_eq!(page.next, None);
+
+        let updated = update_item::<Bookmark>(&state, &id, &update_input).unwrap();
+        assert_eq!(updated.title.as_deref(), Some("Docs"));
+        assert_eq!(updated.base.created_at, added.base.created_at);
+
+        delete_item::<Bookmark>(&state, &id).unwrap();
+        assert_eq!(
+            get_item::<Bookmark>(&state, &id).unwrap_err().code,
+            "not_found"
+        );
+        assert!(list_items::<Bookmark>(&state, &first_page())
+            .unwrap()
+            .items
+            .is_empty());
+        let with_deleted = ListArgs {
+            include_deleted: true,
+            ..first_page()
+        };
+        let kept = list_items::<Bookmark>(&state, &with_deleted).unwrap().items;
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].base.deleted_at.is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn link_commands_add_list_and_remove() {
+        let (storage, dir) = temp_storage();
+        let state = AppStorage::new(Ok(storage));
+        let n: Note = add_item::<Note>(&state, &NoteInput { body: "n".into() }).unwrap();
+        let t: Task = add_item::<Task>(
+            &state,
+            &TaskInput {
+                title: "t".into(),
+                done: false,
+            },
+        )
+        .unwrap();
+        let note = ItemRef {
+            kind: crate::storage::items::ItemKind::Note,
+            id: n.base.id,
+        };
+        let task = ItemRef {
+            kind: crate::storage::items::ItemKind::Task,
+            id: t.base.id,
+        };
+        let link = link_add(&state, &note, &task).unwrap();
+        let page = PageRequest {
+            limit: 10,
+            after: None,
+        };
+        assert_eq!(
+            link_list(&state, &task, &page).unwrap().items[0].other,
+            note
+        );
+        link_remove(&state, &link.id).unwrap();
+        assert!(link_list(&state, &note, &page).unwrap().items.is_empty());
+        assert_eq!(link_remove(&state, &link.id).unwrap_err().code, "not_found");
+        assert_eq!(
+            link_add(&state, &note, &note).unwrap_err().code,
+            "invalid_input"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn item_errors_map_to_stable_codes_without_detail() {
+        let nf = item_failed(StorageError::NotFound { kind: "bookmark" });
+        assert_eq!(nf.code, "not_found");
+        assert!(nf.message.contains("bookmark"));
+        let inv = item_failed(StorageError::Invalid("The title cannot be empty.".into()));
+        assert_eq!(inv.code, "invalid_input");
+        assert_eq!(inv.message, "The title cannot be empty.");
+        for e in [
+            StorageError::Database("disk I/O error at /home/someone/mnemo.db".into()),
+            StorageError::Open("/home/someone".into()),
+            StorageError::MigrationFailed {
+                number: 3,
+                reason: "x".into(),
+            },
+            StorageError::SchemaTooNew {
+                found: 9,
+                supported: 4,
+            },
+        ] {
+            let err = item_failed(e);
+            assert_eq!(err.code, "storage_error");
+            assert!(!err.message.contains('/'), "{}", err.message);
+        }
+    }
+
+    #[test]
+    fn item_commands_refuse_bad_input_and_give_storage_unavailable_without_a_database() {
+        let (storage, dir) = temp_storage();
+        let state = AppStorage::new(Ok(storage));
+        assert_eq!(
+            add_item::<Bookmark>(&state, &bookmark_input("not a link", None))
+                .unwrap_err()
+                .code,
+            "invalid_input"
+        );
+        let too_big = ListArgs {
+            limit: 101,
+            ..first_page()
+        };
+        assert_eq!(
+            list_items::<Note>(&state, &too_big).unwrap_err().code,
+            "invalid_input"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+
+        let closed = AppStorage::new(Err(StartupError {
+            code: "open",
+            detail: "x".into(),
+        }));
+        assert_eq!(
+            add_item::<Note>(&closed, &NoteInput { body: "n".into() })
+                .unwrap_err()
+                .code,
+            "storage_unavailable"
+        );
+        assert_eq!(
+            list_items::<Memory>(&closed, &first_page())
+                .unwrap_err()
+                .code,
+            "storage_unavailable"
+        );
+        assert_eq!(
+            delete_item::<Run>(&closed, "x").unwrap_err().code,
+            "storage_unavailable"
         );
     }
 }

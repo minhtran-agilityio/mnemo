@@ -1,5 +1,7 @@
 // Owns persistence: reading and writing Mnemo's local data. The only module that touches SQLite.
 mod error;
+pub mod items;
+pub mod links;
 mod migrate;
 pub mod record;
 mod settings;
@@ -11,12 +13,14 @@ use std::time::Duration;
 use rusqlite::Connection;
 
 pub use error::StorageError;
+pub use items::Item;
+pub use links::ItemRef;
+pub use record::PageRequest;
 
 /// How long a writer waits for another writer before giving up.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The open Mnemo database.
-#[allow(dead_code)] // `conn` is first read by the item functions in #14.
 pub struct Storage {
     conn: Connection,
 }
@@ -80,35 +84,52 @@ impl Storage {
     }
 }
 
+/// Temporary databases for tests: std only, removed on drop. Tests never touch the
+/// real data folder.
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod testing {
+    use std::path::{Path, PathBuf};
 
-    fn temp_db() -> (tempdir::Dir, std::path::PathBuf) {
-        let d = tempdir::Dir::new();
-        let p = d.path().join("mnemo.db");
-        (d, p)
+    use super::Storage;
+
+    pub struct TempDir(PathBuf);
+
+    impl TempDir {
+        pub fn new() -> TempDir {
+            let p = std::env::temp_dir().join(format!("mnemo-test-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&p).unwrap();
+            TempDir(p)
+        }
+
+        pub fn path(&self) -> &Path {
+            &self.0
+        }
     }
 
-    // Tiny temp dir helper: std only, removed on drop. Tests never touch the real data folder.
-    mod tempdir {
-        use std::path::{Path, PathBuf};
-        pub struct Dir(PathBuf);
-        impl Dir {
-            pub fn new() -> Dir {
-                let p = std::env::temp_dir().join(format!("mnemo-test-{}", uuid::Uuid::new_v4()));
-                std::fs::create_dir_all(&p).unwrap();
-                Dir(p)
-            }
-            pub fn path(&self) -> &Path {
-                &self.0
-            }
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
         }
-        impl Drop for Dir {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_dir_all(&self.0);
-            }
-        }
+    }
+
+    /// A migrated database in a new temporary folder. Keep the folder alive while the
+    /// storage is used.
+    pub fn open_temp() -> (Storage, TempDir) {
+        let dir = TempDir::new();
+        let storage = Storage::open(&dir.path().join("mnemo.db")).unwrap();
+        (storage, dir)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::testing::TempDir;
+    use super::*;
+
+    fn temp_db() -> (TempDir, std::path::PathBuf) {
+        let d = TempDir::new();
+        let p = d.path().join("mnemo.db");
+        (d, p)
     }
 
     #[test]
@@ -118,7 +139,7 @@ mod tests {
         assert!(p.exists());
         assert_eq!(s.journal_mode().unwrap(), "wal");
         assert_eq!(s.busy_timeout_ms().unwrap(), 5000);
-        assert_eq!(s.schema_version().unwrap(), 2);
+        assert_eq!(s.schema_version().unwrap(), 4);
     }
 
     #[test]
@@ -126,7 +147,7 @@ mod tests {
         let (_d, p) = temp_db();
         drop(Storage::open(&p).unwrap());
         let s = Storage::open(&p).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 2);
+        assert_eq!(s.schema_version().unwrap(), 4);
     }
 
     #[test]
@@ -166,7 +187,7 @@ mod tests {
 
     #[test]
     fn a_folder_in_place_of_the_file_is_refused() {
-        let d = tempdir::Dir::new();
+        let d = TempDir::new();
         let err = Storage::open(d.path()).err().unwrap();
         assert!(matches!(err, StorageError::Open(_)));
         assert!(d.path().exists());

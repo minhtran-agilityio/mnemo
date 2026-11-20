@@ -46,6 +46,10 @@
 }
 
 .tnode .tname {
+  /* Room above and below the line for stacked Vietnamese marks, taken back by the margin so the
+     layout does not move. */
+  padding-block: var(--border-2);
+  margin-block: calc(-1 * var(--border-2));
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

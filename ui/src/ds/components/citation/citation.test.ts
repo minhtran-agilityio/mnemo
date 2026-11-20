@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { expect, test } from "vitest";
+import { cssRule, MARKS_ROOM } from "../../../css-rule";
 import {
   createAnswer,
   createCite,
@@ -47,4 +48,20 @@ test("an answer keeps its text as text and holds the marks in order", () => {
   ]);
   expect(p.querySelector("b")).toBeNull();
   expect(p.textContent).toBe("Use <b>the API</b> 1 not a copy ?");
+});
+
+// The Limits tab fix (issue 113): a long source title is cut with an ellipsis and keeps room for stacked marks.
+test("a long source title is whole text in .src-title, which has room for stacked marks and an ellipsis", () => {
+  const title = `Hướng dẫn ${"ẪẬẲỖỮỰ".repeat(10)}${"y".repeat(90)}`;
+  const ol = createSourceList(document, [{ title, app: "zalo", age: "1 h" }]);
+  const el = ol.querySelector(".src-title") as HTMLElement;
+  expect(el.textContent).toBe(title);
+  expect(el.title).toBe(title);
+  const rule = cssRule(import.meta.dirname, "citation.css", ".srcs .src-title");
+  expect(rule).toMatchObject(MARKS_ROOM);
+  expect(rule["min-width"]).toBe("0");
+  expect(rule["text-overflow"]).toBe("ellipsis");
+  // The list itself never grows wider than its container because of a long title.
+  const list = cssRule(import.meta.dirname, "citation.css", ".srcs");
+  expect(list["max-width"]).toBe("100%");
 });
