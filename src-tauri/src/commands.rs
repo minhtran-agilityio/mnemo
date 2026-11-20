@@ -5,6 +5,7 @@ use std::sync::{Mutex, MutexGuard};
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
+use crate::ai::health::{self, AiHealth};
 use crate::storage::items::{
     Bookmark, BookmarkInput, Event, EventInput, Idea, IdeaInput, Memory, MemoryInput, Note,
     NoteInput, Project, ProjectInput, Run, RunInput, Task, TaskInput,
@@ -164,6 +165,84 @@ pub async fn set_setting(
     value: String,
 ) -> Result<(), AppError> {
     off_main_thread(app, move |storage| write_setting(storage, &key, &value)).await
+}
+
+/// The latest Claude Code check, kept in memory only. `None` until the first check ends.
+/// It holds only a state and a fixed message, never output from Claude Code.
+#[derive(Default)]
+pub struct AiHealthState(Mutex<AiHealthSlot>);
+
+#[derive(Default)]
+struct AiHealthSlot {
+    /// The number given to the most recently started check.
+    started: u64,
+    /// The number of the check whose result is kept.
+    applied: u64,
+    value: Option<AiHealth>,
+}
+
+impl AiHealthState {
+    fn slot(&self) -> MutexGuard<'_, AiHealthSlot> {
+        // A lock poisoned by a panic is recovered: the value is plain data.
+        self.0.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// The latest result.
+    pub fn get(&self) -> Option<AiHealth> {
+        self.slot().value.clone()
+    }
+
+    /// Numbers a check as it starts. Checks end in any order, but the one that started last wins.
+    pub fn begin(&self) -> u64 {
+        let mut slot = self.slot();
+        slot.started += 1;
+        slot.started
+    }
+
+    /// Keeps the result of check `seq` unless a check that started later already ended.
+    /// Returns whether it was kept.
+    pub fn finish(&self, seq: u64, value: AiHealth) -> bool {
+        let mut slot = self.slot();
+        if seq <= slot.applied {
+            return false;
+        }
+        slot.applied = seq;
+        slot.value = Some(value);
+        true
+    }
+
+    #[cfg(test)]
+    fn set(&self, value: AiHealth) {
+        let seq = self.begin();
+        self.finish(seq, value);
+    }
+}
+
+/// Runs the check on a blocking thread and keeps the result. It never fails the caller:
+/// a check that could not finish is reported as a Version problem, not as Ready.
+pub async fn refresh_ai_health(app: tauri::AppHandle) -> AiHealth {
+    let seq = app.state::<AiHealthState>().begin();
+    let found = tauri::async_runtime::spawn_blocking(health::check_system)
+        .await
+        .unwrap_or_else(|e| {
+            log::error!("the Claude Code check did not finish: {e}");
+            AiHealth::of(health::AiState::VersionProblem)
+        });
+    log::info!("Claude Code check: {:?}", found.state);
+    app.state::<AiHealthState>().finish(seq, found.clone());
+    found
+}
+
+/// The latest Claude Code check, or null while the first one is still running.
+#[tauri::command]
+pub fn get_ai_health(state: tauri::State<'_, AiHealthState>) -> Option<AiHealth> {
+    state.get()
+}
+
+/// Checks Claude Code again (the "Check again" button) and returns the new result.
+#[tauri::command]
+pub async fn check_ai_health(app: tauri::AppHandle) -> Result<AiHealth, AppError> {
+    Ok(refresh_ai_health(app).await)
 }
 
 // ---- Items and links ----
@@ -503,6 +582,42 @@ mod tests {
         );
         assert_eq!(read_setting(&state, "k").unwrap(), None);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ai_health_state_is_empty_until_set_then_keeps_the_latest() {
+        let state = AiHealthState::default();
+        assert_eq!(state.get(), None);
+        state.set(AiHealth::of(health::AiState::NotInstalled));
+        state.set(AiHealth::of(health::AiState::Ready));
+        assert_eq!(state.get().map(|h| h.state), Some(health::AiState::Ready));
+    }
+
+    #[test]
+    fn a_slow_older_check_does_not_overwrite_a_newer_result() {
+        let state = AiHealthState::default();
+        let startup = state.begin();
+        let manual = state.begin();
+        assert!(state.finish(manual, AiHealth::of(health::AiState::Ready)));
+        // The startup check ends last, with an older answer: it is dropped.
+        assert!(!state.finish(startup, AiHealth::of(health::AiState::NotInstalled)));
+        assert_eq!(state.get().map(|h| h.state), Some(health::AiState::Ready));
+    }
+
+    #[test]
+    fn ai_health_state_survives_a_poisoned_lock() {
+        let state = std::sync::Arc::new(AiHealthState::default());
+        let other = state.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = other.0.lock().unwrap();
+            panic!("poison the lock");
+        })
+        .join();
+        state.set(AiHealth::of(health::AiState::NotSignedIn));
+        assert_eq!(
+            state.get().map(|h| h.state),
+            Some(health::AiState::NotSignedIn)
+        );
     }
 
     fn bookmark_input(url: &str, title: Option<&str>) -> BookmarkInput {

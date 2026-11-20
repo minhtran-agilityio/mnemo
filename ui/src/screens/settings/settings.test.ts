@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Theme } from "../../frame/theme";
+import type { AiHealth } from "../../shared/api";
 import { renderSettings, type SettingsDeps } from "./settings";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -12,6 +13,15 @@ let applied: Theme[];
 let release: Array<() => void>;
 let failWith: unknown;
 let detached: Array<string | null>;
+let firstHealth: Array<AiHealth | null | Error>;
+let rechecks: Array<AiHealth | Error>;
+let checks: number;
+
+const READY: AiHealth = { state: "ready", message: "Claude Code is ready." };
+const SIGNED_OUT: AiHealth = {
+  state: "not_signed_in",
+  message: "Open a terminal and run `claude`.",
+};
 
 function deps(): SettingsDeps {
   return {
@@ -24,6 +34,18 @@ function deps(): SettingsDeps {
       saves.push(theme);
       if (failWith) return Promise.reject(failWith);
       return new Promise<void>((done) => release.push(done));
+    },
+    getAiHealth: async () => {
+      const next =
+        firstHealth.length > 1 ? firstHealth.shift() : firstHealth[0];
+      if (next instanceof Error) throw next;
+      return next ?? null;
+    },
+    checkAiHealth: async () => {
+      checks += 1;
+      const next = rechecks.shift() ?? READY;
+      if (next instanceof Error) throw next;
+      return next;
     },
   };
 }
@@ -61,6 +83,9 @@ beforeEach(() => {
   release = [];
   detached = [];
   failWith = undefined;
+  firstHealth = [READY];
+  rechecks = [];
+  checks = 0;
   renderSettings(container, deps());
 });
 
@@ -83,18 +108,139 @@ test("Appearance offers System, Light and Dark, and no other theme", () => {
   expect(checked?.value).toBe("system");
 });
 
-test("the AI and Data sections open and have no controls", () => {
-  for (const name of ["AI", "Data"]) {
-    const row = [...container.querySelectorAll("button.section-list-row")].find(
-      (b) => b.querySelector(".section-list-name")?.textContent === name,
-    ) as HTMLButtonElement;
-    row.click();
-    expect(container.querySelector(".settings-body h2")?.textContent).toBe(
-      name,
-    );
-    expect(container.querySelectorAll(".settings-body input").length).toBe(0);
-    expect(container.querySelectorAll(".settings-body button").length).toBe(0);
+test("the Data section opens and has no controls", () => {
+  openSection("Data");
+  expect(container.querySelector(".settings-body h2")?.textContent).toBe(
+    "Data",
+  );
+  expect(container.querySelectorAll(".settings-body input").length).toBe(0);
+  expect(container.querySelectorAll(".settings-body button").length).toBe(0);
+});
+
+function openSection(name: string): void {
+  const row = [...container.querySelectorAll("button.section-list-row")].find(
+    (b) => b.querySelector(".section-list-name")?.textContent === name,
+  ) as HTMLButtonElement;
+  row.click();
+}
+
+function aiBody(): string {
+  return (container.querySelector(".settings-body")?.textContent ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function checkAgainButton(): HTMLButtonElement {
+  const button = [...container.querySelectorAll("button")].find((b) =>
+    b.textContent?.includes("Check again"),
+  );
+  if (!button) throw new Error("no Check again button");
+  return button as HTMLButtonElement;
+}
+
+test("the AI row shows the state of the first check without opening the section", async () => {
+  renderSettings(container, deps());
+  expect(rowText("AI")).toBe("AI Checking");
+  await tick();
+  expect(rowText("AI")).toBe("AI Ready");
+});
+
+test("the AI section shows the state, the fix message and a Check again button", async () => {
+  firstHealth = [SIGNED_OUT];
+  document.body.replaceChildren(container);
+  renderSettings(container, deps());
+  await tick();
+  openSection("AI");
+  expect(aiBody()).toContain("Not signed in");
+  expect(aiBody()).toContain("Open a terminal and run `claude`.");
+  expect(container.querySelectorAll(".settings-body .pill").length).toBe(1);
+  expect(container.querySelectorAll(".settings-body button").length).toBe(1);
+  expect(checkAgainButton().type).toBe("button");
+});
+
+test("every state has its own plain word on the row", async () => {
+  const words = {
+    ready: "Ready",
+    not_installed: "Not installed",
+    not_signed_in: "Not signed in",
+    version_problem: "Version problem",
+  } as const;
+  for (const [state, word] of Object.entries(words)) {
+    firstHealth = [{ state: state as AiHealth["state"], message: "m" }];
+    renderSettings(container, deps());
+    await tick();
+    expect(rowText("AI")).toBe(`AI ${word}`);
   }
+});
+
+test("a first check that is still running shows Checking, then the result", async () => {
+  vi.useFakeTimers();
+  try {
+    firstHealth = [null, null, SIGNED_OUT];
+    renderSettings(container, deps());
+    openSection("AI");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(aiBody()).toContain("Mnemo is checking Claude Code.");
+    expect(rowText("AI")).toBe("AI Checking");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(rowText("AI")).toBe("AI Not signed in");
+    expect(aiBody()).toContain("Open a terminal");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a first check that never ends stops at a plain line with Check again, not Checking", async () => {
+  vi.useFakeTimers();
+  try {
+    firstHealth = [null];
+    renderSettings(container, deps());
+    openSection("AI");
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(rowText("AI")).toBe("AI Unknown");
+    expect(aiBody()).toContain("still waiting for the Claude Code check");
+    expect(aiBody()).not.toContain("Mnemo is checking Claude Code.");
+    expect(checkAgainButton()).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("Check again asks once, shows the new state and does not double submit", async () => {
+  openSection("AI");
+  await tick();
+  rechecks = [SIGNED_OUT];
+  const button = checkAgainButton();
+  button.click();
+  button.click();
+  await tick();
+  await tick();
+  expect(checks).toBe(1);
+  expect(rowText("AI")).toBe("AI Not signed in");
+  expect(aiBody()).toContain("Open a terminal");
+});
+
+test("a check that cannot be asked for shows a plain line and keeps the button", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  openSection("AI");
+  await tick();
+  rechecks = [Object.assign(new Error("x"), { code: "boom", message: "No." })];
+  checkAgainButton().click();
+  await tick();
+  await tick();
+  expect(aiBody()).toContain("Mnemo could not check Claude Code.");
+  expect(rowText("AI")).toBe("AI Unknown");
+  expect(checkAgainButton().getAttribute("aria-busy")).toBeNull();
+});
+
+test("a first read that fails shows a plain line, never a Ready state", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  firstHealth = [new Error("x")];
+  renderSettings(container, deps());
+  openSection("AI");
+  await tick();
+  expect(aiBody()).toContain("Mnemo could not read the Claude Code check.");
+  expect(aiBody()).not.toContain("Ready");
 });
 
 test("choosing a theme applies it at once, updates the row and saves it", async () => {

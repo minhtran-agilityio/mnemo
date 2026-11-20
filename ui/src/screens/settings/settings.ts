@@ -1,18 +1,22 @@
 // The Settings screen: a title, a list of sections on the left (each row shows its current value)
-// and the open section on the right. Only Appearance has content so far; AI and Data are empty
-// until their own tickets. All text goes in as text, never as markup. Every part comes from
+// and the open section on the right. Appearance and AI have content; Data is empty until its own
+// ticket. The AI section shows the Claude Code check (state, how to fix it, Check again). All text goes in as text, never as markup. Every part comes from
 // ui/src/ds (section list, card, choice list, text); settings.css lays them out.
 
 import {
+  buildPill,
   buildText,
   type ChoiceList,
+  createButton,
   createCard,
   createChoiceList,
   createSectionList,
+  type PillTint,
+  setButtonBusy,
 } from "../../ds";
 import { findItem } from "../../frame/nav";
 import { THEME_LABELS, THEMES, type Theme } from "../../frame/theme";
-import { errorMessage } from "../../shared/api";
+import { type AiHealth, type AiState, errorMessage } from "../../shared/api";
 
 export interface SettingsDeps {
   /** The theme that is in use now. */
@@ -27,6 +31,10 @@ export interface SettingsDeps {
    * somewhere that is still on screen.
    */
   onDetachedSave?(failure: string | null): void;
+  /** The latest Claude Code check, or null while the first one is still running. */
+  getAiHealth(): Promise<AiHealth | null>;
+  /** Checks Claude Code again. Rejects when the check could not be asked for. */
+  checkAiHealth(): Promise<AiHealth>;
 }
 
 type SectionId = "appearance" | "ai" | "data";
@@ -45,6 +53,33 @@ const SECTIONS: readonly Section[] = [
 /** What a section without content shows as its value, and in its body. */
 const EMPTY_VALUE = "Not built yet";
 
+const AI_LABELS: Readonly<Record<AiState, string>> = {
+  ready: "Ready",
+  not_installed: "Not installed",
+  not_signed_in: "Not signed in",
+  version_problem: "Version problem",
+};
+
+const AI_TINTS: Readonly<Record<AiState, PillTint>> = {
+  ready: "good",
+  not_installed: "bad",
+  not_signed_in: "warn",
+  version_problem: "warn",
+};
+
+/** What the AI section knows: the first check is running, it is known, or it could not be read. */
+type AiView =
+  | { kind: "checking" }
+  | { kind: "known"; health: AiHealth }
+  | { kind: "failed"; text: string };
+
+/**
+ * How often, and how many times, the first check is asked for while it is still running. The
+ * core may take up to 20 seconds (two commands, 10 seconds each), so the polling lasts longer.
+ */
+const AI_POLL_MS = 1000;
+const AI_POLL_TRIES = 25;
+
 const HINTS: Readonly<Record<Theme, string>> = {
   system: "Matches your computer, and follows it when it changes.",
   light: "Light background, dark text.",
@@ -62,6 +97,8 @@ export function renderSettings(
 ): void {
   const doc = container.ownerDocument;
   let open: SectionId = "appearance";
+  let ai: AiView = { kind: "checking" };
+  let aiBusy = false;
 
   const title = doc.createElement("h1");
   title.textContent = "Settings";
@@ -85,8 +122,19 @@ export function renderSettings(
       }),
     );
 
+  const aiValue = (): string =>
+    ai.kind === "known"
+      ? AI_LABELS[ai.health.state]
+      : ai.kind === "checking"
+        ? "Checking"
+        : "Unknown";
+
   const currentValue = (id: SectionId): string =>
-    id === "appearance" ? THEME_LABELS[deps.getTheme()] : EMPTY_VALUE;
+    id === "appearance"
+      ? THEME_LABELS[deps.getTheme()]
+      : id === "ai"
+        ? aiValue()
+        : EMPTY_VALUE;
 
   // The section list builds its rows once and updates them in place, so the row that has
   // keyboard focus keeps it.
@@ -118,6 +166,7 @@ export function renderSettings(
 
   function renderBody(): void {
     if (open === "appearance") body.replaceChildren(appearance());
+    else if (open === "ai") body.replaceChildren(aiSection());
     else body.replaceChildren(emptySection(open));
   }
 
@@ -155,6 +204,85 @@ export function renderSettings(
     });
     return card("Appearance", [choices.element]);
   }
+
+  function aiSection(): HTMLElement {
+    const status = doc.createElement("div");
+    status.className = "settings-ai-status";
+    const line = (text: string) =>
+      buildText(doc, { tone: "muted", content: text });
+    const button = createButton(doc, {
+      label: "Check again",
+      onClick: () => void checkAgain(),
+    });
+    if (aiBusy) setButtonBusy(button, true, { label: "Check again" });
+    if (ai.kind === "known") {
+      status.append(
+        buildPill({
+          text: AI_LABELS[ai.health.state],
+          tint: AI_TINTS[ai.health.state],
+        }),
+        button,
+      );
+      return card("AI", [status, line(ai.health.message)]);
+    }
+    if (ai.kind === "checking") {
+      status.append(buildPill({ text: "Checking" }), button);
+      return card("AI", [status, line("Mnemo is checking Claude Code.")]);
+    }
+    status.append(button);
+    return card("AI", [status, line(ai.text)]);
+  }
+
+  function showAi(next: AiView): void {
+    ai = next;
+    renderList();
+    if (open === "ai" && body.isConnected) renderBody();
+  }
+
+  async function checkAgain(): Promise<void> {
+    if (aiBusy) return;
+    aiBusy = true;
+    if (open === "ai") renderBody();
+    try {
+      showAi({ kind: "known", health: await deps.checkAiHealth() });
+    } catch (error) {
+      console.error("could not check Claude Code:", error);
+      showAi({
+        kind: "failed",
+        text: `Mnemo could not check Claude Code. ${errorMessage(error)}`,
+      });
+    } finally {
+      aiBusy = false;
+      if (open === "ai") renderBody();
+    }
+  }
+
+  // The first result is read at once, so the AI row shows its state without opening the section.
+  // While the first check is still running the answer is null: ask again every second, for a
+  // short time, and stop when the owner leaves Settings.
+  function readFirstCheck(left: number): void {
+    deps
+      .getAiHealth()
+      .then((health) => {
+        if (health) showAi({ kind: "known", health });
+        else if (ai.kind === "checking" && body.isConnected) {
+          if (left > 0) setTimeout(() => readFirstCheck(left - 1), AI_POLL_MS);
+          else
+            showAi({
+              kind: "failed",
+              text: "Mnemo is still waiting for the Claude Code check. Choose Check again to try once more.",
+            });
+        }
+      })
+      .catch((error: unknown) => {
+        console.error("could not read the Claude Code check:", error);
+        showAi({
+          kind: "failed",
+          text: `Mnemo could not read the Claude Code check. ${errorMessage(error)}`,
+        });
+      });
+  }
+  readFirstCheck(AI_POLL_TRIES);
 
   function choose(theme: Theme, choices: ChoiceList<Theme>): void {
     deps.applyTheme(theme);

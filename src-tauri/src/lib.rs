@@ -8,7 +8,7 @@ mod system;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
 
-use commands::{AppStorage, StartupError};
+use commands::{AiHealthState, AppStorage, StartupError};
 use storage::StorageError;
 
 /// The stable code for a storage error. Only this code reaches the UI; the full
@@ -94,6 +94,11 @@ pub fn run() {
             app.manage(AppStorage::new(opened));
             app.manage(StartupFailed(error_code.is_some()));
 
+            // The Claude Code check runs off the main thread, so the window never waits for
+            // it. Saving and reading do not depend on its result.
+            app.manage(AiHealthState::default());
+            tauri::async_runtime::spawn(commands::refresh_ai_health(app.handle().clone()));
+
             // Close hides the window only when a tray item really exists to bring it back.
             // On the error page there is no tray: closing the window quits Mnemo.
             let tray = keeps_running_in_tray(error_code.is_some(), system::tray::tray_available())
@@ -155,6 +160,8 @@ pub fn run() {
             commands::ping,
             commands::get_setting,
             commands::set_setting,
+            commands::get_ai_health,
+            commands::check_ai_health,
             commands::add_bookmark,
             commands::get_bookmark,
             commands::list_bookmarks,

@@ -22,7 +22,14 @@ import {
 } from "./frame/theme";
 import { pingErrorText } from "./ping-text";
 import { renderSettings } from "./screens/settings/settings";
-import { errorMessage, getSetting, ping, setSetting } from "./shared/api";
+import {
+  checkAiHealth,
+  errorMessage,
+  getAiHealth,
+  getSetting,
+  ping,
+  setSetting,
+} from "./shared/api";
 import { versionErrorText, versionText } from "./version-text";
 
 /** The settings key that keeps whether the sidebar is collapsed ("true" or "false"). */
@@ -166,6 +173,8 @@ async function start(): Promise<void> {
             theme,
           ),
         onDetachedSave: (failure) => showNote(themeSaveNote, failure),
+        getAiHealth,
+        checkAiHealth,
       });
     } else if (isRoadmapItem(item)) {
       renderEmptyState(screen, { item, query: route.query });
