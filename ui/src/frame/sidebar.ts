@@ -10,6 +10,7 @@ import {
   type IconShape,
   type NavItem,
   SAVE_OR_ASK,
+  STOREHOUSE_GROUP,
 } from "./nav";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -154,7 +155,9 @@ export function createSidebar(doc: Document, options: SidebarOptions): Sidebar {
 
   // The groups.
   const scroll = make(doc, "div", "sb-scroll");
-  for (const group of GROUPS) {
+  // Storehouse (dev builds only) comes after the last group, above the bottom items.
+  const groups = STOREHOUSE_GROUP ? [...GROUPS, STOREHOUSE_GROUP] : GROUPS;
+  for (const group of groups) {
     const heading = make(doc, "h2", "sb-label", group.label);
     heading.id = `sb-group-${group.id}`;
     const list = make(doc, "ul", "sidenav");

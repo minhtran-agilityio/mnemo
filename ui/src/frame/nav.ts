@@ -323,6 +323,35 @@ export const GROUPS: readonly NavGroup[] = [
   },
 ];
 
+/** The id of the UI Catalog screen. Its address is `#/ui-catalog`. */
+export const UI_CATALOG_ID = "ui-catalog";
+
+/**
+ * The dev-only Storehouse group, with one item that opens the UI Catalog. It is null in a
+ * release build: the `import.meta.env.DEV` test is replaced by `false` there, so the group,
+ * its label and its item are dropped from the bundle. It is not in ALL_ITEMS, because the
+ * router does not own the catalog; main.ts opens it.
+ */
+export const STOREHOUSE_GROUP: NavGroup | null = import.meta.env.DEV
+  ? {
+      id: "storehouse",
+      label: "Storehouse",
+      items: [
+        {
+          id: UI_CATALOG_ID,
+          label: "UI Catalog",
+          phase: 1,
+          icon: [
+            ["rect", { x: "3", y: "3", width: "7", height: "7", rx: "1.5" }],
+            ["rect", { x: "14", y: "3", width: "7", height: "7", rx: "1.5" }],
+            ["rect", { x: "3", y: "14", width: "7", height: "7", rx: "1.5" }],
+            ["rect", { x: "14", y: "14", width: "7", height: "7", rx: "1.5" }],
+          ],
+        },
+      ],
+    }
+  : null;
+
 /** The list that opens and closes at the bottom of the sidebar. */
 export const APPS_LABEL = "Apps and settings";
 export const APPS_ITEMS: readonly NavItem[] = [

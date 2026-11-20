@@ -1,6 +1,12 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, test, vi } from "vitest";
-import { ALL_ITEMS, APPS_ITEMS, GROUPS } from "./nav";
+import {
+  ALL_ITEMS,
+  APPS_ITEMS,
+  GROUPS,
+  STOREHOUSE_GROUP,
+  UI_CATALOG_ID,
+} from "./nav";
 import {
   createSidebar,
   createSidebarFromSaved,
@@ -56,8 +62,9 @@ test("every item is a link with its name, and there is no Tags group, count or b
   const all = names(sidebar.element);
   for (const item of ALL_ITEMS)
     expect(all.some((n) => n.startsWith(item.label))).toBe(true);
+  // Vitest runs in dev mode, so the dev-only Storehouse group is the one extra heading.
   expect(sidebar.element.querySelectorAll(".sb-label").length).toBe(
-    GROUPS.length,
+    GROUPS.length + 1,
   );
   expect(sidebar.element.textContent).not.toMatch(/tags/i);
   expect(sidebar.element.textContent).not.toMatch(/\d/);
@@ -231,4 +238,36 @@ test("a read that never finishes gives an open sidebar after the limit and repor
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("in a dev build Storehouse is the last group and its UI Catalog item opens #/ui-catalog", () => {
+  const headings = [...sidebar.element.querySelectorAll("h2.sb-label")];
+  expect(headings.at(-1)?.textContent).toBe("Storehouse");
+  const list = headings.at(-1)?.nextElementSibling as HTMLElement;
+  const links = list.querySelectorAll<HTMLAnchorElement>("a");
+  expect(links.length).toBe(1);
+  expect(links[0]?.textContent).toBe("UI Catalog");
+  expect(links[0]?.getAttribute("href")).toBe("#/ui-catalog");
+  // It sits before the bottom items.
+  expect(sidebar.element.querySelector(".sb-scroll")?.contains(list)).toBe(
+    true,
+  );
+  // The collapsed sidebar keeps its name as a tooltip.
+  build(true);
+  expect(
+    sidebar.element.querySelector<HTMLAnchorElement>("a[data-item=ui-catalog]")
+      ?.title,
+  ).toBe("UI Catalog");
+});
+
+test("setCurrent marks the UI Catalog item current and clears the others", () => {
+  sidebar.setCurrent("today");
+  sidebar.setCurrent(UI_CATALOG_ID);
+  const current = sidebar.element.querySelectorAll("[aria-current=page]");
+  expect(current.length).toBe(1);
+  expect((current[0] as HTMLElement).dataset.item).toBe("ui-catalog");
+});
+
+test("the Storehouse group is the dev-only data", () => {
+  expect(STOREHOUSE_GROUP?.items.map((i) => i.id)).toEqual(["ui-catalog"]);
 });
