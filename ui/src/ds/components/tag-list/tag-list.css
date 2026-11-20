@@ -3,6 +3,8 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+  /* A long tag never makes the list wider than its container. */
+  max-width: 100%;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -11,12 +13,21 @@
 .tag-item {
   max-width: 100%;
   padding: 0 var(--space-2);
-  overflow: hidden;
   border-radius: var(--radius-sm);
   background: var(--tint-info);
   color: var(--chip-ink);
   font-size: var(--text-md);
   line-height: var(--leading-label);
+}
+
+/* The text is cut with an ellipsis in its own box, not in the chip. The block padding, taken back by
+   the margin, gives stacked Vietnamese marks room above and below the line, and the chip keeps its
+   22px height. */
+.tag-item .tag-text {
+  display: block;
+  padding-block: var(--border-2);
+  margin-block: calc(-1 * var(--border-2));
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

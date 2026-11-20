@@ -26,6 +26,10 @@
 }
 
 .lcard .url {
+  /* Room above and below the line for stacked Vietnamese marks, taken back by the margin so the
+     layout does not move. */
+  padding-block: var(--border-2);
+  margin-block: calc(-1 * var(--border-2));
   overflow: hidden;
   color: var(--muted);
   font-family: var(--font-mono);
@@ -67,6 +71,8 @@
 
 .lcard .trust {
   align-self: flex-start;
+  max-width: 100%;
+  white-space: normal;
 }
 
 .views {
@@ -78,7 +84,7 @@
 .views.cards {
   grid-template-columns: repeat(
       auto-fill,
-      minmax(var(--size-basis-column), 1fr)
+      minmax(min(var(--size-basis-column), 100%), 1fr)
     );
 }
 

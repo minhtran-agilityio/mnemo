@@ -10,6 +10,9 @@ body {
   color: var(--ink);
   font-family: var(--font-body);
   font-size: var(--text-base);
+  /* A long word breaks inside its box. "anywhere" lowers the min-content width of every box, so it
+     stays on the boxes that hold long URLs and titles. */
+  overflow-wrap: break-word;
   line-height: var(--leading-body);
 }
 
@@ -45,4 +48,19 @@ a {
 :focus-visible {
   outline: var(--focus-ring) solid var(--accent);
   outline-offset: 2px;
+}
+
+/* One rule for every part and every screen: with the reduced-motion setting nothing animates or
+   transitions. The per-part rules stay as the part's own static fallback (a spinner that shows a
+   still ring), but this rule does not depend on any of them. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: must win over every class animation */
+    animation: none !important;
+    /* biome-ignore lint/complexity/noImportantStyles: must win over every class transition */
+    transition: none !important;
+    scroll-behavior: auto;
+  }
 }

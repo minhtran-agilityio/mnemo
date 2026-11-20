@@ -223,9 +223,9 @@ export const renderRecords: TabRenderer = (panel, ctx) => {
       const answer = createAnswer(doc, [
         buildTrustLabel("ai"),
         " You saved two guides on data backups. Both say to use the online backup API instead of copying the file ",
-        createCite(doc, 1),
+        createCite(doc, 1, "#/ui-catalog"),
         ". One adds that WAL mode needs a checkpoint first ",
-        createCite(doc, 2),
+        createCite(doc, 2, "#/ui-catalog"),
         ". Restore time was not measured in either ",
         createMissingCite(doc),
         ".",

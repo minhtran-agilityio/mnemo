@@ -250,7 +250,13 @@ export function createSpecimen(
   const win = buildWindow(doc);
   const hots = el(doc, "div", "hotspots");
   stage.append(win, hots);
-  section.append(bar, stage);
+  const narrow = el(
+    doc,
+    "p",
+    "cat-note spec-narrow",
+    "The sample window shows on wider windows.",
+  );
+  section.append(bar, stage, narrow);
 
   const layout = () => {
     const width = win.offsetWidth;

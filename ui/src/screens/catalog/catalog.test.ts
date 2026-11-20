@@ -298,7 +298,7 @@ test("Find a part lists tokens and ignores Vietnamese marks", () => {
 test("the Limits tab builds 1000 rows on request and every Limits row is a real part", () => {
   mount();
   const panel = panelFor("Limits");
-  expect(panel?.querySelectorAll(".cat-row").length).toBe(7);
+  expect(panel?.querySelectorAll(".cat-row").length).toBe(8);
   expect(panel?.textContent).not.toContain("Not built yet: planned");
   const build = [...(panel?.querySelectorAll("button") ?? [])].find(
     (b) => b.textContent === "Build 1000 rows",
@@ -347,4 +347,20 @@ test("closing the catalog closes an open popover", () => {
   teardown?.();
   teardown = null;
   expect(trigger?.getAttribute("aria-expanded")).toBe("false");
+});
+
+test("every link inside a catalog sample stays in the UI Catalog", () => {
+  mount();
+  const links = [...screen.querySelectorAll<HTMLAnchorElement>("a[href]")];
+  const outside = links
+    .map((a) => a.getAttribute("href"))
+    .filter((h) => h !== "#/ui-catalog" && !h?.startsWith("#/ui-catalog/"));
+  // Open every tab so the samples of each one are built.
+  for (const tab of tabs()) tab.click();
+  const all = [...screen.querySelectorAll<HTMLAnchorElement>("a[href]")]
+    .map((a) => a.getAttribute("href"))
+    .filter((h) => h !== "#/ui-catalog" && !h?.startsWith("#/ui-catalog/"));
+  expect([...outside, ...all].filter((h) => !/^https?:/.test(h ?? ""))).toEqual(
+    [],
+  );
 });

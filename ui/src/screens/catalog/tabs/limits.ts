@@ -1,7 +1,7 @@
 // The Limits tab: messy content and small windows, drawn with the real parts. The narrow preview
 // has a width slider, the owner's sidebar choice and 200% zoom; the 1000 rows are built on request.
 
-import { Link, Plus } from "lucide";
+import { Bell, Link, Plus } from "lucide";
 import "../../../ds/catalog/limits.css";
 import {
   buildBanner,
@@ -11,6 +11,7 @@ import {
   buildTrustLabel,
   createButton,
   createCheckbox,
+  createChoiceList,
   createKanbanCard,
   createKanbanColumn,
   createLinkCard,
@@ -19,8 +20,12 @@ import {
   createMetaLine,
   createNavRail,
   createPageHeader,
+  createSectionList,
+  createSidebar,
+  createSourceList,
   createStatusBar,
   createTagList,
+  createTree,
   type PillTint,
 } from "../../../ds/index";
 import {
@@ -268,7 +273,11 @@ export const renderLimits: TabRenderer = (panel, ctx) => {
   const doc = ctx.doc;
   panel.append(
     entryRows(ctx, "Limits", {
-      "narrow width, 200%": () => ({ nodes: narrowPreview(ctx), column: true }),
+      "narrow width, 200%": () => ({
+        nodes: narrowPreview(ctx),
+        column: true,
+        wide: true,
+      }),
 
       "very long title": () => {
         const rowList = createList(doc, "Long title, row", [
@@ -356,6 +365,133 @@ export const renderLimits: TabRenderer = (panel, ctx) => {
         };
       },
 
+      "long values in parts": () => {
+        const word = `${"ẪẬẲỖỮỰ".repeat(6)}${"x".repeat(70)}`;
+        const marks = "ỖỘỔ ỮỰỬ ẪẬẨ ẴẶẲ ỄỆỂ";
+        const sidebar = createSidebar(doc, {
+          label: "Main, long label example",
+          brand: "Mnemo",
+          brandMark: "M",
+          quick: {
+            id: "save",
+            label: "Save or ask",
+            href: "#/ui-catalog",
+            icon: Plus,
+          },
+          searchLabel: "Search everything",
+          groups: [
+            {
+              id: "long",
+              label: "Library",
+              items: [
+                {
+                  id: "word",
+                  label: word,
+                  href: "#/ui-catalog",
+                  icon: Bell,
+                },
+                {
+                  id: "marks",
+                  label: `${marks} thông báo lặng lẽ từ mọi ứng dụng và lịch`,
+                  href: "#/ui-catalog",
+                  icon: Bell,
+                },
+              ],
+            },
+          ],
+          bottom: {
+            label: "Apps and settings",
+            icon: Plus,
+            items: [
+              {
+                id: "settings",
+                label: "Settings",
+                href: "#/ui-catalog",
+                icon: Plus,
+              },
+            ],
+          },
+          collapsed: false,
+          idPrefix: "lim-sb",
+        });
+        const frame = el(doc, "div", "frame frame-sidebar");
+        frame.append(sidebar.element);
+        return {
+          column: true,
+          nodes: [
+            state(
+              doc,
+              "tag list",
+              createTagList(doc, [word, marks, "ngữ pháp"], {
+                label: "Long tags",
+              }),
+            ),
+            state(
+              doc,
+              "choice list",
+              createChoiceList(doc, {
+                legend: "Long hints",
+                name: "lim-choice",
+                value: "a",
+                choices: [
+                  { value: "a", label: marks, hint: word },
+                  {
+                    value: "b",
+                    label: "Ghi chú",
+                    hint: "Một dòng giải thích dài, có dấu chồng: ỖỘỔ ẪẬẨ, không bị cắt.",
+                  },
+                ],
+              }).element,
+            ),
+            state(
+              doc,
+              "source list",
+              createSourceList(doc, [
+                { title: word, app: "zalo", age: "1 h" },
+                {
+                  title: `${marks} ${marks} ${marks}`,
+                  app: "telegram",
+                  age: "2 d",
+                },
+              ]),
+            ),
+            state(
+              doc,
+              "section list",
+              createSectionList(doc, {
+                label: "Long values",
+                current: "a",
+                sections: [
+                  { id: "a", label: "Appearance", value: word },
+                  { id: "b", label: "Ngôn ngữ", value: `${marks} ${marks}` },
+                ],
+              }).element,
+            ),
+            state(
+              doc,
+              "folder tree",
+              createTree(doc, "Long folders", [
+                { label: word, kind: "folder", count: 12 },
+                { label: `${marks} / ${marks}`, kind: "label", count: 3 },
+              ]),
+            ),
+            state(
+              doc,
+              "list row, second line",
+              createList(doc, "Long second line", [
+                createListRow(doc, { title: "Row", sub: word, meta: "1 h" }),
+                createListRow(doc, {
+                  title: "Hàng",
+                  sub: `${marks} ${marks}`,
+                  meta: "2 h",
+                }),
+              ]),
+            ),
+            state(doc, "sidebar, long labels", frame),
+          ],
+        };
+      },
+
       "empty content": () => {
         const card = createLinkCard(doc, {
           title: "Untitled link",
@@ -364,15 +500,18 @@ export const renderLimits: TabRenderer = (panel, ctx) => {
           age: "just now",
         });
         card.classList.add("lim-narrow");
-        return [
-          card,
-          createKanbanColumn(doc, {
-            name: "Waiting",
-            cards: [],
-            emptyText: "Nothing here.",
-          }),
-          createMetaLine(doc, ["just now", "0 links"]),
-        ];
+        return {
+          wide: true,
+          nodes: [
+            card,
+            createKanbanColumn(doc, {
+              name: "Waiting",
+              cards: [],
+              emptyText: "Nothing here.",
+            }),
+            createMetaLine(doc, ["just now", "0 links"]),
+          ],
+        };
       },
 
       "1000 rows": () => ({ nodes: manyRows(ctx), column: true }),

@@ -104,6 +104,14 @@ pub fn run() {
             app.manage(system::window::TrayAvailable(tray));
             app.manage(system::window::HiddenAt::default());
 
+            // The minimum is also enforced on every resize, so it holds when the size is restored late
+            // or when a window saved maximized is un-maximized.
+            let main = app.config().app.windows.iter().find(|w| w.label == "main");
+            app.manage(system::window::MinimumSize {
+                width: main.and_then(|w| w.min_width),
+                height: main.and_then(|w| w.min_height),
+            });
+
             // The main window is built here (`create: false` in tauri.conf.json) so it can
             // start on the error page. If it cannot be built, Mnemo prints why and exits
             // with code 1. Returning an error from setup would make Tauri panic instead.
@@ -117,9 +125,13 @@ pub fn run() {
                 .ok_or_else(|| "tauri.conf.json has no main window".to_string())
                 .and_then(|mut config| {
                     config.url = start_url(error_code, config.url);
-                    WebviewWindowBuilder::from_config(app.handle(), &config)
+                    let built = WebviewWindowBuilder::from_config(app.handle(), &config)
                         .and_then(|b| b.build())
-                        .map_err(|e| e.to_string())
+                        .map_err(|e| e.to_string())?;
+                    // The window-state plugin has restored the saved size by now. One saved before
+                    // the minimum existed may be smaller; grow it to max(saved, minimum).
+                    system::window::enforce_minimum(&built, config.min_width, config.min_height);
+                    Ok(())
                 });
             if let Err(why) = window {
                 eprintln!("Mnemo could not open its window: {why}");
@@ -128,6 +140,7 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            system::window::enforce_on_resize(window, event);
             // The error page asks the owner to quit and start again, so a close there
             // quits instead of hiding to the tray.
             let failed = window.try_state::<StartupFailed>().is_some_and(|s| s.0);
@@ -155,6 +168,24 @@ pub fn run() {
 mod tests {
     use super::{keeps_running_in_tray, start_url, startup_code, StorageError};
     use tauri::WebviewUrl;
+
+    // The window is built from this config entry (create: false), so the minimum here is the minimum
+    // of the real window. 800 x 560 is the smallest size every screen is designed and checked for.
+    #[test]
+    fn main_window_has_a_minimum_of_800_by_560_and_starts_at_900_by_640() {
+        // No JSON crate is a dependency, so the compact text of the config is checked.
+        let conf: String = include_str!("../tauri.conf.json")
+            .split_whitespace()
+            .collect();
+        for want in [
+            "\"minWidth\":800",
+            "\"minHeight\":560",
+            "\"width\":900",
+            "\"height\":640",
+        ] {
+            assert!(conf.contains(want), "tauri.conf.json lacks {want}");
+        }
+    }
 
     #[test]
     fn no_tray_on_the_error_page() {
