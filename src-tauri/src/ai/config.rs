@@ -144,6 +144,13 @@ pub fn load_allowed_tools(
     serde_json::from_str(&text).map_err(|_| ConfigError::Invalid)
 }
 
+/// A config in a new temp folder, for the tests of the run args.
+#[cfg(test)]
+pub(crate) fn test_config() -> ClaudeConfig {
+    let dir = std::env::temp_dir().join(format!("mnemo-test-config-{}", uuid::Uuid::new_v4()));
+    ensure_config(&dir).unwrap()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1123,11 +1123,11 @@ mod tests {
         assert_eq!(serde_json::to_string(&AiMode::Fake).unwrap(), "\"fake\"");
         assert_eq!(serde_json::to_string(&AiMode::Real).unwrap(), "\"real\"");
         let fake = AiRunnerState {
-            runner: crate::ai::runner::select_runner(true, None),
+            runner: crate::ai::runner::select_runner(true, None, None),
             fake: true,
         };
         let real = AiRunnerState {
-            runner: crate::ai::runner::select_runner(false, None),
+            runner: crate::ai::runner::select_runner(false, None, None),
             fake: false,
         };
         assert_eq!(fake.mode(), AiMode::Fake);
@@ -1136,7 +1136,7 @@ mod tests {
 
     #[test]
     fn test_prompt_command_with_the_fake_gives_the_fake_answer() {
-        let runner = crate::ai::runner::select_runner(true, None);
+        let runner = crate::ai::runner::select_runner(true, None, None);
         let got = run_test_prompt_with(runner.as_ref()).unwrap();
         assert_eq!(got.answer, "Fake answer: AI is in test mode.");
         let json = serde_json::to_value(&got).unwrap();
