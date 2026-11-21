@@ -15,8 +15,8 @@ use std::time::Instant;
 use serde::Deserialize;
 
 use super::claude::{
-    self, build_command, failure, limits_for, outcome_line, process_error, Event, ExitInfo,
-    OutputMode,
+    self, build_command, failure, limit_from_raw, limits_for, outcome_line, process_error, Event,
+    ExitInfo, OutputMode,
 };
 use super::process;
 use super::run_dir::RunDir;
@@ -118,9 +118,19 @@ pub fn run_stream(
     let run_dir = RunDir::create(runs_dir).map_err(|_| AiError::Unavailable)?;
     let command = build_command(program, task, run_dir.path(), OutputMode::StreamJson);
     let mut reader = StreamReader::new(on_text);
-    let ran = process::run_bounded_with(command, limits_for(task), &mut |chunk| reader.push(chunk));
+    let ran = process::run_bounded_with(
+        command,
+        limits_for(task),
+        Some(task.prompt.as_bytes()),
+        &mut |chunk| reader.push(chunk),
+    );
     let result = match ran {
-        Ok(out) => reader.finish(&task.schema, ExitInfo::of(out.status)),
+        Ok(out) => {
+            let exit = ExitInfo::of(out.status);
+            reader
+                .finish(&task.schema, exit)
+                .map_err(|e| limit_from_raw(e, exit, &[&out.stderr]))
+        }
         Err(e) => Err(process_error(e)),
     };
     log::info!("{}", outcome_line(&task.name, &result, started.elapsed()));

@@ -10,7 +10,7 @@
 // Errors carry no output text: output may hold account data and never goes into an error.
 
 use std::fmt;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
@@ -39,7 +39,13 @@ pub struct ProcessOutput {
     pub stdout: Vec<u8>,
     /// True when the stream ended. False when a descendant still held the pipe after `drain`.
     pub finished: bool,
+    /// The start of the standard error (at most `MAX_STDERR` bytes), read only to spot a
+    /// usage-limit message. It is never kept, logged or shown.
+    pub stderr: Vec<u8>,
 }
+
+/// The most standard error bytes kept from one run.
+const MAX_STDERR: u64 = 64 * 1024;
 
 /// Output can hold account data, so `{:?}` never prints it.
 impl fmt::Debug for ProcessOutput {
@@ -51,6 +57,10 @@ impl fmt::Debug for ProcessOutput {
                 &format_args!("<{} bytes hidden>", self.stdout.len()),
             )
             .field("finished", &self.finished)
+            .field(
+                "stderr",
+                &format_args!("<{} bytes hidden>", self.stderr.len()),
+            )
             .finish()
     }
 }
@@ -100,20 +110,22 @@ fn spawn_retrying_busy(command: &mut Command) -> std::io::Result<Child> {
 /// The group kill uses the `kill` of the shell, so no `unsafe` code is needed.
 fn kill_tree(child: &mut Child) {
     #[cfg(unix)]
-    kill_group(child.id());
+    let _ = kill_group(child.id());
     let _ = child.kill();
     let _ = child.wait();
 }
 
+/// Kills every process in the group. True when at least one process was still in it.
 #[cfg(unix)]
-fn kill_group(pgid: u32) {
-    let _ = Command::new("/bin/sh")
+fn kill_group(pgid: u32) -> bool {
+    Command::new("/bin/sh")
         .args(["-c", "kill -KILL \"-$1\" 2>/dev/null", "sh"])
         .arg(pgid.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status();
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 /// The text of an output, or `Err` when it may be cut short. Output that hit the size cap or
@@ -130,19 +142,25 @@ pub fn complete_text(bytes: Vec<u8>, finished: bool, max_output: u64) -> Result<
     String::from_utf8(bytes).map_err(|_| ())
 }
 
-/// Runs `command` with its output bounded by `limits`. Stdout is piped by this function.
+/// Runs `command` with its output bounded by `limits`. Stdout and stderr are piped by this
+/// function; stdin is as the command set it.
 pub fn run_bounded(command: Command, limits: Limits) -> Result<ProcessOutput, ProcessError> {
-    run_bounded_with(command, limits, &mut |_| {})
+    run_bounded_with(command, limits, None, &mut |_| {})
 }
 
-/// Like `run_bounded`, and calls `on_chunk` with each piece of output as it arrives (stream
-/// mode). The pieces are cut at any byte, not at line breaks.
+/// Like `run_bounded`. When `input` is given it is written to the child's stdin, which is then
+/// closed (so a prompt never shows on the command line). `on_chunk` gets each piece of output
+/// as it arrives (stream mode); the pieces are cut at any byte, not at line breaks.
 pub fn run_bounded_with(
     mut command: Command,
     limits: Limits,
+    input: Option<&[u8]>,
     on_chunk: &mut dyn FnMut(&[u8]),
 ) -> Result<ProcessOutput, ProcessError> {
-    command.stdout(Stdio::piped());
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    if input.is_some() {
+        command.stdin(Stdio::piped());
+    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -153,6 +171,27 @@ pub fn run_bounded_with(
         kill_tree(&mut child);
         return Err(ProcessError::Read);
     };
+    if let Some(input) = input {
+        let Some(mut stdin) = child.stdin.take() else {
+            kill_tree(&mut child);
+            return Err(ProcessError::Read);
+        };
+        // Written on its own thread, so a child that does not read cannot block this one.
+        // Dropping the handle at the end closes stdin.
+        let input = input.to_vec();
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(&input);
+        });
+    }
+    // Stderr is read on its own thread with a cap, so a full stderr pipe never stalls the child.
+    let (err_sender, err_receiver) = mpsc::channel::<Vec<u8>>();
+    if let Some(stderr) = child.stderr.take() {
+        std::thread::spawn(move || {
+            let mut kept = Vec::new();
+            let _ = stderr.take(MAX_STDERR).read_to_end(&mut kept);
+            let _ = err_sender.send(kept);
+        });
+    }
     let (sender, receiver) = mpsc::channel::<Vec<u8>>();
     // The reader is not joined: if a descendant keeps the pipe open it ends when that does.
     // It ends the channel when it stops, so the receiver sees whether the stream finished.
@@ -214,7 +253,16 @@ pub fn run_bounded_with(
         }
     };
 
-    // The child has exited: wait a short while for the end of the stream.
+    // The child has exited. End anything left in its group now, while the group number is
+    // still held by those processes, so the number cannot have been reused by another group.
+    // What they already wrote stays in the pipe and is still read below. If something was
+    // still running, the output may be cut short, so it does not count as finished.
+    #[cfg(unix)]
+    let cut_short = kill_group(child.id());
+    #[cfg(not(unix))]
+    let cut_short = false;
+
+    // Wait a short while for the end of the stream.
     let drain_deadline = Instant::now() + limits.drain;
     while !finished {
         let left = drain_deadline.saturating_duration_since(Instant::now());
@@ -223,18 +271,21 @@ pub fn run_bounded_with(
         }
         take_in(left.min(POLL), &mut bytes, &mut finished);
     }
-    if !finished {
-        // A descendant still holds the pipe: end it, so it does not outlive the run.
-        #[cfg(unix)]
-        kill_group(child.id());
+    if cut_short {
+        finished = false;
     }
     if bytes.len() as u64 >= limits.max_output {
         return Err(ProcessError::TooLarge);
     }
+    // Stderr is closed by now unless a process outside the group holds it: wait only briefly.
+    let stderr = err_receiver
+        .recv_timeout(Duration::from_millis(200))
+        .unwrap_or_default();
     Ok(ProcessOutput {
         status,
         stdout: bytes,
         finished,
+        stderr,
     })
 }
 
@@ -340,7 +391,7 @@ mod tests {
     #[test]
     fn chunks_reach_the_callback_in_order() {
         let mut seen: Vec<u8> = Vec::new();
-        let got = run_bounded_with(sh("echo one; echo two"), limits(5000), &mut |c| {
+        let got = run_bounded_with(sh("echo one; echo two"), limits(5000), None, &mut |c| {
             seen.extend_from_slice(c)
         })
         .unwrap();

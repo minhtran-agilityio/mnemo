@@ -26,6 +26,16 @@ const MAX_OUTPUT: u64 = 4 * 1024 * 1024;
 /// How long to wait for the end of the output after `claude` has exited.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Environment variables that would send a run to a key, token, host or cloud other than the
+/// owner's Claude subscription. They are removed from every run's environment.
+pub const ROUTING_ENV: [&str; 5] = [
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+];
+
 /// The two output formats the runner reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputMode {
@@ -39,8 +49,10 @@ pub enum OutputMode {
 /// subscription is used (no API key in the child), and the run starts in `work_dir`.
 pub fn build_command(program: &Path, task: &AiTask, work_dir: &Path, mode: OutputMode) -> Command {
     let mut command = Command::new(program);
-    // The prompt comes right after `-p`: `--allowedTools` takes a list and would swallow it.
-    command.arg("-p").arg(&task.prompt);
+    // The prompt is not an argument: other local accounts can read a command line (`ps`), and
+    // one argument is capped in size. `claude -p` with no prompt argument reads it from stdin,
+    // which the runner writes (see `run_claude`). So the command line holds fixed flags only.
+    command.arg("-p");
     command.arg("--output-format").arg(match mode {
         OutputMode::Json => "json",
         OutputMode::StreamJson => "stream-json",
@@ -67,10 +79,13 @@ pub fn build_command(program: &Path, task: &AiTask, work_dir: &Path, mode: Outpu
         command.arg("--effort").arg(effort);
     }
     command
-        .env_remove("ANTHROPIC_API_KEY")
         .current_dir(work_dir)
         .stdin(Stdio::null())
         .stderr(Stdio::null());
+    // Runs use the owner's subscription sign-in only: no key, token, other host or other cloud.
+    for name in ROUTING_ENV {
+        command.env_remove(name);
+    }
     command
 }
 
@@ -147,6 +162,19 @@ const LIMIT_MARKERS: [&str; 5] = [
 fn says_limit(text: &str) -> bool {
     let lower = text.to_lowercase();
     LIMIT_MARKERS.iter().any(|m| lower.contains(m))
+}
+
+/// A failed run whose output was not a readable result can still be a usage limit: the limit
+/// message may come as plain text on stdout or on stderr. **Unverified:** the spike did not see
+/// the at-limit output. Only a failed exit is looked at, so an answer that mentions a limit is
+/// never mistaken for one. The text is matched in memory and never kept or logged.
+pub(super) fn limit_from_raw(error: AiError, exit: ExitInfo, raw: &[&[u8]]) -> AiError {
+    let unread = matches!(error, AiError::ExitError { .. } | AiError::SchemaMismatch);
+    if !exit.success && unread && raw.iter().any(|r| says_limit(&String::from_utf8_lossy(r))) {
+        AiError::UsageLimit
+    } else {
+        error
+    }
 }
 
 /// An error result at the usage limit. **Unverified** shape: HTTP 429, or a known marker.
@@ -240,7 +268,12 @@ fn matches_schema(answer: &Value, schema: &str) -> bool {
             "array" => answer.is_array(),
             "string" => answer.is_string(),
             "number" => answer.is_number(),
-            "integer" => answer.is_i64() || answer.is_u64(),
+            // JSON Schema counts a number with no fractional part (such as 5.0) as an integer.
+            "integer" => {
+                answer.is_i64()
+                    || answer.is_u64()
+                    || answer.as_f64().is_some_and(|f| f.fract() == 0.0)
+            }
             "boolean" => answer.is_boolean(),
             "null" => answer.is_null(),
             _ => true,
@@ -308,9 +341,18 @@ pub fn run_claude(program: &Path, task: &AiTask, runs_dir: &Path) -> Result<AiOu
     let started = Instant::now();
     let run_dir = RunDir::create(runs_dir).map_err(|_| AiError::Unavailable)?;
     let command = build_command(program, task, run_dir.path(), OutputMode::Json);
-    let result = process::run_bounded(command, limits_for(task))
-        .map_err(process_error)
-        .and_then(|out| parse_output(&out.stdout, &task.schema, ExitInfo::of(out.status)));
+    let result = process::run_bounded_with(
+        command,
+        limits_for(task),
+        Some(task.prompt.as_bytes()),
+        &mut |_| {},
+    )
+    .map_err(process_error)
+    .and_then(|out| {
+        let exit = ExitInfo::of(out.status);
+        parse_output(&out.stdout, &task.schema, exit)
+            .map_err(|e| limit_from_raw(e, exit, &[&out.stdout, &out.stderr]))
+    });
     log::info!("{}", outcome_line(&task.name, &result, started.elapsed()));
     result
 }
@@ -380,7 +422,8 @@ mod tests {
         );
         let args = args_of(&command);
         assert_eq!(args[0], "-p");
-        assert_eq!(args[1], "Say hi");
+        // The prompt goes on stdin, never on the command line (other accounts can read it).
+        assert!(!args.iter().any(|a| a.contains("Say hi")));
         assert!(has_pair(&args, "--output-format", "json"));
         assert!(has_pair(&args, "--json-schema", SCHEMA));
         assert!(has_pair(&args, "--allowedTools", "Read,Grep"));
@@ -709,6 +752,98 @@ mod tests {
         let _ = std::fs::remove_file(&marker);
         assert_eq!(got, Err(AiError::Unavailable));
         assert!(!ran, "claude was started without a private folder");
+    }
+
+    #[test]
+    fn every_routing_variable_is_removed_from_the_child_env() {
+        let command = build_command(
+            Path::new("/x/claude"),
+            &task(),
+            Path::new("/w"),
+            OutputMode::Json,
+        );
+        for name in ROUTING_ENV {
+            let found = command.get_envs().find(|(n, _)| *n == OsStr::new(name));
+            assert_eq!(found, Some((OsStr::new(name), None)), "{name} is passed on");
+        }
+    }
+
+    #[test]
+    fn the_prompt_reaches_claude_on_stdin_and_not_on_the_command_line() {
+        let seen = std::env::temp_dir().join(format!("mnemo-stdin-{}", uuid::Uuid::new_v4()));
+        let program = stand_in(
+            "stdin",
+            &format!(
+                "cat > '{0}.in'\nprintf '%s\\n' \"$@\" > '{0}.args'\ncat <<'EOF'\n{1}\nEOF",
+                seen.display(),
+                result_object()
+            ),
+        );
+        run_claude(&program, &task(), &runs()).unwrap();
+        let input = std::fs::read_to_string(format!("{}.in", seen.display())).unwrap();
+        let args = std::fs::read_to_string(format!("{}.args", seen.display())).unwrap();
+        let _ = std::fs::remove_file(format!("{}.in", seen.display()));
+        let _ = std::fs::remove_file(format!("{}.args", seen.display()));
+        assert_eq!(input, "Say hi");
+        assert!(!args.contains("Say hi"));
+    }
+
+    #[test]
+    fn a_failed_run_with_a_plain_limit_line_on_stderr_is_the_usage_limit() {
+        let program = stand_in(
+            "limit-stderr",
+            "echo 'Claude AI usage limit reached|1700000000' >&2; exit 1",
+        );
+        assert_eq!(
+            run_claude(&program, &task(), &runs()),
+            Err(AiError::UsageLimit)
+        );
+    }
+
+    #[test]
+    fn a_failed_run_with_a_plain_limit_line_on_stdout_is_the_usage_limit() {
+        let program = stand_in(
+            "limit-stdout",
+            "echo 'Claude AI usage limit reached'; exit 1",
+        );
+        assert_eq!(
+            run_claude(&program, &task(), &runs()),
+            Err(AiError::UsageLimit)
+        );
+    }
+
+    #[test]
+    fn limit_words_in_a_run_that_did_not_fail_are_not_a_usage_limit() {
+        let exit = ExitInfo {
+            success: true,
+            code: Some(0),
+        };
+        let got = limit_from_raw(AiError::SchemaMismatch, exit, &[b"you hit your limit"]);
+        assert_eq!(got, AiError::SchemaMismatch);
+        let failed = ExitInfo {
+            success: false,
+            code: Some(1),
+        };
+        let got = limit_from_raw(AiError::Timeout, failed, &[b"usage limit"]);
+        assert_eq!(got, AiError::Timeout);
+        let got = limit_from_raw(
+            AiError::ExitError { code: Some(1) },
+            failed,
+            &[b"other error"],
+        );
+        assert_eq!(got, AiError::ExitError { code: Some(1) });
+    }
+
+    #[test]
+    fn a_whole_number_written_with_a_point_is_an_integer() {
+        assert!(matches_schema(
+            &serde_json::json!(5.0),
+            r#"{"type":"integer"}"#
+        ));
+        assert!(!matches_schema(
+            &serde_json::json!(5.5),
+            r#"{"type":"integer"}"#
+        ));
     }
 
     #[test]

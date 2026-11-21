@@ -2,7 +2,11 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Theme } from "../../frame/theme";
 import type { AiHealth, AiMode, TestPromptResult } from "../../shared/api";
-import { renderSettings, type SettingsDeps } from "./settings";
+import {
+  renderSettings,
+  resetTestPromptForTests,
+  type SettingsDeps,
+} from "./settings";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
@@ -87,6 +91,7 @@ afterEach(async () => {
 });
 
 beforeEach(() => {
+  resetTestPromptForTests();
   container = document.createElement("main");
   document.body.replaceChildren(container);
   current = "system";
@@ -458,6 +463,22 @@ test("while the test prompt runs, the button is busy, the busy line shows and a 
     container.querySelector(".settings-body [role=status].busy-line")
       ?.textContent,
   ).toBe("Waiting for Claude…");
+});
+
+test("leaving Settings during a run and coming back shows it still running, and its answer then shows", async () => {
+  await openAi();
+  sendButton()?.click();
+  // The owner goes to another screen and comes back: Settings is drawn again from scratch.
+  container = document.createElement("main");
+  document.body.replaceChildren(container);
+  renderSettings(container, deps());
+  await openAi();
+  expect(sendButton()?.getAttribute("aria-busy")).toBe("true");
+  sendButton()?.click();
+  expect(prompts.length).toBe(1);
+  prompts[0]?.({ answer: "Hello again.", durationMs: 900 });
+  await tick();
+  expect(aiBody()).toContain("Hello again.");
 });
 
 test("a good answer shows the text, the Written by AI label and the time", async () => {

@@ -119,7 +119,8 @@ fn real_run_refuses_a_tool_not_in_the_allowed_list() {
         max_output: 4 * 1024 * 1024,
         drain: Duration::from_secs(2),
     };
-    let out = process::run_bounded(command, limits).expect("the real run did not finish");
+    let out = process::run_bounded_with(command, limits, Some(task.prompt.as_bytes()), &mut |_| {})
+        .expect("the real run did not finish");
     let refused = refused_tools(&out.stdout);
     let written = dir.join("mnemo-proof-file").exists();
     drop(run_dir);
