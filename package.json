@@ -9,7 +9,10 @@
   "scripts": {
     "dev": "vite",
     "build": "npm run typecheck && vite build",
+    "build:dev": "npm run typecheck && NODE_ENV=development vite build --mode development",
     "tauri": "tauri",
+    "bundle": "tauri build",
+    "bundle:dev": "tauri build --config src-tauri/tauri.dev.conf.json",
     "format:check": "cargo fmt --manifest-path src-tauri/Cargo.toml --check && biome format",
     "typecheck": "tsc --noEmit",
     "test": "cargo test --manifest-path src-tauri/Cargo.toml && vitest run --no-color && MNEMO_NESTED=1 node --test --test-isolation=none \"tests/*.test.mjs\" \"tests/acceptance/*.test.mjs\"",
