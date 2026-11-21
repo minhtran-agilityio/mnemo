@@ -18,7 +18,8 @@ struct TestAnswer {
 pub fn task() -> AiTask {
     AiTask {
         name: "test_prompt".to_string(),
-        prompt: "Reply with one short friendly sentence.".to_string(),
+        prompt: "Write one short friendly sentence for the owner of a notes app. Put it in the answer field."
+            .to_string(),
         schema:
             r#"{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"#
                 .to_string(),

@@ -3,6 +3,8 @@ pub mod claude;
 pub mod fake;
 pub mod health;
 pub mod process;
+#[cfg(test)]
+mod proof;
 pub mod runner;
 #[cfg(test)]
 mod sample;
