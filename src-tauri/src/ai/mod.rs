@@ -5,6 +5,7 @@ pub mod health;
 pub mod process;
 #[cfg(test)]
 mod proof;
+pub mod run_dir;
 pub mod runner;
 #[cfg(test)]
 mod sample;

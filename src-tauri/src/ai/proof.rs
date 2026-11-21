@@ -15,6 +15,7 @@ use serde_json::Value;
 use super::claude::{build_command, run_claude, OutputMode};
 use super::health::{ClaudeCli, SystemClaude};
 use super::process::{self, Limits};
+use super::run_dir::RunDir;
 use super::runner::AiTask;
 use super::test_prompt;
 
@@ -22,6 +23,16 @@ fn proof_enabled() -> bool {
     ["MNEMO_REAL_AI_PROOF", "MNEMO_REAL_CLAUDE"]
         .iter()
         .any(|name| std::env::var(name).is_ok_and(|v| v == "1"))
+}
+
+/// Like the app, real runs start inside an owner-only folder under the home folder, never
+/// under `/tmp` (see `run_dir`).
+fn proof_runs_dir() -> PathBuf {
+    let home = std::env::var_os("HOME").expect("HOME is not set, so the proof cannot run");
+    PathBuf::from(home)
+        .join(".cache")
+        .join("mnemo-proof")
+        .join("ai-runs")
 }
 
 fn real_claude() -> PathBuf {
@@ -84,7 +95,7 @@ fn real_run_gives_an_answer() {
     if !proof_enabled() {
         return;
     }
-    let out = run_claude(&real_claude(), &test_prompt::task(), &std::env::temp_dir())
+    let out = run_claude(&real_claude(), &test_prompt::task(), &proof_runs_dir())
         .expect("the real test prompt gave no answer");
     let answer: Value = serde_json::from_str(&out.structured_output).unwrap();
     let text = answer["answer"].as_str().unwrap_or_default();
@@ -100,8 +111,8 @@ fn real_run_refuses_a_tool_not_in_the_allowed_list() {
     }
     let task = disallowed_tool_task();
     // A folder of its own, so a wrongly allowed command could touch nothing else.
-    let dir = std::env::temp_dir().join(format!("mnemo-proof-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let run_dir = RunDir::create(&proof_runs_dir()).unwrap();
+    let dir = run_dir.path().to_path_buf();
     let command = build_command(&real_claude(), &task, &dir, OutputMode::Json);
     let limits = Limits {
         timeout: task.timeout,
@@ -111,7 +122,7 @@ fn real_run_refuses_a_tool_not_in_the_allowed_list() {
     let out = process::run_bounded(command, limits).expect("the real run did not finish");
     let refused = refused_tools(&out.stdout);
     let written = dir.join("mnemo-proof-file").exists();
-    let _ = std::fs::remove_dir_all(&dir);
+    drop(run_dir);
     assert!(!written, "the refused command still ran");
     println!("refused tools: {}", refused.join(", "));
     assert!(refused.iter().any(|t| t == "Bash"), "Bash was not refused");

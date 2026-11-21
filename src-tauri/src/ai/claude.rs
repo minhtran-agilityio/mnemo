@@ -18,6 +18,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::process::{self, Limits, ProcessError};
+use super::run_dir::RunDir;
 use super::runner::{AiError, AiOutput, AiTask};
 
 /// The most output read from one run. A structured answer is small; this is a safety cap.
@@ -300,11 +301,13 @@ pub(super) fn process_error(error: ProcessError) -> AiError {
     }
 }
 
-/// Runs one task with `claude` at `program`, in `work_dir`. This does not check for a test: the
-/// guard lives in `ClaudeRunner::run_task`, so unit tests pass a stand-in program here.
-pub fn run_claude(program: &Path, task: &AiTask, work_dir: &Path) -> Result<AiOutput, AiError> {
+/// Runs one task with `claude` at `program`, in a new owner-only folder inside `runs_dir` (see
+/// `run_dir`). This does not check for a test: the guard lives in `ClaudeRunner::run_task`, so
+/// unit tests pass a stand-in program here.
+pub fn run_claude(program: &Path, task: &AiTask, runs_dir: &Path) -> Result<AiOutput, AiError> {
     let started = Instant::now();
-    let command = build_command(program, task, work_dir, OutputMode::Json);
+    let run_dir = RunDir::create(runs_dir).map_err(|_| AiError::Unavailable)?;
+    let command = build_command(program, task, run_dir.path(), OutputMode::Json);
     let result = process::run_bounded(command, limits_for(task))
         .map_err(process_error)
         .and_then(|out| parse_output(&out.stdout, &task.schema, ExitInfo::of(out.status)));
@@ -317,6 +320,11 @@ mod tests {
     use super::*;
     use std::ffi::OsStr;
     use std::path::PathBuf;
+
+    /// A runs folder of the test's own: `/tmp` itself is not the owner's, so it is refused.
+    fn runs() -> PathBuf {
+        std::env::temp_dir().join(format!("mnemo-test-runs-{}", uuid::Uuid::new_v4()))
+    }
 
     const SCHEMA: &str =
         r#"{"type":"object","properties":{"greeting":{"type":"string"}},"required":["greeting"]}"#;
@@ -622,14 +630,14 @@ mod tests {
     #[test]
     fn a_stand_in_claude_that_prints_a_result_gives_the_answer() {
         let program = stand_in("ok", &format!("cat <<'EOF'\n{}\nEOF", result_object()));
-        let got = run_claude(&program, &task(), &std::env::temp_dir()).unwrap();
+        let got = run_claude(&program, &task(), &runs()).unwrap();
         assert_eq!(got.structured_output, r#"{"greeting":"Hi!"}"#);
     }
 
     #[test]
     fn a_stand_in_claude_with_a_failing_exit_gives_an_exit_error() {
         let program = stand_in("fail", &format!("echo '{}'; exit 1", result_object()));
-        let got = run_claude(&program, &task(), &std::env::temp_dir());
+        let got = run_claude(&program, &task(), &runs());
         assert_eq!(got, Err(AiError::ExitError { code: Some(1) }));
     }
 
@@ -644,7 +652,7 @@ mod tests {
         let mut t = task();
         t.timeout = Duration::from_secs(1);
         let started = Instant::now();
-        let got = run_claude(&program, &t, &std::env::temp_dir());
+        let got = run_claude(&program, &t, &runs());
         assert_eq!(got, Err(AiError::Timeout));
         assert!(started.elapsed() < Duration::from_secs(5));
         let pid = std::fs::read_to_string(&marker).unwrap().trim().to_string();
@@ -665,12 +673,47 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_program_is_unavailable() {
-        let got = run_claude(
-            Path::new("/nonexistent/claude"),
-            &task(),
-            &std::env::temp_dir(),
+    fn each_run_starts_in_its_own_folder_inside_the_runs_dir_and_it_is_removed_after() {
+        let runs = std::env::temp_dir().join(format!("mnemo-runs-{}", uuid::Uuid::new_v4()));
+        let seen = std::env::temp_dir().join(format!("mnemo-cwd-{}", uuid::Uuid::new_v4()));
+        let program = stand_in(
+            "cwd",
+            &format!(
+                "pwd > '{}'\ncat <<'EOF'\n{}\nEOF",
+                seen.display(),
+                result_object()
+            ),
         );
+        run_claude(&program, &task(), &runs).unwrap();
+        let cwd = PathBuf::from(std::fs::read_to_string(&seen).unwrap().trim());
+        let _ = std::fs::remove_file(&seen);
+        let runs_real = std::fs::canonicalize(&runs).unwrap();
+        assert!(
+            cwd.starts_with(&runs_real),
+            "{cwd:?} is not inside {runs_real:?}"
+        );
+        assert_ne!(cwd, runs_real);
+        assert!(!cwd.exists(), "the run folder was not removed");
+        let _ = std::fs::remove_dir_all(&runs);
+    }
+
+    #[test]
+    fn a_runs_dir_that_cannot_be_made_is_unavailable_and_starts_nothing() {
+        let file = std::env::temp_dir().join(format!("mnemo-runs-file-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&file, "not a folder").unwrap();
+        let marker = std::env::temp_dir().join(format!("mnemo-ran-{}", uuid::Uuid::new_v4()));
+        let program = stand_in("noruns", &format!("touch '{}'", marker.display()));
+        let got = run_claude(&program, &task(), &file);
+        let ran = marker.exists();
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_file(&marker);
+        assert_eq!(got, Err(AiError::Unavailable));
+        assert!(!ran, "claude was started without a private folder");
+    }
+
+    #[test]
+    fn a_missing_program_is_unavailable() {
+        let got = run_claude(Path::new("/nonexistent/claude"), &task(), &runs());
         assert_eq!(got, Err(AiError::Unavailable));
     }
 }

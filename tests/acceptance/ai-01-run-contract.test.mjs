@@ -456,7 +456,9 @@ test('AC10: the Rust unit tests, with the runner tests of this ticket, pass and 
   const r = runWithStandIn(null);
   assert.notEqual(r.signal, 'SIGTERM', 'the unit tests did not finish (hang)');
   assert.equal(r.status, 0, `cargo test --lib failed:\n${r.out.slice(-4000)}`);
-  for (const n of added) assert.match(r.out, new RegExp(`test ${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\.\\.\\. ok`), `the runner test ${n} did not run and pass`);
+  // The real-run proofs AC11 asks for are ignored tests: they print 'ignored', not 'ok', in this run.
+  const ignored = new Set(ignoredAiTests());
+  for (const n of added.filter((t) => !ignored.has(t))) assert.match(r.out, new RegExp(`test ${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\.\\.\\. ok`), `the runner test ${n} did not run and pass`);
   const printRuns = r.calls.filter((c) => /(^|\s)(-p|--print)(\s|$)/.test(c));
   assert.deepEqual(printRuns, [], `a unit test started a claude -p run (${printRuns.length} call(s))`);
 });

@@ -100,13 +100,14 @@ pub trait AiRunner: Send + Sync {
 
 /// The real runner: one `claude -p` process per task.
 pub struct ClaudeRunner {
-    /// The folder every run starts in. It is Mnemo's own, never a project folder of the owner.
-    work_dir: PathBuf,
+    /// The folder inside Mnemo's data folder that holds one new owner-only folder per run (see
+    /// `run_dir`). `None` when the data folder could not be found: then no run starts.
+    runs_dir: Option<PathBuf>,
 }
 
 impl ClaudeRunner {
-    pub fn new(work_dir: PathBuf) -> Self {
-        ClaudeRunner { work_dir }
+    pub fn new(runs_dir: Option<PathBuf>) -> Self {
+        ClaudeRunner { runs_dir }
     }
 }
 
@@ -119,10 +120,13 @@ fn guard_against_test_use() {
 impl AiRunner for ClaudeRunner {
     fn run_task(&self, task: &AiTask) -> Result<AiOutput, AiError> {
         guard_against_test_use();
+        let Some(runs_dir) = &self.runs_dir else {
+            return Err(AiError::Unavailable);
+        };
         let Some(program) = SystemClaude::from_env().locate() else {
             return Err(AiError::Unavailable);
         };
-        claude::run_claude(&program, task, &self.work_dir)
+        claude::run_claude(&program, task, runs_dir)
     }
 }
 
@@ -131,15 +135,20 @@ pub fn fake_requested(value: Option<&OsStr>) -> bool {
     value == Some(OsStr::new("1"))
 }
 
-/// The runner the app uses: the fake (one fixed valid answer) or the real one.
-pub fn select_runner(fake: bool) -> Arc<dyn AiRunner> {
+/// The folder, inside Mnemo's data folder, that holds the per-run folders.
+pub fn runs_dir(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("ai-runs")
+}
+
+/// The runner the app uses: the fake (one fixed valid answer) or the real one. `runs_dir` is
+/// Mnemo's own folder for runs (see `runs_dir`), never `/tmp` and never an owner project folder.
+pub fn select_runner(fake: bool, runs_dir: Option<PathBuf>) -> Arc<dyn AiRunner> {
     if fake {
         Arc::new(FakeRunner::new(FakeResult::Valid(
             r#"{"answer":"Fake answer: AI is in test mode.","fake":true}"#.to_string(),
         )))
     } else {
-        // The temp folder is never an owner project folder. #20 moves it to Mnemo's config.
-        Arc::new(ClaudeRunner::new(std::env::temp_dir()))
+        Arc::new(ClaudeRunner::new(runs_dir))
     }
 }
 
@@ -162,7 +171,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "the real AI runner was used in a test")]
     fn the_real_runner_panics_in_a_test() {
-        let _ = ClaudeRunner::new(std::env::temp_dir()).run_task(&task());
+        let _ = ClaudeRunner::new(Some(std::env::temp_dir())).run_task(&task());
     }
 
     #[test]
@@ -181,7 +190,7 @@ mod tests {
 
     #[test]
     fn select_runner_gives_the_fake_answer_when_fake() {
-        let out = select_runner(true).run_task(&task()).unwrap();
+        let out = select_runner(true, None).run_task(&task()).unwrap();
         assert_eq!(
             out.structured_output,
             r#"{"answer":"Fake answer: AI is in test mode.","fake":true}"#

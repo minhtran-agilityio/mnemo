@@ -19,6 +19,7 @@ use super::claude::{
     OutputMode,
 };
 use super::process;
+use super::run_dir::RunDir;
 use super::runner::{AiError, AiOutput, AiTask};
 
 #[derive(Deserialize, Default)]
@@ -110,11 +111,12 @@ impl<'a> StreamReader<'a> {
 pub fn run_stream(
     program: &Path,
     task: &AiTask,
-    work_dir: &Path,
+    runs_dir: &Path,
     on_text: &mut dyn FnMut(&str),
 ) -> Result<AiOutput, AiError> {
     let started = Instant::now();
-    let command = build_command(program, task, work_dir, OutputMode::StreamJson);
+    let run_dir = RunDir::create(runs_dir).map_err(|_| AiError::Unavailable)?;
+    let command = build_command(program, task, run_dir.path(), OutputMode::StreamJson);
     let mut reader = StreamReader::new(on_text);
     let ran = process::run_bounded_with(command, limits_for(task), &mut |chunk| reader.push(chunk));
     let result = match ran {
@@ -128,7 +130,13 @@ pub fn run_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use std::time::Duration;
+
+    /// A runs folder of the test's own: `/tmp` itself is not the owner's, so it is refused.
+    fn runs() -> PathBuf {
+        std::env::temp_dir().join(format!("mnemo-test-runs-{}", uuid::Uuid::new_v4()))
+    }
 
     const SCHEMA: &str = r#"{"type":"object","required":["answer"]}"#;
     const OK: ExitInfo = ExitInfo {
@@ -261,7 +269,7 @@ mod tests {
     fn a_stand_in_claude_that_prints_a_stream_works_end_to_end() {
         let program = stand_in(&format!("cat <<'EOF'\n{STREAM}EOF"));
         let mut pieces: Vec<String> = Vec::new();
-        let got = run_stream(&program, &task(), &std::env::temp_dir(), &mut |t| {
+        let got = run_stream(&program, &task(), &runs(), &mut |t| {
             pieces.push(t.to_string())
         });
         assert_eq!(pieces, vec!["Hel", "lo", " there"]);
@@ -277,7 +285,7 @@ mod tests {
         let mut t = task();
         t.timeout = Duration::from_secs(1);
         let started = Instant::now();
-        let got = run_stream(&program, &t, &std::env::temp_dir(), &mut |_| {});
+        let got = run_stream(&program, &t, &runs(), &mut |_| {});
         assert_eq!(got, Err(AiError::Timeout));
         assert!(started.elapsed() < Duration::from_secs(5));
     }
