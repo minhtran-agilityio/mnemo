@@ -5,8 +5,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
+use crate::ai::claude::error_kind;
 use crate::ai::health::{self, AiHealth};
-use crate::ai::runner::AiRunner;
+use crate::ai::runner::{AiError, AiRunner};
+use crate::ai::test_prompt;
 use crate::storage::items::{
     Bookmark, BookmarkInput, Event, EventInput, Idea, IdeaInput, Memory, MemoryInput, Note,
     NoteInput, Project, ProjectInput, Run, RunInput, Task, TaskInput,
@@ -78,8 +80,6 @@ pub enum AiMode {
 /// The runner every AI feature uses, and which kind it is. Chosen once at start from
 /// `MNEMO_FAKE_AI`.
 pub struct AiRunnerState {
-    // Read by the AI features of issue #19 and later; today only the mode is read.
-    #[expect(dead_code, reason = "read by the AI features of issue #19")]
     pub runner: Arc<dyn AiRunner>,
     pub fake: bool,
 }
@@ -98,6 +98,57 @@ impl AiRunnerState {
 #[tauri::command]
 pub fn get_ai_mode(state: tauri::State<'_, AiRunnerState>) -> AiMode {
     state.mode()
+}
+
+/// The answer of the test prompt and how long it took.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestPromptResult {
+    pub answer: String,
+    pub duration_ms: u64,
+}
+
+/// What the owner is told when a run gave no answer. The text says what happened and never
+/// holds output from Claude Code; the UI adds that nothing changed and what to do next. The
+/// `code` is the kind of the error.
+fn ai_failed(error: &AiError) -> AppError {
+    let message = match error {
+        AiError::Timeout => "Claude did not answer in time.",
+        AiError::UsageLimit => "Claude is at its usage limit.",
+        AiError::SchemaMismatch => "Claude answered, but not in the shape Mnemo asked for.",
+        AiError::ExitError { .. } => "Claude Code stopped with an error.",
+        AiError::Unavailable => "Claude Code could not be started.",
+    };
+    AppError {
+        code: error_kind(error),
+        message: message.to_string(),
+    }
+}
+
+/// Runs the test prompt on this thread and times it. The command calls this on a blocking thread.
+fn run_test_prompt_with(runner: &dyn AiRunner) -> Result<TestPromptResult, AppError> {
+    let started = std::time::Instant::now();
+    let answer = test_prompt::run(runner).map_err(|e| ai_failed(&e))?;
+    Ok(TestPromptResult {
+        answer,
+        duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+    })
+}
+
+/// Sends one tiny fixed prompt through the selected runner (the fake with `MNEMO_FAKE_AI=1`).
+/// A real run uses Claude usage. It runs on a blocking thread, never on the main thread.
+#[tauri::command]
+pub async fn run_test_prompt(app: tauri::AppHandle) -> Result<TestPromptResult, AppError> {
+    let runner = app.state::<AiRunnerState>().runner.clone();
+    tauri::async_runtime::spawn_blocking(move || run_test_prompt_with(runner.as_ref()))
+        .await
+        .unwrap_or_else(|e| {
+            log::error!("the test prompt did not finish: {e}");
+            Err(AppError {
+                code: "task_failed",
+                message: "The test prompt did not finish.".to_string(),
+            })
+        })
 }
 
 /// Returns a fixed reply so the UI can prove the Rust core is reachable.
@@ -632,6 +683,44 @@ mod tests {
         };
         assert_eq!(fake.mode(), AiMode::Fake);
         assert_eq!(real.mode(), AiMode::Real);
+    }
+
+    #[test]
+    fn test_prompt_command_with_the_fake_gives_the_fake_answer() {
+        let runner = crate::ai::runner::select_runner(true);
+        let got = run_test_prompt_with(runner.as_ref()).unwrap();
+        assert_eq!(got.answer, "Fake answer: AI is in test mode.");
+        let json = serde_json::to_value(&got).unwrap();
+        assert!(json.get("durationMs").is_some());
+    }
+
+    #[test]
+    fn test_prompt_errors_have_a_code_and_a_plain_message_without_output() {
+        let errors = [
+            AiError::Timeout,
+            AiError::UsageLimit,
+            AiError::SchemaMismatch,
+            AiError::ExitError { code: Some(1) },
+            AiError::ExitError { code: None },
+            AiError::Unavailable,
+        ];
+        let mut codes = Vec::new();
+        for e in &errors {
+            let app = ai_failed(e);
+            assert!(!app.code.is_empty());
+            assert!(!app.message.is_empty());
+            assert!(app.message.ends_with('.'));
+            assert!(!app.message.contains("code "));
+            codes.push(app.code);
+        }
+        assert_eq!(ai_failed(&AiError::UsageLimit).code, "usage_limit");
+        assert_eq!(
+            ai_failed(&AiError::ExitError { code: None }).code,
+            "exit_error"
+        );
+        codes.sort_unstable();
+        codes.dedup();
+        assert_eq!(codes.len(), 5);
     }
 
     #[test]

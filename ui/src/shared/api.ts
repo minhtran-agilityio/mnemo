@@ -71,6 +71,21 @@ export function checkAiHealth(): Promise<AiHealth> {
   return invoke<AiHealth>("check_ai_health");
 }
 
+/** The answer of the test prompt and how long it took. */
+export interface TestPromptResult {
+  answer: string;
+  durationMs: number;
+}
+
+/**
+ * Sends one tiny fixed prompt through the AI runner (Settings > AI developer test). A real run
+ * uses Claude usage; with MNEMO_FAKE_AI=1 it uses the fake. Rejects with an AppError whose code
+ * is the kind of failure (for example "usage_limit").
+ */
+export function runTestPrompt(): Promise<TestPromptResult> {
+  return invoke<TestPromptResult>("run_test_prompt");
+}
+
 // ---- Items and links (#14) ----
 // Types mirror the Rust records (camelCase). Times are UTC ISO 8601 set by the core;
 // null means unknown. Every list is paged: at most 100 records, newest first.

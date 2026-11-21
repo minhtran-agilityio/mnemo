@@ -7,3 +7,4 @@ pub mod runner;
 #[cfg(test)]
 mod sample;
 pub mod stream;
+pub mod test_prompt;

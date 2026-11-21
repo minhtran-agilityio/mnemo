@@ -172,6 +172,7 @@ pub fn run() {
             commands::get_ai_health,
             commands::check_ai_health,
             commands::get_ai_mode,
+            commands::run_test_prompt,
             commands::add_bookmark,
             commands::get_bookmark,
             commands::list_bookmarks,
