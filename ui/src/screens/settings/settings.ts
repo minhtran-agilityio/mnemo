@@ -4,6 +4,7 @@
 // ui/src/ds (section list, card, choice list, text); settings.css lays them out.
 
 import {
+  buildBanner,
   buildPill,
   buildText,
   type ChoiceList,
@@ -16,7 +17,12 @@ import {
 } from "../../ds";
 import { findItem } from "../../frame/nav";
 import { THEME_LABELS, THEMES, type Theme } from "../../frame/theme";
-import { type AiHealth, type AiState, errorMessage } from "../../shared/api";
+import {
+  type AiHealth,
+  type AiMode,
+  type AiState,
+  errorMessage,
+} from "../../shared/api";
 
 export interface SettingsDeps {
   /** The theme that is in use now. */
@@ -33,6 +39,8 @@ export interface SettingsDeps {
   onDetachedSave?(failure: string | null): void;
   /** The latest Claude Code check, or null while the first one is still running. */
   getAiHealth(): Promise<AiHealth | null>;
+  /** Which AI runner the app uses. Rejects when it could not be read. */
+  getAiMode(): Promise<AiMode>;
   /** Checks Claude Code again. Rejects when the check could not be asked for. */
   checkAiHealth(): Promise<AiHealth>;
 }
@@ -99,6 +107,7 @@ export function renderSettings(
   let open: SectionId = "appearance";
   let ai: AiView = { kind: "checking" };
   let aiBusy = false;
+  let aiMode: AiMode = "real";
 
   const title = doc.createElement("h1");
   title.textContent = "Settings";
@@ -215,6 +224,17 @@ export function renderSettings(
       onClick: () => void checkAgain(),
     });
     if (aiBusy) setButtonBusy(button, true, { label: "Check again" });
+    // Only when AI is fake: the owner must never mistake fixed test answers for real ones.
+    const fakeBanner: Node[] =
+      aiMode === "fake"
+        ? [
+            buildBanner({
+              tone: "warn",
+              lead: "Fake AI",
+              message: "answers are fixed test data, no Claude usage",
+            }),
+          ]
+        : [];
     if (ai.kind === "known") {
       status.append(
         buildPill({
@@ -223,14 +243,18 @@ export function renderSettings(
         }),
         button,
       );
-      return card("AI", [status, line(ai.health.message)]);
+      return card("AI", [...fakeBanner, status, line(ai.health.message)]);
     }
     if (ai.kind === "checking") {
       status.append(buildPill({ text: "Checking" }), button);
-      return card("AI", [status, line("Mnemo is checking Claude Code.")]);
+      return card("AI", [
+        ...fakeBanner,
+        status,
+        line("Mnemo is checking Claude Code."),
+      ]);
     }
     status.append(button);
-    return card("AI", [status, line(ai.text)]);
+    return card("AI", [...fakeBanner, status, line(ai.text)]);
   }
 
   function showAi(next: AiView): void {
@@ -283,6 +307,17 @@ export function renderSettings(
       });
   }
   readFirstCheck(AI_POLL_TRIES);
+
+  // The mode is read once. When it cannot be read the banner stays off, and the error is logged.
+  deps
+    .getAiMode()
+    .then((mode) => {
+      aiMode = mode;
+      if (mode === "fake" && open === "ai" && body.isConnected) renderBody();
+    })
+    .catch((error: unknown) => {
+      console.error("could not read the AI mode:", error);
+    });
 
   function choose(theme: Theme, choices: ChoiceList<Theme>): void {
     deps.applyTheme(theme);

@@ -164,4 +164,8 @@ Status: **Unverified**. These need the owner's own machines and are not done:
 
 ## Environment variables
 
-None yet. New variables are listed here when they are added.
+| Variable | Effect |
+| --- | --- |
+| `MNEMO_FAKE_AI` | `1` starts Mnemo with the fake AI runner (fixed test answers, no Claude usage). Settings > AI then shows a Fake AI banner. Any other value leaves the real runner on. |
+
+New variables are listed here when they are added.

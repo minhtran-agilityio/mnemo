@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Theme } from "../../frame/theme";
-import type { AiHealth } from "../../shared/api";
+import type { AiHealth, AiMode } from "../../shared/api";
 import { renderSettings, type SettingsDeps } from "./settings";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -16,6 +16,7 @@ let detached: Array<string | null>;
 let firstHealth: Array<AiHealth | null | Error>;
 let rechecks: Array<AiHealth | Error>;
 let checks: number;
+let aiMode: AiMode | Error;
 
 const READY: AiHealth = { state: "ready", message: "Claude Code is ready." };
 const SIGNED_OUT: AiHealth = {
@@ -40,6 +41,10 @@ function deps(): SettingsDeps {
         firstHealth.length > 1 ? firstHealth.shift() : firstHealth[0];
       if (next instanceof Error) throw next;
       return next ?? null;
+    },
+    getAiMode: async () => {
+      if (aiMode instanceof Error) throw aiMode;
+      return aiMode;
     },
     checkAiHealth: async () => {
       checks += 1;
@@ -86,6 +91,7 @@ beforeEach(() => {
   firstHealth = [READY];
   rechecks = [];
   checks = 0;
+  aiMode = "real";
   renderSettings(container, deps());
 });
 
@@ -341,4 +347,51 @@ test("a good save while Settings is open clears an earlier detached failure", as
   await tick();
   await tick();
   expect(detached).toEqual([null]);
+});
+
+test("the AI section shows the Fake AI banner first when the mode is fake", async () => {
+  aiMode = "fake";
+  document.body.replaceChildren(container);
+  renderSettings(container, deps());
+  await tick();
+  openSection("AI");
+  const banner = container.querySelector(".settings-body .banner");
+  expect(banner?.textContent).toContain("Fake AI");
+  expect(banner?.textContent).toContain(
+    "answers are fixed test data, no Claude usage",
+  );
+  expect(banner?.classList.contains("banner-warn")).toBe(true);
+  expect(
+    container.querySelector(".settings-body .settings-card")?.children[1],
+  ).toBe(banner);
+});
+
+test("the Fake AI banner shows up when the mode is read after the section opened", async () => {
+  aiMode = "fake";
+  document.body.replaceChildren(container);
+  renderSettings(container, deps());
+  openSection("AI");
+  expect(container.querySelector(".settings-body .banner")).toBeNull();
+  await tick();
+  expect(container.querySelector(".settings-body .banner")).not.toBeNull();
+});
+
+test("the AI section shows no banner when the mode is real", async () => {
+  document.body.replaceChildren(container);
+  renderSettings(container, deps());
+  await tick();
+  openSection("AI");
+  expect(container.querySelector(".settings-body .banner")).toBeNull();
+});
+
+test("the AI section shows no banner, and the failure is logged, when the mode cannot be read", async () => {
+  aiMode = new Error("no mode");
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  document.body.replaceChildren(container);
+  renderSettings(container, deps());
+  await tick();
+  openSection("AI");
+  expect(container.querySelector(".settings-body .banner")).toBeNull();
+  expect(log).toHaveBeenCalled();
+  log.mockRestore();
 });

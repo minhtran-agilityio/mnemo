@@ -58,6 +58,14 @@ export async function getAiHealth(): Promise<AiHealth | null> {
   return value ?? null;
 }
 
+/** Whether AI answers are real (`claude -p`) or fake test data (`MNEMO_FAKE_AI=1`). */
+export type AiMode = "real" | "fake";
+
+/** Reads which AI runner the app started with. */
+export function getAiMode(): Promise<AiMode> {
+  return invoke<AiMode>("get_ai_mode");
+}
+
 /** Checks Claude Code again and returns the new result. */
 export function checkAiHealth(): Promise<AiHealth> {
   return invoke<AiHealth>("check_ai_health");
