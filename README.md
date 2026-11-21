@@ -79,6 +79,18 @@ The dev build reads `src-tauri/tauri.dev.conf.json` on top of `src-tauri/tauri.c
 
 `npm run tauri dev` runs the app from source with live reload; it also shows Storehouse but uses the release data folder.
 
+## Claude config
+
+Every Mnemo `claude -p` run uses only Mnemo's own config, never your personal Claude Code setup. Mnemo makes three files in `~/.config/mnemo/` the first time it starts:
+
+- `settings.json`: passed to Claude with `--settings`. The default is `{"disableAllHooks": true}`. What this key does is **Unverified** until a real run.
+- `mcp.json`: passed with `--mcp-config` (and `--strict-mcp-config`). The default is `{"mcpServers": {}}`: no connectors.
+- `allowed-tools.json`: the tools each feature may use. The default is `{"test_prompt": []}`. An empty list blocks every tool.
+
+The folder is owner-only (mode 0700) and each file is owner-only (mode 0600). Mnemo creates a file only when it is missing and never overwrites it, so your edits stay. The files hold no token, and Mnemo never reads `~/.claude` or any Claude sign-in file. If the files cannot be made, AI is off; saving and reading still work.
+
+Each run starts in a new owner-only folder inside Mnemo's data folder (`ai-runs/`), removed when the run ends. That the run ignores your personal `CLAUDE.md` and your personal connectors is **Unverified** until a real run repeats test 3 of spike #6.
+
 ## Data folder
 
 Mnemo keeps all its data in one SQLite file named `mnemo.db` inside the Tauri app data folder (`~/.local/share/io.mnemo.desktop/` on Ubuntu, `~/Library/Application Support/io.mnemo.desktop/` on macOS). The file is created on first start and updated by numbered migrations when the app opens. If the file cannot be opened, the Mnemo window opens on a plain error page instead of the app, and nothing is deleted. The page shows only a short reason; the full error, which can name file paths, is printed to the terminal. If even that window cannot be built, Mnemo prints the error and exits with code 1. The error page was checked in a real window on Ubuntu 22.04; on macOS it is **Unverified**.
