@@ -58,9 +58,32 @@ export async function getAiHealth(): Promise<AiHealth | null> {
   return value ?? null;
 }
 
+/** Whether AI answers are real (`claude -p`) or fake test data (`MNEMO_FAKE_AI=1`). */
+export type AiMode = "real" | "fake";
+
+/** Reads which AI runner the app started with. */
+export function getAiMode(): Promise<AiMode> {
+  return invoke<AiMode>("get_ai_mode");
+}
+
 /** Checks Claude Code again and returns the new result. */
 export function checkAiHealth(): Promise<AiHealth> {
   return invoke<AiHealth>("check_ai_health");
+}
+
+/** The answer of the test prompt and how long it took. */
+export interface TestPromptResult {
+  answer: string;
+  durationMs: number;
+}
+
+/**
+ * Sends one tiny fixed prompt through the AI runner (Settings > AI developer test). A real run
+ * uses Claude usage; with MNEMO_FAKE_AI=1 it uses the fake. Rejects with an AppError whose code
+ * is the kind of failure (for example "usage_limit").
+ */
+export function runTestPrompt(): Promise<TestPromptResult> {
+  return invoke<TestPromptResult>("run_test_prompt");
 }
 
 // ---- Items and links (#14) ----

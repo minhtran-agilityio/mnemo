@@ -35,6 +35,7 @@ import {
   deleteLabel,
   errorMessage,
   getAiHealth,
+  getAiMode,
   getSetting,
   listBookmarks,
   listIdeas,
@@ -44,6 +45,7 @@ import {
   moveLabel,
   ping,
   renameLabel,
+  runTestPrompt,
   saveLabelledNote,
   setSetting,
   turnIdeaIntoProject,
@@ -252,7 +254,9 @@ async function start(): Promise<void> {
           ),
         onDetachedSave: (failure) => showNote(themeSaveNote, failure),
         getAiHealth,
+        getAiMode,
         checkAiHealth,
+        runTestPrompt,
       });
     } else if (item.id === IDEAS_ID) {
       leaveScreen = renderIdeas(screen, {
