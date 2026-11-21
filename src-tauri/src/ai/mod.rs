@@ -6,3 +6,4 @@ pub mod process;
 pub mod runner;
 #[cfg(test)]
 mod sample;
+pub mod stream;

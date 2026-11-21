@@ -163,7 +163,7 @@ fn is_limit_error(result: &Event) -> bool {
 }
 
 /// What a run that gave no usable result is called: the exit decides.
-fn failure(exit: ExitInfo) -> AiError {
+pub(super) fn failure(exit: ExitInfo) -> AiError {
     if exit.success {
         AiError::SchemaMismatch
     } else {
