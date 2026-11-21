@@ -11,15 +11,19 @@
 //    app-03-settings). The fake answers the AI health check with a chosen state and answers the test
 //    prompt command (any command whose name has "prompt" or "test" in it) with a fixed answer, a plain
 //    error or a usage-limit error. UI tests skip when no Chrome is found (set MNEMO_CHROME).
-// Not testable from outside: AC10 (it already holds through the #21 guard), AC11 (real runs, evidence in
-// the PR), AC12 (log and data file contents of a real run), AC13 (npm run check and the PR body).
+// 3. AC10-AC13. AC10 runs the Rust unit tests with a stand-in `claude` first on PATH that records every
+//    call, and checks none was a `claude -p` run. AC11 needs the real runs to be ignored Rust tests in the
+//    ai module; they run only when MNEMO_REAL_CLAUDE=1 (they use Claude usage). AC12 plants fake tokens in
+//    the environment and checks that no test output (logs) and no file the tests write holds them. AC13
+//    reads the pull request through `gh` and runs the static parts of `npm run check`; it runs only when
+//    MNEMO_PR_CHECK=1 (it needs the network and an open pull request).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, chmodSync, mkdirSync, readdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { join, dirname, extname } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -56,7 +60,7 @@ const leaf = (n) => n.split('::').pop().toLowerCase();
 /** The new ai tests whose own name matches `re`; fails with the list when there is none. */
 function named(re, what, pool = newAiTests()) {
   const hits = pool.filter((n) => re.test(leaf(n)));
-  assert.ok(hits.length > 0, `no new Rust test in the ai module checks ${what} (name matching ${re}). New ai tests: ${JSON.stringify(newAiTests())}`);
+  assert.ok(hits.length > 0, `no new Rust test in the ai module checks ${what} (name matching ${re}). Candidates: ${JSON.stringify(pool)}`);
   return hits;
 }
 
@@ -381,3 +385,158 @@ test("AC9: at the usage limit the 'At usage limit' state shows instead of the bu
     assert.equal(await sendButtons(app), 0, "'Send test prompt' is still offered at the usage limit");
     assert.match(await app.mainText(), /Links still save/, 'the usage-limit state does not say links still save');
   }));
+
+// ------------------------------------------------------------------ AC10-AC13
+
+// Fake tokens planted in the environment of the Rust tests. None may come back in a log or a data file.
+const FAKE_TOKENS = ['sk-ant-api03-QAPLANTEDAPIKEY0000000000000000000000', 'sk-ant-oat01-QAPLANTEDOAUTHTOKEN00000000000000000000'];
+
+/**
+ * Runs `cargo test --lib` (all tests, or these exact names) with a stand-in `claude` first on PATH that
+ * records each call and prints a planted token, with fake tokens in the environment and a temp HOME,
+ * XDG and TMPDIR. Returns the output, the recorded calls and every file written under the temp dirs.
+ */
+function runWithStandIn(names) {
+  const tmp = mkdtempSync(join(tmpdir(), 'mnemo-ai19-standin-'));
+  try {
+    const bin = join(tmp, 'bin');
+    const home = join(tmp, 'home');
+    const tdir = join(tmp, 'tmp');
+    for (const d of [bin, home, tdir]) mkdirSync(d, { recursive: true });
+    const calls = join(tmp, 'claude-calls.log');
+    writeFileSync(join(bin, 'claude'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\necho '{"type":"result","is_error":false,"result":"${FAKE_TOKENS[1]}"}'\necho '${FAKE_TOKENS[0]}' >&2\nexit 0\n`);
+    chmodSync(join(bin, 'claude'), 0o755);
+    const env = {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      HOME: home,
+      XDG_CONFIG_HOME: join(home, '.config'),
+      XDG_DATA_HOME: join(home, '.local', 'share'),
+      XDG_STATE_HOME: join(home, '.local', 'state'),
+      XDG_CACHE_HOME: join(home, '.cache'),
+      TMPDIR: tdir,
+      CARGO_HOME: process.env.CARGO_HOME ?? join(homedir(), '.cargo'),
+      RUSTUP_HOME: process.env.RUSTUP_HOME ?? join(homedir(), '.rustup'),
+      ANTHROPIC_API_KEY: FAKE_TOKENS[0],
+      CLAUDE_CODE_OAUTH_TOKEN: FAKE_TOKENS[1],
+      RUST_LOG: 'trace',
+      RUST_BACKTRACE: '0',
+    };
+    delete env.MNEMO_FAKE_AI;
+    const args = ['test', '--manifest-path', CARGO_TOML, '--lib', '--', '--nocapture'];
+    if (names) args.push('--exact', ...names);
+    const r = spawnSync('cargo', args, { encoding: 'utf8', env, timeout: 580000, maxBuffer: 64 * 1024 * 1024 });
+    const files = [];
+    const walk = (d) => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const f = join(d, e.name);
+        if (e.isDirectory()) walk(f);
+        else if (e.isFile() && f !== join(bin, 'claude') && f !== calls) files.push({ path: f.slice(tmp.length), body: readFileSync(f).toString('latin1') });
+      }
+    };
+    walk(home);
+    walk(tdir);
+    return {
+      status: r.status,
+      signal: r.signal,
+      out: `${r.stdout}\n${r.stderr}`,
+      calls: existsSync(calls) ? readFileSync(calls, 'utf8').split('\n').filter(Boolean) : [],
+      files,
+    };
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+// AC10: "All unit tests use the fake runner (#21). None calls the real Claude." (ticket). Owner-confirmed
+// (8): no test in check starts a `claude -p` model run; the #18 test that runs `claude auth status` stays.
+test('AC10: the Rust unit tests, with the runner tests of this ticket, pass and never start claude -p', RUST, () => {
+  const added = newAiTests();
+  assert.ok(added.length > 0, 'the ai module has no new unit tests for the runner of this ticket');
+  const r = runWithStandIn(null);
+  assert.notEqual(r.signal, 'SIGTERM', 'the unit tests did not finish (hang)');
+  assert.equal(r.status, 0, `cargo test --lib failed:\n${r.out.slice(-4000)}`);
+  for (const n of added) assert.match(r.out, new RegExp(`test ${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\.\\.\\. ok`), `the runner test ${n} did not run and pass`);
+  const printRuns = r.calls.filter((c) => /(^|\s)(-p|--print)(\s|$)/.test(c));
+  assert.deepEqual(printRuns, [], `a unit test started a claude -p run (${printRuns.length} call(s))`);
+});
+
+// AC11: "A test prompt returns an answer on macOS and on Ubuntu." and "A tool that is not in the allowed
+// list is refused. Show one run as proof." (ticket). Owner-confirmed (5): a few tiny real runs on Ubuntu
+// only for the acceptance proof, as an ignored test or a script. These tests read the ignored Rust tests.
+const REAL = process.env.MNEMO_REAL_CLAUDE === '1';
+let ignoredListed = null;
+function ignoredAiTests() {
+  if (!ignoredListed) {
+    const r = spawnSync('cargo', ['test', '--manifest-path', CARGO_TOML, '--lib', '--', '--list', '--ignored'], { encoding: 'utf8', timeout: 580000, maxBuffer: 64 * 1024 * 1024 });
+    assert.equal(r.status, 0, `cargo test --list --ignored exit ${r.status}:\n${r.stderr.slice(-3000)}`);
+    ignoredListed = r.stdout.split('\n').filter((l) => l.endsWith(': test')).map((l) => l.slice(0, -': test'.length));
+  }
+  return ignoredListed.filter((n) => n.startsWith('ai::') && isNew(n));
+}
+const realPrompt = () => named(/prompt|answer/, 'a real test prompt that answers (ignored test)', ignoredAiTests());
+const realTool = () => named(/tool|refus|disallow|not_allowed/, 'a real run where a tool not in the allowed list is refused (ignored test)', ignoredAiTests());
+const TOKEN_LIKE = /sk-ant-[A-Za-z0-9_-]{8,}/;
+
+/** Runs these ignored Rust tests for real; they must pass, and their output must hold no token. */
+function runReal(names) {
+  const r = spawnSync('cargo', ['test', '--manifest-path', CARGO_TOML, '--lib', '--', '--ignored', '--exact', '--nocapture', ...names], { encoding: 'utf8', timeout: 580000, maxBuffer: 64 * 1024 * 1024, env: { ...process.env, MNEMO_FAKE_AI: '' } });
+  assert.notEqual(r.signal, 'SIGTERM', `the real runs did not finish: ${names.join(', ')}`);
+  assert.equal(r.status, 0, `${names.join(', ')} failed (exit ${r.status})`);
+  // AC12: "No token appears in logs or data files."
+  assert.doesNotMatch(`${r.stdout}\n${r.stderr}`, TOKEN_LIKE, 'the output of a real run holds a token');
+}
+
+test('AC11: an ignored Rust test runs a real test prompt that answers', RUST, () => {
+  const names = realPrompt();
+  if (REAL) runReal(names);
+});
+
+test('AC11: an ignored Rust test runs a real task where a tool not in the allowed list is refused', RUST, () => {
+  const names = realTool();
+  if (REAL) runReal(names);
+});
+
+// AC12: "No token appears in logs or data files." (ticket). Rule: Mnemo never reads, stores or logs the
+// Claude token. The runner tests run with fake tokens in the environment and from the stand-in claude.
+test('AC12: with tokens in the environment, the runner tests log no token and write none to a file', RUST, () => {
+  const added = newAiTests();
+  assert.ok(added.length > 0, 'the ai module has no new unit tests for the runner of this ticket');
+  const r = runWithStandIn(added);
+  assert.equal(r.status, 0, `the runner tests failed:\n${r.out.slice(-4000)}`);
+  for (const t of FAKE_TOKENS) {
+    assert.ok(!r.out.includes(t), 'a planted token appears in the test output (logs)');
+    const hit = r.files.find((f) => f.body.includes(t));
+    assert.equal(hit, undefined, `a planted token was written to a file: ${hit?.path}`);
+  }
+});
+
+// AC13: "Run `npm run check` before every commit" and owner-confirmed (9): the PR body records the 'Send
+// test prompt' button as an owner-confirmed decision, says that each click runs a real `claude -p` and uses
+// Claude usage, and says the button follows shared rule 3 (not offered when AI is not Ready or at the usage
+// limit; the AI-off / usage-limit state shows instead; the rest of the app keeps working). (10) The PR
+// targets feat/ai-runner. Only with MNEMO_PR_CHECK=1: it needs the network and the open pull request.
+const BRANCH = 'feat/19-ai-01-run-contract-one-claude-p-process-';
+const PR = { timeout: 600000, skip: process.env.MNEMO_PR_CHECK === '1' ? false : 'set MNEMO_PR_CHECK=1 (needs the network and the open pull request)' };
+
+test('AC13: npm run check (static parts) passes, and the pull request to feat/ai-runner records the owner-confirmed button and rule 3', PR, () => {
+  // The test part of npm run check runs this file, so only format, lint and type check run here.
+  for (const script of ['format:check', 'lint', 'typecheck']) {
+    const c = spawnSync('npm', ['run', script], { cwd: ROOT, encoding: 'utf8', timeout: 580000, maxBuffer: 64 * 1024 * 1024 });
+    assert.equal(c.status, 0, `npm run ${script} exit ${c.status}:\n${`${c.stdout}\n${c.stderr}`.slice(-3000)}`);
+  }
+  const r = spawnSync('gh', ['pr', 'list', '--repo', 'minhtran-agilityio/mnemo', '--head', BRANCH, '--state', 'all', '--json', 'number,baseRefName,body'], { encoding: 'utf8', timeout: 60000 });
+  assert.equal(r.status, 0, `gh pr list exit ${r.status}: ${r.stderr}`);
+  const prs = JSON.parse(r.stdout);
+  assert.equal(prs.length, 1, `expected one pull request from ${BRANCH}, found ${prs.length}`);
+  const { baseRefName, body } = prs[0];
+  assert.equal(baseRefName, 'feat/ai-runner', 'the pull request does not target feat/ai-runner');
+  assert.match(body, /Send test prompt/, "the body does not name the 'Send test prompt' button");
+  assert.match(body, /owner[- ]confirmed/i, 'the body does not record the button as an owner-confirmed decision');
+  assert.match(body, /claude -p/, 'the body does not say that each click runs a real claude -p');
+  assert.match(body, /usage/i, 'the body does not say that each click uses Claude usage');
+  assert.match(body, /rule 3/i, 'the body does not say the button follows shared rule 3');
+  assert.match(body, /usage limit/i, 'the body does not say the button is not offered at the usage limit');
+  assert.doesNotMatch(body, TOKEN_LIKE, 'the body holds a token');
+  assert.doesNotMatch(body.replace(/noreply@anthropic\.com/g, ''), /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/, 'the body holds an email address');
+});
