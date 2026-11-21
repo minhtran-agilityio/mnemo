@@ -9,13 +9,18 @@ use crate::ai::claude::error_kind;
 use crate::ai::health::{self, AiHealth};
 use crate::ai::runner::{AiError, AiRunner};
 use crate::ai::test_prompt;
+use crate::storage::files::OrphanReport;
+use crate::storage::ideas::{Idea, IdeaInput, IdeaProject};
 use crate::storage::items::{
-    Bookmark, BookmarkInput, Event, EventInput, Idea, IdeaInput, Memory, MemoryInput, Note,
-    NoteInput, Project, ProjectInput, Run, RunInput, Task, TaskInput,
+    Bookmark, BookmarkInput, Event, EventInput, Memory, MemoryInput, Note, NoteInput, Project,
+    ProjectInput, Run, RunInput, Task, TaskInput,
+};
+use crate::storage::labels::{
+    ChangePage, ChangePageRequest, DeleteLabelOutcome, Label, LabelledNote,
 };
 use crate::storage::links::Link;
 use crate::storage::record::{Cursor, Page};
-use crate::storage::{Item, ItemRef, PageRequest, Storage, StorageError};
+use crate::storage::{FileRecord, Item, ItemRef, PageRequest, Storage, StorageError};
 
 /// The one error shape every command returns: a stable machine `code` and a plain
 /// `message`. It never carries file paths, stack traces or raw error text.
@@ -366,6 +371,155 @@ fn item_failed(e: StorageError) -> AppError {
     }
 }
 
+/// The error the UI sees for a file call. Size and name problems keep their own codes
+/// and plain messages; any other reason stays in the log.
+fn file_failed(e: StorageError) -> AppError {
+    match e {
+        StorageError::FileTooLarge { .. } => AppError {
+            code: "file_too_large",
+            message: e.to_string(),
+        },
+        StorageError::InvalidFileName => AppError {
+            code: "invalid_file_name",
+            message: e.to_string(),
+        },
+        StorageError::FileMissing => AppError {
+            code: "file_missing",
+            message: e.to_string(),
+        },
+        StorageError::NotFound { .. } => AppError {
+            code: "file_not_found",
+            message: "There is no such file. It may have been deleted.".to_string(),
+        },
+        StorageError::Invalid(message) => AppError {
+            code: "invalid_input",
+            message,
+        },
+        other => {
+            log::error!("file storage call failed: {other}");
+            AppError {
+                code: "storage_error",
+                message: "Mnemo could not read or save this file. Nothing was deleted.".to_string(),
+            }
+        }
+    }
+}
+
+/// The header that carries the file's original name, percent-encoded by the UI.
+const FILE_NAME_HEADER: &str = "x-mnemo-file-name";
+
+fn invalid_file_input(message: &str) -> AppError {
+    AppError {
+        code: "invalid_input",
+        message: message.to_string(),
+    }
+}
+
+/// Decodes `%XX` escapes as UTF-8 text. Bad escapes or bad UTF-8 give `None`.
+fn percent_decode(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = std::str::from_utf8(bytes.get(i + 1..i + 3)?).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+/// A file id must look like a UUID before storage is touched, so a path such as
+/// `../mnemo.db` is refused here.
+fn check_file_id(id: &str) -> Result<(), AppError> {
+    if crate::storage::files::is_file_id(id) {
+        Ok(())
+    } else {
+        Err(file_failed(StorageError::InvalidFileName))
+    }
+}
+
+fn save_file_item(
+    storage: &AppStorage,
+    encoded_name: Option<&str>,
+    bytes: &[u8],
+) -> Result<FileRecord, AppError> {
+    let name = encoded_name
+        .and_then(percent_decode)
+        .ok_or_else(|| invalid_file_input("The file name was missing or not readable."))?;
+    storage.get()?.save_file(&name, bytes).map_err(file_failed)
+}
+
+fn get_file_item(storage: &AppStorage, id: &str) -> Result<FileRecord, AppError> {
+    check_file_id(id)?;
+    storage.get()?.get_file(id).map_err(file_failed)
+}
+
+fn read_file_item(storage: &AppStorage, id: &str) -> Result<Vec<u8>, AppError> {
+    check_file_id(id)?;
+    storage.get()?.read_file(id).map_err(file_failed)
+}
+
+fn delete_file_item(storage: &AppStorage, id: &str) -> Result<(), AppError> {
+    check_file_id(id)?;
+    storage.get()?.delete_file(id).map_err(file_failed)
+}
+
+fn orphan_report_item(storage: &AppStorage) -> Result<OrphanReport, AppError> {
+    storage.get()?.orphan_report().map_err(file_failed)
+}
+
+/// Saves a file. The request body is the raw bytes; the original name is in the
+/// `x-mnemo-file-name` header, percent-encoded.
+#[tauri::command]
+pub async fn add_file(
+    app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<FileRecord, AppError> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(invalid_file_input("The file must be sent as raw bytes."));
+    };
+    let bytes = bytes.clone();
+    let name = request
+        .headers()
+        .get(FILE_NAME_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    off_main_thread(app, move |s| save_file_item(s, name.as_deref(), &bytes)).await
+}
+
+/// The details of a saved file.
+#[tauri::command]
+pub async fn get_file(app: tauri::AppHandle, id: String) -> Result<FileRecord, AppError> {
+    off_main_thread(app, move |s| get_file_item(s, &id)).await
+}
+
+/// The bytes of a saved file, as a raw reply. Only a file id is accepted, never a path.
+#[tauri::command]
+pub async fn read_file(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<tauri::ipc::Response, AppError> {
+    let bytes = off_main_thread(app, move |s| read_file_item(s, &id)).await?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Soft-deletes a saved file. The file stays on disk.
+#[tauri::command]
+pub async fn delete_file(app: tauri::AppHandle, id: String) -> Result<(), AppError> {
+    off_main_thread(app, move |s| delete_file_item(s, &id)).await
+}
+
+/// Lists files in the folder that no row owns. It deletes nothing.
+#[tauri::command]
+pub async fn file_orphan_report(app: tauri::AppHandle) -> Result<OrphanReport, AppError> {
+    off_main_thread(app, orphan_report_item).await
+}
+
 fn add_item<T: Item>(storage: &AppStorage, input: &T::Input) -> Result<T, AppError> {
     storage.get()?.add::<T>(input).map_err(item_failed)
 }
@@ -451,15 +605,67 @@ item_commands!(
     update_note,
     delete_note
 );
-item_commands!(
-    Idea,
-    IdeaInput,
-    add_idea,
-    get_idea,
-    list_ideas,
-    update_idea,
-    delete_idea
-);
+// Ideas (#34) have their own storage functions: tags live in their own table and the
+// stage follows four plain checks, so the generic item engine does not fit them.
+
+/// Adds an idea with its tags. The core sets its stage from the checks.
+#[tauri::command]
+pub async fn add_idea(app: tauri::AppHandle, input: IdeaInput) -> Result<Idea, AppError> {
+    off_main_thread(app, move |s| s.get()?.add_idea(&input).map_err(item_failed)).await
+}
+
+/// The live idea with this id, with its tags, checks and project.
+#[tauri::command]
+pub async fn get_idea(app: tauri::AppHandle, id: String) -> Result<Idea, AppError> {
+    off_main_thread(app, move |s| s.get()?.get_idea(&id).map_err(item_failed)).await
+}
+
+/// One page of ideas, newest first.
+#[tauri::command]
+pub async fn list_ideas(app: tauri::AppHandle, args: ListArgs) -> Result<Page<Idea>, AppError> {
+    off_main_thread(app, move |s| {
+        let page = PageRequest {
+            limit: args.limit,
+            after: args.after.clone(),
+        };
+        s.get()?
+            .list_ideas(&page, args.include_deleted)
+            .map_err(item_failed)
+    })
+    .await
+}
+
+/// Replaces every field of a live idea, tags included. The stage follows the checks.
+#[tauri::command]
+pub async fn update_idea(
+    app: tauri::AppHandle,
+    id: String,
+    input: IdeaInput,
+) -> Result<Idea, AppError> {
+    off_main_thread(app, move |s| {
+        s.get()?.update_idea(&id, &input).map_err(item_failed)
+    })
+    .await
+}
+
+/// Soft deletes an idea and removes its links.
+#[tauri::command]
+pub async fn delete_idea(app: tauri::AppHandle, id: String) -> Result<(), AppError> {
+    off_main_thread(app, move |s| s.get()?.delete_idea(&id).map_err(item_failed)).await
+}
+
+/// "Turn into project", at any stage: adds a project, links idea and project, and moves
+/// the idea to the stage Project.
+#[tauri::command]
+pub async fn turn_idea_into_project(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<IdeaProject, AppError> {
+    off_main_thread(app, move |s| {
+        s.get()?.turn_idea_into_project(&id).map_err(item_failed)
+    })
+    .await
+}
 item_commands!(
     Project,
     ProjectInput,
@@ -536,6 +742,146 @@ pub async fn remove_link(app: tauri::AppHandle, id: String) -> Result<(), AppErr
     off_main_thread(app, move |s| link_remove(s, &id)).await
 }
 
+// ---- Labels and labelled notes (#33) ----
+
+fn label_create(
+    storage: &AppStorage,
+    parent_id: Option<&str>,
+    name: &str,
+) -> Result<Label, AppError> {
+    storage
+        .get()?
+        .create_label(parent_id, name)
+        .map_err(item_failed)
+}
+
+fn label_rename(storage: &AppStorage, id: &str, name: &str) -> Result<Label, AppError> {
+    storage.get()?.rename_label(id, name).map_err(item_failed)
+}
+
+fn label_move(storage: &AppStorage, id: &str, parent_id: Option<&str>) -> Result<Label, AppError> {
+    storage
+        .get()?
+        .move_label(id, parent_id)
+        .map_err(item_failed)
+}
+
+fn label_delete(storage: &AppStorage, id: &str) -> Result<DeleteLabelOutcome, AppError> {
+    storage.get()?.delete_label(id).map_err(item_failed)
+}
+
+fn label_delete_count(storage: &AppStorage, id: &str) -> Result<u32, AppError> {
+    storage
+        .get()?
+        .count_notes_moving_on_delete(id)
+        .map_err(item_failed)
+}
+
+fn label_list(storage: &AppStorage) -> Result<Vec<Label>, AppError> {
+    storage.get()?.list_labels().map_err(item_failed)
+}
+
+fn labelled_note_save(
+    storage: &AppStorage,
+    id: Option<&str>,
+    body: &str,
+    label_ids: &[String],
+) -> Result<LabelledNote, AppError> {
+    storage
+        .get()?
+        .save_labelled_note(id, body, label_ids)
+        .map_err(item_failed)
+}
+
+fn labelled_note_list(
+    storage: &AppStorage,
+    label_id: Option<&str>,
+    page: &ChangePageRequest,
+) -> Result<ChangePage<LabelledNote>, AppError> {
+    storage
+        .get()?
+        .list_labelled_notes(label_id, page)
+        .map_err(item_failed)
+}
+
+/// Creates a label under `parent_id` (null: a top label).
+#[tauri::command]
+pub async fn create_label(
+    app: tauri::AppHandle,
+    parent_id: Option<String>,
+    name: String,
+) -> Result<Label, AppError> {
+    off_main_thread(app, move |s| label_create(s, parent_id.as_deref(), &name)).await
+}
+
+/// Renames a label.
+#[tauri::command]
+pub async fn rename_label(
+    app: tauri::AppHandle,
+    id: String,
+    name: String,
+) -> Result<Label, AppError> {
+    off_main_thread(app, move |s| label_rename(s, &id, &name)).await
+}
+
+/// Moves a label under `parent_id` (null: to the top).
+#[tauri::command]
+pub async fn move_label(
+    app: tauri::AppHandle,
+    id: String,
+    parent_id: Option<String>,
+) -> Result<Label, AppError> {
+    off_main_thread(app, move |s| label_move(s, &id, parent_id.as_deref())).await
+}
+
+/// Deletes a label: its notes get the parent label and its child labels move up.
+#[tauri::command]
+pub async fn delete_label(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<DeleteLabelOutcome, AppError> {
+    off_main_thread(app, move |s| label_delete(s, &id)).await
+}
+
+/// How many notes deleting a label would move to its parent label (0 for a top label).
+#[tauri::command]
+pub async fn count_label_delete_moves(app: tauri::AppHandle, id: String) -> Result<u32, AppError> {
+    off_main_thread(app, move |s| label_delete_count(s, &id)).await
+}
+
+/// Every live label, flat with its parent id.
+#[tauri::command]
+pub async fn list_labels(app: tauri::AppHandle) -> Result<Vec<Label>, AppError> {
+    off_main_thread(app, label_list).await
+}
+
+/// Adds a note (`id` null) or replaces a note's text, with at least one label.
+#[tauri::command]
+pub async fn save_labelled_note(
+    app: tauri::AppHandle,
+    id: Option<String>,
+    body: String,
+    label_ids: Vec<String>,
+) -> Result<LabelledNote, AppError> {
+    off_main_thread(app, move |s| {
+        labelled_note_save(s, id.as_deref(), &body, &label_ids)
+    })
+    .await
+}
+
+/// One page of notes, newest change first: of a label and its child labels, or all (null).
+#[tauri::command]
+pub async fn list_labelled_notes(
+    app: tauri::AppHandle,
+    label_id: Option<String>,
+    page: ChangePageRequest,
+) -> Result<ChangePage<LabelledNote>, AppError> {
+    off_main_thread(app, move |s| {
+        labelled_note_list(s, label_id.as_deref(), &page)
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -548,6 +894,109 @@ mod tests {
     fn temp_storage() -> (Storage, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("mnemo-appstorage-{}", uuid::Uuid::new_v4()));
         (Storage::open(&dir.join("mnemo.db")).unwrap(), dir)
+    }
+
+    fn app_storage() -> (AppStorage, std::path::PathBuf) {
+        let (s, dir) = temp_storage();
+        (AppStorage::new(Ok(s)), dir)
+    }
+
+    #[test]
+    fn read_file_refuses_a_dotdot_request() {
+        let (state, dir) = app_storage();
+        std::fs::write(dir.join("outside.txt"), b"secret").unwrap();
+        for bad in [
+            "../mnemo.db",
+            "../outside.txt",
+            "/etc/passwd",
+            "a/b",
+            "a\\b",
+            "..",
+        ] {
+            for err in [
+                read_file_item(&state, bad).unwrap_err(),
+                get_file_item(&state, bad).unwrap_err(),
+                delete_file_item(&state, bad).unwrap_err(),
+            ] {
+                assert_eq!(err.code, "invalid_file_name", "{bad}");
+                assert!(!err.message.contains('/'), "{}", err.message);
+            }
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn file_commands_save_read_delete_end_to_end() {
+        let (state, dir) = app_storage();
+        let bytes: Vec<u8> = (0..=255u8).collect();
+        let name = "caf%C3%A9%20photo.png";
+        let rec = save_file_item(&state, Some(name), &bytes).unwrap();
+        assert_eq!(rec.original_name, "caf\u{e9} photo.png");
+        assert_eq!(get_file_item(&state, &rec.id).unwrap(), rec);
+        assert_eq!(read_file_item(&state, &rec.id).unwrap(), bytes);
+        assert!(orphan_report_item(&state).unwrap().files.is_empty());
+        delete_file_item(&state, &rec.id).unwrap();
+        assert_eq!(
+            read_file_item(&state, &rec.id).unwrap_err().code,
+            "file_not_found"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_file_lost_from_disk_gives_file_missing_not_deleted() {
+        let (state, dir) = app_storage();
+        let rec = save_file_item(&state, Some("a.png"), b"png").unwrap();
+        std::fs::remove_dir_all(dir.join("files")).unwrap();
+        let err = read_file_item(&state, &rec.id).unwrap_err();
+        assert_eq!(err.code, "file_missing");
+        assert!(
+            !err.message.contains("may have been deleted"),
+            "{}",
+            err.message
+        );
+        assert!(
+            !err.message.contains('/'),
+            "no path may reach the UI: {}",
+            err.message
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn add_file_over_the_limit_gives_file_too_large() {
+        let (state, dir) = app_storage();
+        state
+            .get()
+            .unwrap()
+            .set_setting("files.max_bytes", "10")
+            .unwrap();
+        let err = save_file_item(&state, Some("big.bin"), &[1u8; 11]).unwrap_err();
+        assert_eq!(err.code, "file_too_large");
+        assert!(err.message.contains("10 bytes"), "{}", err.message);
+        assert!(orphan_report_item(&state).unwrap().files.is_empty());
+        assert_eq!(
+            save_file_item(&state, None, b"x").unwrap_err().code,
+            "invalid_input"
+        );
+        assert_eq!(
+            save_file_item(&state, Some("%ZZ"), b"x").unwrap_err().code,
+            "invalid_input"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn percent_decode_round_trips_utf8_names() {
+        assert_eq!(percent_decode("plain.png").as_deref(), Some("plain.png"));
+        assert_eq!(
+            percent_decode("na%C3%AFve%20%E2%9C%93.txt").as_deref(),
+            Some("na\u{ef}ve \u{2713}.txt")
+        );
+        assert_eq!(percent_decode("%"), None);
+        assert_eq!(percent_decode("%4"), None);
+        assert_eq!(percent_decode("%GG"), None);
+        assert_eq!(percent_decode("%FF"), None);
     }
 
     #[test]
@@ -863,6 +1312,59 @@ mod tests {
         assert_eq!(
             link_add(&state, &note, &note).unwrap_err().code,
             "invalid_input"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The calls the label and labelled-note commands make, on a temporary database.
+    #[test]
+    fn label_commands_create_save_list_move_and_delete_end_to_end() {
+        let (storage, dir) = temp_storage();
+        let state = AppStorage::new(Ok(storage));
+        let work = label_create(&state, None, "Work").unwrap();
+        let plans = label_create(&state, Some(&work.base.id), "Plans").unwrap();
+        assert_eq!(
+            label_create(&state, None, "work").unwrap_err().code,
+            "invalid_input"
+        );
+        let refused = labelled_note_save(&state, None, "text", &[]).unwrap_err();
+        assert_eq!(refused.code, "invalid_input");
+        assert_eq!(refused.message, "A note needs at least one label.");
+        let saved =
+            labelled_note_save(&state, None, "# Plan", std::slice::from_ref(&plans.base.id))
+                .unwrap();
+        let page = ChangePageRequest {
+            limit: 10,
+            after: None,
+        };
+        let listed = labelled_note_list(&state, Some(&work.base.id), &page).unwrap();
+        assert_eq!(listed.items, vec![saved.clone()]);
+        let json = serde_json::to_value(&listed).unwrap();
+        assert_eq!(json["items"][0]["note"]["body"], "# Plan");
+        assert_eq!(json["items"][0]["labelIds"][0], plans.base.id.as_str());
+        assert_eq!(
+            label_move(&state, &work.base.id, Some(&plans.base.id))
+                .unwrap_err()
+                .code,
+            "invalid_input"
+        );
+        let renamed = label_rename(&state, &plans.base.id, "Goals").unwrap();
+        assert_eq!(renamed.name, "Goals");
+        let out = label_delete(&state, &plans.base.id).unwrap();
+        assert_eq!(out.moved_notes, 1);
+        assert_eq!(
+            serde_json::to_value(&out).unwrap()["parentId"],
+            work.base.id.as_str()
+        );
+        let labels = label_list(&state).unwrap();
+        assert_eq!(labels.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&labels[0]).unwrap()["parentId"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            label_delete(&state, &plans.base.id).unwrap_err().code,
+            "not_found"
         );
         let _ = std::fs::remove_dir_all(dir);
     }

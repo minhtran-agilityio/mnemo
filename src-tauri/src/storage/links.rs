@@ -68,7 +68,34 @@ pub(crate) fn hide_links_of(
     Ok(())
 }
 
-fn require_live(tx: &Transaction<'_>, item: &ItemRef) -> Result<(), StorageError> {
+/// Links two items inside the caller's transaction, after the caller checked that both
+/// are live. Returns the link id and its created_at. Linking an item to itself is refused.
+pub(crate) fn link_in_tx(
+    tx: &Transaction<'_>,
+    now: &str,
+    a: &ItemRef,
+    b: &ItemRef,
+) -> Result<(String, String), StorageError> {
+    if a == b {
+        return Err(StorageError::Invalid(
+            "An item cannot be linked to itself.".to_string(),
+        ));
+    }
+    // Order by the stored kind name, then the id, never by the enum's order.
+    let (first, second) = if (a.kind.as_str(), a.id.as_str()) <= (b.kind.as_str(), b.id.as_str()) {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    let base = RecordBase::new_at(now);
+    Ok(tx.query_row(
+        UPSERT_SQL,
+        params![base.id, first.kind, first.id, second.kind, second.id, now],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?)
+}
+
+pub(crate) fn require_live(tx: &Transaction<'_>, item: &ItemRef) -> Result<(), StorageError> {
     let n: i64 = tx.query_row(exists_sql(item.kind), [&item.id], |r| r.get(0))?;
     if n == 0 {
         return Err(StorageError::NotFound {
@@ -96,13 +123,6 @@ impl Storage {
                 "An item cannot be linked to itself.".to_string(),
             ));
         }
-        // Order by the stored kind name, then the id, never by the enum's order.
-        let (first, second) =
-            if (a.kind.as_str(), a.id.as_str()) <= (b.kind.as_str(), b.id.as_str()) {
-                (a, b)
-            } else {
-                (b, a)
-            };
         // Immediate: the checks and the write see the same state, and a second writer
         // waits for the busy timeout instead of failing at once.
         let tx = self
@@ -110,12 +130,7 @@ impl Storage {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_live(&tx, a)?;
         require_live(&tx, b)?;
-        let base = RecordBase::new_at(now);
-        let (id, created_at): (String, String) = tx.query_row(
-            UPSERT_SQL,
-            params![base.id, first.kind, first.id, second.kind, second.id, now],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
+        let (id, created_at) = link_in_tx(&tx, now, a, b)?;
         tx.commit()?;
         Ok(Link {
             id,
@@ -184,10 +199,9 @@ impl Storage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::ideas::IdeaInput;
     use crate::storage::items::tests::{bookmark, note, T1};
-    use crate::storage::items::{
-        Bookmark, Idea, IdeaInput, IdeaStage, Note, Project, ProjectInput, Task, TaskInput,
-    };
+    use crate::storage::items::{Bookmark, Note, Project, ProjectInput, Task, TaskInput};
     use crate::storage::testing::open_temp;
 
     const T2: &str = "2026-01-02T00:00:00Z";
@@ -316,15 +330,7 @@ mod tests {
     #[test]
     fn links_work_between_any_two_types() {
         let (mut s, _dir) = open_temp();
-        let i: Idea = s
-            .add_at(
-                T1,
-                &IdeaInput {
-                    title: "i".into(),
-                    stage: IdeaStage::Spark,
-                },
-            )
-            .unwrap();
+        let i = s.add_idea_at(T1, &IdeaInput::titled("i")).unwrap();
         let t: Task = s
             .add_at(
                 T1,

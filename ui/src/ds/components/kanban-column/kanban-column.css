@@ -74,3 +74,10 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* No-move board: many cards scroll inside the column. */
+.board-fixed .kcol .kcol-cards {
+  max-height: var(--size-column-max);
+  padding: var(--space-1);
+  overflow-y: auto;
+}

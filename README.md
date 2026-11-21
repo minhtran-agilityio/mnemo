@@ -64,7 +64,20 @@ Mnemo opens one window and needs no sign-in or network at start. Closing the win
 ## Other commands
 
 - `npm run build` type-checks the UI and builds it into `dist/`.
-- `npm run tauri build` makes a release bundle for the current platform.
+- `npm run build:dev` builds the UI like `npm run build`, in development mode, so dev-only parts (the Storehouse section and its UI Catalog) are kept.
+
+## Builds
+
+There are two installable builds. Both are made for the current platform (`.app` and `.dmg` on macOS, `.deb` and `.AppImage` on Ubuntu) into `src-tauri/target/release/bundle/`.
+
+| Build | Command | App name | Bundle id and data folder | Storehouse |
+| --- | --- | --- | --- | --- |
+| Release | `npm run bundle` | Mnemo | `io.mnemo.desktop` | Hidden |
+| Dev | `npm run bundle:dev` | Mnemo Dev | `io.mnemo.desktop.dev` | Shown |
+
+The dev build reads `src-tauri/tauri.dev.conf.json` on top of `src-tauri/tauri.conf.json`. Its own bundle id gives it its own data folder, so it never touches the release build's notes, and both can be installed and run at the same time. Mnemo's own config folder, `~/.config/mnemo/`, does not depend on the bundle id, so the two builds share it. Add `-- --bundles dmg` to make only the `.dmg` on macOS. Each bundle command empties the bundle folder first, so copy a `.dmg` out before you build the other one. Neither build is signed; a copy moved to another Mac is allowed the same way as a release download (see Install, macOS). The release workflow below publishes only the release build.
+
+`npm run tauri dev` runs the app from source with live reload; it also shows Storehouse but uses the release data folder.
 
 ## Data folder
 

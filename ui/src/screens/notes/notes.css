@@ -1,0 +1,63 @@
+/* The Notes screen: layout only, with token values. Every look comes from ui/src/ds (tree, label
+   picker, list, state box, skeleton, segmented choice, field, text area, button, pill, banner). */
+
+/* The shipped page column is narrow for reading; the three panes use the full width while open. */
+main.notes-screen {
+  max-width: none;
+}
+.notes-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.notes-layout {
+  display: grid;
+  grid-template-columns:
+    minmax(var(--size-basis-column), 1fr)
+    minmax(var(--size-basis-example), 1.5fr)
+    minmax(0, 3fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.notes-labels,
+.notes-list,
+.notes-list-body,
+.notes-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.notes-bar,
+.notes-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.notes-banner:empty,
+.notes-tree:empty,
+.notes-dirty:empty {
+  display: none;
+}
+
+.notes-field {
+  max-width: none;
+}
+
+.notes-field textarea {
+  min-height: calc(var(--size-textarea-min) * 4);
+}
+
+@media (max-width: 760px) {
+  .notes-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

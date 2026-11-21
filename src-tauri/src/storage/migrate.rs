@@ -29,6 +29,18 @@ pub const MIGRATIONS: &[Migration] = &[
         number: 4,
         sql: include_str!("../../migrations/0004_item_links.sql"),
     },
+    Migration {
+        number: 5,
+        sql: include_str!("../../migrations/0005_files.sql"),
+    },
+    Migration {
+        number: 6,
+        sql: include_str!("../../migrations/0006_labels.sql"),
+    },
+    Migration {
+        number: 7,
+        sql: include_str!("../../migrations/0007_ideas.sql"),
+    },
 ];
 
 /// Reads the schema version stored in the database (0 for a new file).
@@ -87,7 +99,16 @@ mod tests {
     fn real_migrations_set_the_version() {
         let mut c = mem();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 4);
+        assert_eq!(current_version(&c).unwrap(), 7);
+    }
+
+    /// `run` skips every number at or below the stored version, so a gap that is filled
+    /// later would never run on a database that already passed it.
+    #[test]
+    fn migration_numbers_are_1_to_n_with_no_gap() {
+        let numbers: Vec<u32> = MIGRATIONS.iter().map(|m| m.number).collect();
+        let expected: Vec<u32> = (1..=MIGRATIONS.len() as u32).collect();
+        assert_eq!(numbers, expected);
     }
 
     #[test]
@@ -158,7 +179,7 @@ mod tests {
             err,
             StorageError::SchemaTooNew {
                 found: 99,
-                supported: 4
+                supported: 7
             }
         );
     }
@@ -214,7 +235,7 @@ mod tests {
             [T],
         )
         .unwrap();
-        run(&mut c, MIGRATIONS).unwrap();
+        run(&mut c, &MIGRATIONS[..4]).unwrap();
         assert_eq!(current_version(&c).unwrap(), 4);
         assert!(table_exists(&c, "item_link"));
         let body: String = c
@@ -223,8 +244,127 @@ mod tests {
         assert_eq!(body, "kept");
     }
 
+    fn index_exists(conn: &Connection, name: &str) -> bool {
+        conn.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='index' AND name=?1",
+            [name],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap()
+            > 0
+    }
+
     #[test]
-    fn all_migrations_on_a_version_2_database_keep_settings_and_add_9_tables() {
+    fn migration_6_adds_labels_to_a_database_built_by_migration_5() {
+        let mut c = mem();
+        run(&mut c, &MIGRATIONS[..5]).unwrap();
+        c.execute(
+            "INSERT INTO note (id, created_at, updated_at, body) VALUES ('n1', ?1, ?1, 'kept')",
+            [T],
+        )
+        .unwrap();
+        assert!(!table_exists(&c, "label"));
+        run(&mut c, &MIGRATIONS[..6]).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 6);
+        let body: String = c
+            .query_row(
+                "SELECT body FROM note WHERE id = 'n1' AND deleted_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(body, "kept");
+        assert!(table_exists(&c, "label"));
+        assert!(table_exists(&c, "note_label"));
+        assert_eq!(
+            columns(&c, "label"),
+            [
+                "id",
+                "created_at",
+                "updated_at",
+                "deleted_at",
+                "name",
+                "parent_id"
+            ]
+        );
+        for i in [
+            "uq_label_child",
+            "uq_label_top",
+            "idx_label_parent",
+            "idx_note_label_label",
+            "idx_note_label_note",
+            "idx_note_changed",
+        ] {
+            assert!(index_exists(&c, i), "index {i} missing");
+        }
+    }
+
+    #[test]
+    fn migration_6_label_names_are_unique_per_parent_ignoring_case() {
+        let mut c = mem();
+        run(&mut c, MIGRATIONS).unwrap();
+        let add = |id: &str, name: &str, parent: Option<&str>, deleted: Option<&str>| {
+            c.execute(
+                "INSERT INTO label (id, created_at, updated_at, deleted_at, name, parent_id)
+                 VALUES (?1, ?2, ?2, ?3, ?4, ?5)",
+                rusqlite::params![id, T, deleted, name, parent],
+            )
+        };
+        add("t1", "Work", None, None).unwrap();
+        assert!(add("t2", "work", None, None).is_err());
+        add("t3", "Home", None, None).unwrap();
+        add("c1", "Plans", Some("t1"), None).unwrap();
+        assert!(add("c2", "PLANS", Some("t1"), None).is_err());
+        add("c3", "Plans", Some("t3"), None).unwrap();
+        // A deleted label frees its name.
+        add("t4", "Old", None, Some(T)).unwrap();
+        add("t5", "Old", None, None).unwrap();
+    }
+
+    #[test]
+    fn migration_5_adds_file_table_to_a_database_built_by_migration_4() {
+        let mut c = mem();
+        run(&mut c, &MIGRATIONS[..4]).unwrap();
+        c.execute(
+            "INSERT INTO note (id, created_at, updated_at, body) VALUES ('n1', ?1, ?1, 'kept')",
+            [T],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES ('theme', 'dark', ?1)",
+            [T],
+        )
+        .unwrap();
+        assert!(!table_exists(&c, "file"));
+        run(&mut c, &MIGRATIONS[..5]).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 5);
+        assert_eq!(
+            columns(&c, "file"),
+            [
+                "id",
+                "original_name",
+                "stored_name",
+                "size_bytes",
+                "mime",
+                "created_at",
+                "updated_at",
+                "deleted_at"
+            ]
+        );
+        let body: String = c
+            .query_row("SELECT body FROM note WHERE id = 'n1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(body, "kept");
+        let theme: String = c
+            .query_row("SELECT value FROM settings WHERE key = 'theme'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(theme, "dark");
+    }
+
+    #[test]
+    fn all_migrations_on_a_version_2_database_keep_settings_and_add_the_tables() {
         let mut c = mem();
         run(&mut c, &MIGRATIONS[..2]).unwrap();
         c.execute(
@@ -233,7 +373,7 @@ mod tests {
         )
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 4);
+        assert_eq!(current_version(&c).unwrap(), 7);
         for t in KINDS.iter().chain(["item_link", "settings"].iter()) {
             assert!(table_exists(&c, t), "table {t} missing");
         }
@@ -241,6 +381,65 @@ mod tests {
             .query_row("SELECT count(*) FROM settings", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn migration_7_adds_idea_fields_and_idea_tag_and_keeps_ideas_projects_and_links() {
+        let mut c = mem();
+        // The database of the version before: every migration up to the one before ideas.
+        let before = MIGRATIONS.len() - 1;
+        run(&mut c, &MIGRATIONS[..before]).unwrap();
+        c.execute_batch(&format!(
+            "INSERT INTO idea (id, created_at, updated_at, title, stage) VALUES ('i1', '{T}', '{T}', 'Garden robot', 'ready');
+             INSERT INTO project (id, created_at, updated_at, title, status) VALUES ('p1', '{T}', '{T}', 'Old', 'active');
+             INSERT INTO item_link (id, a_kind, a_id, b_kind, b_id, created_at, updated_at) VALUES ('l1', 'idea', 'i1', 'project', 'p1', '{T}', '{T}');"
+        ))
+        .unwrap();
+        run(&mut c, MIGRATIONS).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 7);
+        let cols = columns(&c, "idea");
+        for col in [
+            "body",
+            "source_kind",
+            "source_id",
+            "source_url",
+            "why",
+            "outline",
+        ] {
+            assert!(cols.iter().any(|n| n == col), "idea lacks {col}");
+        }
+        assert!(table_exists(&c, "idea_tag"));
+        let kept: (String, String, Option<String>) = c
+            .query_row(
+                "SELECT title, stage, why FROM idea WHERE id = 'i1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(kept, ("Garden robot".into(), "ready".into(), None));
+        let links: i64 = c
+            .query_row(
+                "SELECT count(*) FROM item_link WHERE id = 'l1' AND deleted_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(links, 1);
+        // A source must be a saved item type, and a tag is unique per idea.
+        assert!(c
+            .execute("UPDATE idea SET source_kind = 'task' WHERE id = 'i1'", [])
+            .is_err());
+        c.execute(
+            "INSERT INTO idea_tag (id, idea_id, tag, created_at, updated_at) VALUES ('t1', 'i1', 'garden', ?1, ?1)",
+            [T],
+        )
+        .unwrap();
+        assert!(c
+            .execute(
+                "INSERT INTO idea_tag (id, idea_id, tag, created_at, updated_at) VALUES ('t2', 'i1', 'garden', ?1, ?1)",
+                [T],
+            )
+            .is_err());
     }
 
     #[test]

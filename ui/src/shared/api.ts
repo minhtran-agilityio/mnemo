@@ -153,14 +153,40 @@ export interface Note extends RecordBase {
   body: string;
 }
 
+/** The stage of an idea. The core sets it from the four checks (#34); the UI never sends it. */
 export type IdeaStage = "spark" | "shape" | "ready" | "project";
+/** Where an idea comes from: a saved bookmark or note, or a web link. */
+export type IdeaSource =
+  | { type: "item"; item: { kind: "bookmark" | "note"; id: string } }
+  | { type: "link"; url: string };
+/** The four plain checks. Advice only: they never block a save. */
+export interface IdeaChecks {
+  hasTag: boolean;
+  hasSource: boolean;
+  hasWhy: boolean;
+  hasOutline: boolean;
+}
 export interface IdeaInput {
   title: string;
-  stage: IdeaStage;
+  text: string | null;
+  source: IdeaSource | null;
+  why: string | null;
+  /** Plain text, one point per line. */
+  outline: string | null;
+  /** Update replaces the tags too: a tag left out is removed. */
+  tags: string[];
 }
 export interface Idea extends RecordBase {
   title: string;
+  text: string | null;
+  source: IdeaSource | null;
+  why: string | null;
+  outline: string | null;
+  tags: string[];
   stage: IdeaStage;
+  checks: IdeaChecks;
+  /** The project this idea was turned into, if it is still there. */
+  projectId: string | null;
 }
 
 export interface ProjectInput {
@@ -276,6 +302,15 @@ export const listIdeas = ideas.list;
 export const updateIdea = ideas.update;
 export const deleteIdea = ideas.remove;
 
+/** "Turn into project", at any stage: the idea at the stage Project and the new project. */
+export function turnIdeaIntoProject(
+  id: string,
+): Promise<{ idea: Idea; project: Project }> {
+  return invoke<{ idea: Idea; project: Project }>("turn_idea_into_project", {
+    id,
+  });
+}
+
 const projects = itemClient<Project, ProjectInput>("project", "projects");
 export const addProject = projects.add;
 export const getProject = projects.get;
@@ -330,4 +365,149 @@ export function listLinks(
 /** Removes a link. */
 export function removeLink(id: string): Promise<void> {
   return invoke<void>("remove_link", { id });
+}
+
+// ---- Labels and labelled notes (#33) ----
+// A label nests under one parent label (null for a top label). A note is saved with at
+// least one label; the core refuses a save with none.
+
+export interface Label extends RecordBase {
+  name: string;
+  /** Null for a top label. */
+  parentId: string | null;
+}
+
+/** A note with the ids of its live labels. */
+export interface LabelledNote {
+  note: Note;
+  labelIds: string[];
+}
+
+/** Where a page of notes starts: the last note of the page before. */
+export interface ChangeCursor {
+  updatedAt: string;
+  id: string;
+}
+
+/** One page of notes, newest change first. `next` is set when more notes follow. */
+export interface LabelledNotePage {
+  items: LabelledNote[];
+  next: ChangeCursor | null;
+}
+
+/** What a label delete changed: notes that got the parent label, child labels moved up. */
+export interface DeleteLabelOutcome {
+  movedNotes: number;
+  movedLabels: number;
+  /** Where the notes and child labels went; null for a top label. */
+  parentId: string | null;
+}
+
+/** Creates a label under `parentId` (null: a top label). */
+export function createLabel(
+  parentId: string | null,
+  name: string,
+): Promise<Label> {
+  return invoke<Label>("create_label", { parentId, name });
+}
+
+/** Renames a label. */
+export function renameLabel(id: string, name: string): Promise<Label> {
+  return invoke<Label>("rename_label", { id, name });
+}
+
+/** Moves a label under `parentId` (null: to the top). */
+export function moveLabel(id: string, parentId: string | null): Promise<Label> {
+  return invoke<Label>("move_label", { id, parentId });
+}
+
+/** Deletes a label. Its notes get the parent label and its child labels move up. */
+export function deleteLabel(id: string): Promise<DeleteLabelOutcome> {
+  return invoke<DeleteLabelOutcome>("delete_label", { id });
+}
+
+/** How many notes deleting a label would move to its parent label (0 for a top label). */
+export function countLabelDeleteMoves(id: string): Promise<number> {
+  return invoke<number>("count_label_delete_moves", { id });
+}
+
+/** Every live label, flat with its parent id, ordered by name. */
+export function listLabels(): Promise<Label[]> {
+  return invoke<Label[]>("list_labels");
+}
+
+/** Adds a note (`id` null) or replaces a note's text, and sets its labels. */
+export function saveLabelledNote(
+  id: string | null,
+  body: string,
+  labelIds: string[],
+): Promise<LabelledNote> {
+  return invoke<LabelledNote>("save_labelled_note", { id, body, labelIds });
+}
+
+/** One page of notes, newest change first: of `labelId` and its child labels, or all (null). */
+export function listLabelledNotes(
+  labelId: string | null,
+  page: { limit: number; after?: ChangeCursor | null } = { limit: 100 },
+): Promise<LabelledNotePage> {
+  return invoke<LabelledNotePage>("list_labelled_notes", {
+    labelId,
+    page: { limit: page.limit, after: page.after ?? null },
+  });
+}
+
+// ---- Images and attached files (#16) ----
+// Files live in one folder beside the database. The UI never sees a path: it sends
+// bytes and gets a file id, and reads a file by that id only.
+
+/** What the core knows about a saved file. The disk name is never sent. */
+export interface FileRecord {
+  id: string;
+  originalName: string;
+  sizeBytes: number;
+  mime: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A file in the files folder that no row owns. */
+export interface OrphanFile {
+  name: string;
+  sizeBytes: number;
+}
+
+/** The clean-up report. It only lists; nothing is deleted. */
+export interface OrphanReport {
+  files: OrphanFile[];
+  truncated: boolean;
+}
+
+/** Saves a file. The core checks the size limit and rejects with `file_too_large`. */
+export async function addFile(file: File): Promise<FileRecord> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  return invoke<FileRecord>("add_file", bytes, {
+    headers: { "x-mnemo-file-name": encodeURIComponent(file.name) },
+  });
+}
+
+/** The details of a saved file. */
+export function getFile(id: string): Promise<FileRecord> {
+  return invoke<FileRecord>("get_file", { id });
+}
+
+/** A saved file as a Blob with its stored type, ready for `URL.createObjectURL`. */
+export async function readFileBlob(id: string): Promise<Blob> {
+  const record = await getFile(id);
+  const bytes = await invoke<ArrayBuffer>("read_file", { id });
+  return new Blob([bytes], record.mime ? { type: record.mime } : undefined);
+}
+
+/** Removes a file from view. The file stays on disk until the owner removes it. */
+export async function deleteFile(id: string): Promise<void> {
+  await invoke<void>("delete_file", { id });
+}
+
+/** Lists files in the folder that no row owns. It deletes nothing. */
+export function fileOrphanReport(): Promise<OrphanReport> {
+  return invoke<OrphanReport>("file_orphan_report");
 }

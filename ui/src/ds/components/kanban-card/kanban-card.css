@@ -49,3 +49,36 @@
     transition: none;
   }
 }
+
+/* Button card: opens the item and never moves. */
+.kcard-button {
+  align-items: stretch;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.kcard.is-current {
+  border-color: var(--accent);
+  border-inline-start-width: var(--border-2);
+  background: var(--accent-soft);
+}
+
+.kcard-button:active,
+.kcard-button.is-current:active {
+  background: var(--head);
+}
+
+.kcard .k-head {
+  display: flex;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.kcard .k-mark {
+  margin-block-start: var(--space-1);
+  color: var(--accent);
+}

@@ -1,0 +1,45 @@
+/* The Ideas screen: layout only, with token values. Every look comes from ui/src/ds. */
+.ideas-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  margin-top: var(--space-5);
+}
+
+.ideas-board:empty {
+  display: none;
+}
+
+/* main is full width on this screen (data-layout="wide") so the four columns fit; the editor
+   keeps the reading width. */
+.ideas-editor {
+  max-width: var(--measure-intro);
+}
+
+.ideas-editor,
+.idea-fields,
+.idea-source {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.idea-checks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.idea-checks-head,
+.idea-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.idea-actions {
+  justify-content: flex-start;
+}
