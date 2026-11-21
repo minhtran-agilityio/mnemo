@@ -10,9 +10,13 @@
 
 use std::ffi::OsStr;
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
+use super::claude;
 use super::fake::{FakeResult, FakeRunner};
+use super::health::{ClaudeCli, SystemClaude};
 
 /// The environment variable that starts the whole app with the fake runner.
 pub const FAKE_AI_ENV: &str = "MNEMO_FAKE_AI";
@@ -20,6 +24,8 @@ pub const FAKE_AI_ENV: &str = "MNEMO_FAKE_AI";
 /// One AI request: what to ask and what shape the answer must have.
 #[derive(Clone, PartialEq, Eq)]
 pub struct AiTask {
+    /// A short name for logs, such as "test_prompt". Never the prompt or any owner content.
+    pub name: String,
     /// The text sent to the model.
     pub prompt: String,
     /// The JSON schema the answer must match, as JSON text.
@@ -28,16 +34,23 @@ pub struct AiTask {
     pub tools: Vec<String>,
     /// The model to use for this feature.
     pub model: String,
+    /// The effort level for this feature (the `--effort` value), or `None` for the default.
+    pub effort: Option<String>,
+    /// How long the run may take. The runner kills the process after this.
+    pub timeout: Duration,
 }
 
 // The prompt can hold the owner's content, so it never goes to a log through Debug.
 impl fmt::Debug for AiTask {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AiTask")
+            .field("name", &self.name)
             .field("prompt_len", &self.prompt.len())
             .field("schema_len", &self.schema.len())
             .field("tools", &self.tools)
             .field("model", &self.model)
+            .field("effort", &self.effort)
+            .field("timeout", &self.timeout)
             .finish()
     }
 }
@@ -85,9 +98,17 @@ pub trait AiRunner: Send + Sync {
     fn run_task(&self, task: &AiTask) -> Result<AiOutput, AiError>;
 }
 
-/// The real runner. It is a placeholder until issue #19 builds the `claude -p` process:
-/// it spawns nothing and reports `Unavailable`.
-pub struct ClaudeRunner;
+/// The real runner: one `claude -p` process per task.
+pub struct ClaudeRunner {
+    /// The folder every run starts in. It is Mnemo's own, never a project folder of the owner.
+    work_dir: PathBuf,
+}
+
+impl ClaudeRunner {
+    pub fn new(work_dir: PathBuf) -> Self {
+        ClaudeRunner { work_dir }
+    }
+}
 
 /// Stops a test that reaches the real runner. Tests never call the real Claude.
 fn guard_against_test_use() {
@@ -96,11 +117,12 @@ fn guard_against_test_use() {
 }
 
 impl AiRunner for ClaudeRunner {
-    fn run_task(&self, _task: &AiTask) -> Result<AiOutput, AiError> {
+    fn run_task(&self, task: &AiTask) -> Result<AiOutput, AiError> {
         guard_against_test_use();
-        // Issue #19 replaces this with the `claude -p` process.
-        #[allow(unreachable_code)]
-        Err(AiError::Unavailable)
+        let Some(program) = SystemClaude::from_env().locate() else {
+            return Err(AiError::Unavailable);
+        };
+        claude::run_claude(&program, task, &self.work_dir)
     }
 }
 
@@ -113,10 +135,11 @@ pub fn fake_requested(value: Option<&OsStr>) -> bool {
 pub fn select_runner(fake: bool) -> Arc<dyn AiRunner> {
     if fake {
         Arc::new(FakeRunner::new(FakeResult::Valid(
-            r#"{"fake":true}"#.to_string(),
+            r#"{"answer":"Fake answer: AI is in test mode.","fake":true}"#.to_string(),
         )))
     } else {
-        Arc::new(ClaudeRunner)
+        // The temp folder is never an owner project folder. #20 moves it to Mnemo's config.
+        Arc::new(ClaudeRunner::new(std::env::temp_dir()))
     }
 }
 
@@ -126,17 +149,20 @@ mod tests {
 
     fn task() -> AiTask {
         AiTask {
+            name: "t".into(),
             prompt: "secret owner text".into(),
             schema: "{}".into(),
             tools: vec![],
             model: "m".into(),
+            effort: None,
+            timeout: Duration::from_secs(5),
         }
     }
 
     #[test]
     #[should_panic(expected = "the real AI runner was used in a test")]
     fn the_real_runner_panics_in_a_test() {
-        let _ = ClaudeRunner.run_task(&task());
+        let _ = ClaudeRunner::new(std::env::temp_dir()).run_task(&task());
     }
 
     #[test]
@@ -156,7 +182,10 @@ mod tests {
     #[test]
     fn select_runner_gives_the_fake_answer_when_fake() {
         let out = select_runner(true).run_task(&task()).unwrap();
-        assert_eq!(out.structured_output, r#"{"fake":true}"#);
+        assert_eq!(
+            out.structured_output,
+            r#"{"answer":"Fake answer: AI is in test mode.","fake":true}"#
+        );
     }
 
     #[test]

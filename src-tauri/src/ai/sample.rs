@@ -19,12 +19,15 @@ struct TitleAnswer {
 /// Asks the model for a short title. `None` when the run failed or the answer is unusable.
 fn suggest_title(runner: &dyn AiRunner, text: &str) -> Option<String> {
     let task = AiTask {
+        name: "suggest_title".to_string(),
         prompt: format!("Give a short title for: {text}"),
         schema:
             r#"{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}"#
                 .to_string(),
         tools: vec![],
         model: "haiku".to_string(),
+        effort: None,
+        timeout: std::time::Duration::from_secs(60),
     };
     let output = runner.run_task(&task).ok()?;
     let answer: TitleAnswer = serde_json::from_str(&output.structured_output).ok()?;
