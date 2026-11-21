@@ -29,6 +29,7 @@ import {
   getAiMode,
   getSetting,
   ping,
+  runTestPrompt,
   setSetting,
 } from "./shared/api";
 import { versionErrorText, versionText } from "./version-text";
@@ -177,6 +178,7 @@ async function start(): Promise<void> {
         getAiHealth,
         getAiMode,
         checkAiHealth,
+        runTestPrompt,
       });
     } else if (isRoadmapItem(item)) {
       renderEmptyState(screen, { item, query: route.query });
