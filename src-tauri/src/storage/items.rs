@@ -89,7 +89,7 @@ pub enum IdeaStage {
 }
 
 impl IdeaStage {
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             IdeaStage::Spark => "spark",
             IdeaStage::Shape => "shape",
@@ -239,7 +239,7 @@ macro_rules! item_sql {
     };
 }
 
-fn base_from(row: &Row<'_>) -> rusqlite::Result<RecordBase> {
+pub(super) fn base_from(row: &Row<'_>) -> rusqlite::Result<RecordBase> {
     Ok(RecordBase {
         id: row.get(0)?,
         created_at: row.get(1)?,
@@ -258,7 +258,7 @@ fn opt_text(v: &Option<String>) -> Value {
 
 /// An optional field that must still be sent, as a value or as null. Update replaces
 /// every field, so a field left out must not quietly become empty.
-fn nullable<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+pub(super) fn nullable<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: Deserialize<'de>,
@@ -268,12 +268,12 @@ where
 
 // ---- Checks. Messages are shown to the owner as they are. ----
 
-fn invalid(message: String) -> StorageError {
+pub(super) fn invalid(message: String) -> StorageError {
     StorageError::Invalid(message)
 }
 
 /// Text that must be given: not blank, at most `max` characters.
-fn required_chars(field: &str, v: &str, max: usize) -> Result<(), StorageError> {
+pub(super) fn required_chars(field: &str, v: &str, max: usize) -> Result<(), StorageError> {
     if v.trim().is_empty() {
         return Err(invalid(format!("The {field} cannot be empty.")));
     }
@@ -297,7 +297,11 @@ fn required_text(field: &str, v: &str) -> Result<(), StorageError> {
 }
 
 /// Optional text: null for unknown, never blank (send null instead).
-fn optional_chars(field: &str, v: &Option<String>, max: usize) -> Result<(), StorageError> {
+pub(super) fn optional_chars(
+    field: &str,
+    v: &Option<String>,
+    max: usize,
+) -> Result<(), StorageError> {
     match v {
         Some(s) => required_chars(field, s, max).map_err(|_| {
             invalid(format!(
@@ -308,7 +312,7 @@ fn optional_chars(field: &str, v: &Option<String>, max: usize) -> Result<(), Sto
     }
 }
 
-fn optional_text(field: &str, v: &Option<String>) -> Result<(), StorageError> {
+pub(super) fn optional_text(field: &str, v: &Option<String>) -> Result<(), StorageError> {
     match v {
         Some(s) => required_text(field, s).map_err(|_| {
             invalid(format!(
@@ -320,7 +324,7 @@ fn optional_text(field: &str, v: &Option<String>) -> Result<(), StorageError> {
 }
 
 /// A web address: http or https, a host, no spaces, at most 2048 characters.
-fn web_address(v: &str) -> Result<(), StorageError> {
+pub(super) fn web_address(v: &str) -> Result<(), StorageError> {
     let bad = || {
         invalid(
             "The link must be a web address starting with http:// or https://, with no spaces."
@@ -512,55 +516,6 @@ impl Item for Note {
         Ok(Note {
             base: base_from(r)?,
             body: r.get(4)?,
-        })
-    }
-
-    fn base(&self) -> &RecordBase {
-        &self.base
-    }
-}
-
-/// An idea on its way from spark to project.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Idea {
-    #[serde(flatten)]
-    pub base: RecordBase,
-    pub title: String,
-    pub stage: IdeaStage,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IdeaInput {
-    pub title: String,
-    pub stage: IdeaStage,
-}
-
-impl sealed::Sealed for Idea {}
-impl Item for Idea {
-    type Input = IdeaInput;
-    const KIND: ItemKind = ItemKind::Idea;
-    item_sql!(
-        table: "idea",
-        columns: "title, stage",
-        insert: "?3, ?4",
-        set: "title = ?3, stage = ?4"
-    );
-
-    fn validate(i: &IdeaInput) -> Result<(), StorageError> {
-        required_chars("title", &i.title, MAX_TITLE_CHARS)
-    }
-
-    fn values(i: &IdeaInput) -> Vec<Value> {
-        vec![text(&i.title), text(i.stage.as_str())]
-    }
-
-    fn from_row(r: &Row<'_>) -> rusqlite::Result<Self> {
-        Ok(Idea {
-            base: base_from(r)?,
-            title: r.get(4)?,
-            stage: r.get(5)?,
         })
     }
 
@@ -850,7 +805,7 @@ pub(crate) fn exists_sql(kind: ItemKind) -> &'static str {
     match kind {
         ItemKind::Bookmark => Bookmark::EXISTS_SQL,
         ItemKind::Note => Note::EXISTS_SQL,
-        ItemKind::Idea => Idea::EXISTS_SQL,
+        ItemKind::Idea => super::ideas::EXISTS_SQL,
         ItemKind::Project => Project::EXISTS_SQL,
         ItemKind::Task => Task::EXISTS_SQL,
         ItemKind::Event => Event::EXISTS_SQL,
@@ -1142,25 +1097,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn idea_add_get_list_update_delete() {
-        add_get_list_update_delete::<Idea>(
-            IdeaInput {
-                title: "Garden robot".into(),
-                stage: IdeaStage::default(),
-            },
-            IdeaInput {
-                title: "Garden robot v2".into(),
-                stage: IdeaStage::Ready,
-            },
-            |i| assert_eq!(i.stage, IdeaStage::Spark),
-            |i| {
-                assert_eq!(i.stage, IdeaStage::Ready);
-                assert_eq!(i.title, "Garden robot v2");
-            },
-        );
-    }
-
-    #[test]
     fn project_add_get_list_update_delete() {
         add_get_list_update_delete::<Project>(
             ProjectInput {
@@ -1356,11 +1292,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn idea_project_and_task_add_refuse_empty_or_long_fields() {
-        refused::<Idea>(IdeaInput {
-            title: " ".into(),
-            stage: IdeaStage::Spark,
-        });
+    fn project_and_task_add_refuse_empty_or_long_fields() {
         refused::<Project>(ProjectInput {
             title: "p".into(),
             status: "".into(),
@@ -1430,7 +1362,6 @@ pub(crate) mod tests {
         // Update replaces every field, so a field left out is refused, not emptied.
         let partial = r#"{"url":"https://a.example","title":"A"}"#;
         assert!(serde_json::from_str::<BookmarkInput>(partial).is_err());
-        assert!(serde_json::from_str::<IdeaInput>(r#"{"title":"x"}"#).is_err());
         assert!(serde_json::from_str::<TaskInput>(r#"{"title":"x"}"#).is_err());
         assert!(serde_json::from_str::<RunInput>(
             r#"{"taskType":"t","startedAt":"2026-01-01T00:00:00Z"}"#

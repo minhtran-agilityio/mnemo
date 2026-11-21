@@ -11,7 +11,8 @@ use std::path::Path;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
-use super::items::{Idea, IdeaInput, IdeaStage, Item, Note, NoteInput};
+use super::ideas::{Idea, IdeaInput};
+use super::items::{Item, Note, NoteInput};
 use super::record::PageRequest;
 use super::testing::TempDir;
 use super::{Storage, StorageError};
@@ -66,18 +67,32 @@ fn save_notes(prefix: &'static str) -> Box<dyn FnOnce(Storage) -> Vec<StorageErr
     })
 }
 
+/// Ideas have their own storage functions (#34): each save is one immediate transaction
+/// that writes the idea, its tags and its stage.
 fn save_ideas(prefix: &'static str) -> Box<dyn FnOnce(Storage) -> Vec<StorageError> + Send> {
-    Box::new(move |s| {
+    Box::new(move |mut s| {
         (0..SAVES)
             .filter_map(|i| {
-                s.add::<Idea>(&IdeaInput {
-                    title: format!("{prefix}-{i}"),
-                    stage: IdeaStage::Spark,
-                })
-                .err()
+                let mut input = IdeaInput::titled(&format!("{prefix}-{i}"));
+                input.tags = vec![prefix.to_string()];
+                s.add_idea(&input).err()
             })
             .collect()
     })
+}
+
+/// Every live idea, read page by page.
+fn all_ideas(s: &Storage) -> Vec<Idea> {
+    let mut out = Vec::new();
+    let mut page = PageRequest::first(100);
+    loop {
+        let p = s.list_ideas(&page, false).unwrap();
+        out.extend(p.items);
+        match p.next {
+            Some(c) => page.after = Some(c),
+            None => return out,
+        }
+    }
 }
 
 fn expected(prefixes: &[&str]) -> BTreeSet<String> {
@@ -116,7 +131,7 @@ fn two_writers_saving_to_different_tables_lose_nothing() {
 
     let check = Storage::open(&path).unwrap();
     let notes: BTreeSet<String> = all::<Note>(&check).into_iter().map(|n| n.body).collect();
-    let ideas: BTreeSet<String> = all::<Idea>(&check).into_iter().map(|i| i.title).collect();
+    let ideas: BTreeSet<String> = all_ideas(&check).into_iter().map(|i| i.title).collect();
     assert_eq!(notes, expected(&["window"]));
     assert_eq!(ideas, expected(&["job"]));
 }

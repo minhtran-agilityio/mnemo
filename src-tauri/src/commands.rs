@@ -7,9 +7,10 @@ use tauri::Manager;
 
 use crate::ai::health::{self, AiHealth};
 use crate::storage::files::OrphanReport;
+use crate::storage::ideas::{Idea, IdeaInput, IdeaProject};
 use crate::storage::items::{
-    Bookmark, BookmarkInput, Event, EventInput, Idea, IdeaInput, Memory, MemoryInput, Note,
-    NoteInput, Project, ProjectInput, Run, RunInput, Task, TaskInput,
+    Bookmark, BookmarkInput, Event, EventInput, Memory, MemoryInput, Note, NoteInput, Project,
+    ProjectInput, Run, RunInput, Task, TaskInput,
 };
 use crate::storage::labels::{
     ChangePage, ChangePageRequest, DeleteLabelOutcome, Label, LabelledNote,
@@ -519,15 +520,67 @@ item_commands!(
     update_note,
     delete_note
 );
-item_commands!(
-    Idea,
-    IdeaInput,
-    add_idea,
-    get_idea,
-    list_ideas,
-    update_idea,
-    delete_idea
-);
+// Ideas (#34) have their own storage functions: tags live in their own table and the
+// stage follows four plain checks, so the generic item engine does not fit them.
+
+/// Adds an idea with its tags. The core sets its stage from the checks.
+#[tauri::command]
+pub async fn add_idea(app: tauri::AppHandle, input: IdeaInput) -> Result<Idea, AppError> {
+    off_main_thread(app, move |s| s.get()?.add_idea(&input).map_err(item_failed)).await
+}
+
+/// The live idea with this id, with its tags, checks and project.
+#[tauri::command]
+pub async fn get_idea(app: tauri::AppHandle, id: String) -> Result<Idea, AppError> {
+    off_main_thread(app, move |s| s.get()?.get_idea(&id).map_err(item_failed)).await
+}
+
+/// One page of ideas, newest first.
+#[tauri::command]
+pub async fn list_ideas(app: tauri::AppHandle, args: ListArgs) -> Result<Page<Idea>, AppError> {
+    off_main_thread(app, move |s| {
+        let page = PageRequest {
+            limit: args.limit,
+            after: args.after.clone(),
+        };
+        s.get()?
+            .list_ideas(&page, args.include_deleted)
+            .map_err(item_failed)
+    })
+    .await
+}
+
+/// Replaces every field of a live idea, tags included. The stage follows the checks.
+#[tauri::command]
+pub async fn update_idea(
+    app: tauri::AppHandle,
+    id: String,
+    input: IdeaInput,
+) -> Result<Idea, AppError> {
+    off_main_thread(app, move |s| {
+        s.get()?.update_idea(&id, &input).map_err(item_failed)
+    })
+    .await
+}
+
+/// Soft deletes an idea and removes its links.
+#[tauri::command]
+pub async fn delete_idea(app: tauri::AppHandle, id: String) -> Result<(), AppError> {
+    off_main_thread(app, move |s| s.get()?.delete_idea(&id).map_err(item_failed)).await
+}
+
+/// "Turn into project", at any stage: adds a project, links idea and project, and moves
+/// the idea to the stage Project.
+#[tauri::command]
+pub async fn turn_idea_into_project(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<IdeaProject, AppError> {
+    off_main_thread(app, move |s| {
+        s.get()?.turn_idea_into_project(&id).map_err(item_failed)
+    })
+    .await
+}
 item_commands!(
     Project,
     ProjectInput,

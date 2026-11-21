@@ -130,14 +130,40 @@ export interface Note extends RecordBase {
   body: string;
 }
 
+/** The stage of an idea. The core sets it from the four checks (#34); the UI never sends it. */
 export type IdeaStage = "spark" | "shape" | "ready" | "project";
+/** Where an idea comes from: a saved bookmark or note, or a web link. */
+export type IdeaSource =
+  | { type: "item"; item: { kind: "bookmark" | "note"; id: string } }
+  | { type: "link"; url: string };
+/** The four plain checks. Advice only: they never block a save. */
+export interface IdeaChecks {
+  hasTag: boolean;
+  hasSource: boolean;
+  hasWhy: boolean;
+  hasOutline: boolean;
+}
 export interface IdeaInput {
   title: string;
-  stage: IdeaStage;
+  text: string | null;
+  source: IdeaSource | null;
+  why: string | null;
+  /** Plain text, one point per line. */
+  outline: string | null;
+  /** Update replaces the tags too: a tag left out is removed. */
+  tags: string[];
 }
 export interface Idea extends RecordBase {
   title: string;
+  text: string | null;
+  source: IdeaSource | null;
+  why: string | null;
+  outline: string | null;
+  tags: string[];
   stage: IdeaStage;
+  checks: IdeaChecks;
+  /** The project this idea was turned into, if it is still there. */
+  projectId: string | null;
 }
 
 export interface ProjectInput {
@@ -252,6 +278,15 @@ export const getIdea = ideas.get;
 export const listIdeas = ideas.list;
 export const updateIdea = ideas.update;
 export const deleteIdea = ideas.remove;
+
+/** "Turn into project", at any stage: the idea at the stage Project and the new project. */
+export function turnIdeaIntoProject(
+  id: string,
+): Promise<{ idea: Idea; project: Project }> {
+  return invoke<{ idea: Idea; project: Project }>("turn_idea_into_project", {
+    id,
+  });
+}
 
 const projects = itemClient<Project, ProjectInput>("project", "projects");
 export const addProject = projects.add;

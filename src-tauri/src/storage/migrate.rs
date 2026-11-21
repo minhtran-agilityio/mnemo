@@ -37,6 +37,10 @@ pub const MIGRATIONS: &[Migration] = &[
         number: 6,
         sql: include_str!("../../migrations/0006_labels.sql"),
     },
+    Migration {
+        number: 7,
+        sql: include_str!("../../migrations/0007_ideas.sql"),
+    },
 ];
 
 /// Reads the schema version stored in the database (0 for a new file).
@@ -95,7 +99,16 @@ mod tests {
     fn real_migrations_set_the_version() {
         let mut c = mem();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 6);
+        assert_eq!(current_version(&c).unwrap(), 7);
+    }
+
+    /// `run` skips every number at or below the stored version, so a gap that is filled
+    /// later would never run on a database that already passed it.
+    #[test]
+    fn migration_numbers_are_1_to_n_with_no_gap() {
+        let numbers: Vec<u32> = MIGRATIONS.iter().map(|m| m.number).collect();
+        let expected: Vec<u32> = (1..=MIGRATIONS.len() as u32).collect();
+        assert_eq!(numbers, expected);
     }
 
     #[test]
@@ -166,7 +179,7 @@ mod tests {
             err,
             StorageError::SchemaTooNew {
                 found: 99,
-                supported: 6
+                supported: 7
             }
         );
     }
@@ -323,8 +336,8 @@ mod tests {
         )
         .unwrap();
         assert!(!table_exists(&c, "file"));
-        run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 6);
+        run(&mut c, &MIGRATIONS[..5]).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 5);
         assert_eq!(
             columns(&c, "file"),
             [
@@ -351,7 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn all_migrations_on_a_version_2_database_keep_settings_and_add_9_tables() {
+    fn all_migrations_on_a_version_2_database_keep_settings_and_add_the_tables() {
         let mut c = mem();
         run(&mut c, &MIGRATIONS[..2]).unwrap();
         c.execute(
@@ -360,7 +373,7 @@ mod tests {
         )
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 6);
+        assert_eq!(current_version(&c).unwrap(), 7);
         for t in KINDS.iter().chain(["item_link", "settings"].iter()) {
             assert!(table_exists(&c, t), "table {t} missing");
         }
@@ -368,6 +381,65 @@ mod tests {
             .query_row("SELECT count(*) FROM settings", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn migration_7_adds_idea_fields_and_idea_tag_and_keeps_ideas_projects_and_links() {
+        let mut c = mem();
+        // The database of the version before: every migration up to the one before ideas.
+        let before = MIGRATIONS.len() - 1;
+        run(&mut c, &MIGRATIONS[..before]).unwrap();
+        c.execute_batch(&format!(
+            "INSERT INTO idea (id, created_at, updated_at, title, stage) VALUES ('i1', '{T}', '{T}', 'Garden robot', 'ready');
+             INSERT INTO project (id, created_at, updated_at, title, status) VALUES ('p1', '{T}', '{T}', 'Old', 'active');
+             INSERT INTO item_link (id, a_kind, a_id, b_kind, b_id, created_at, updated_at) VALUES ('l1', 'idea', 'i1', 'project', 'p1', '{T}', '{T}');"
+        ))
+        .unwrap();
+        run(&mut c, MIGRATIONS).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 7);
+        let cols = columns(&c, "idea");
+        for col in [
+            "body",
+            "source_kind",
+            "source_id",
+            "source_url",
+            "why",
+            "outline",
+        ] {
+            assert!(cols.iter().any(|n| n == col), "idea lacks {col}");
+        }
+        assert!(table_exists(&c, "idea_tag"));
+        let kept: (String, String, Option<String>) = c
+            .query_row(
+                "SELECT title, stage, why FROM idea WHERE id = 'i1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(kept, ("Garden robot".into(), "ready".into(), None));
+        let links: i64 = c
+            .query_row(
+                "SELECT count(*) FROM item_link WHERE id = 'l1' AND deleted_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(links, 1);
+        // A source must be a saved item type, and a tag is unique per idea.
+        assert!(c
+            .execute("UPDATE idea SET source_kind = 'task' WHERE id = 'i1'", [])
+            .is_err());
+        c.execute(
+            "INSERT INTO idea_tag (id, idea_id, tag, created_at, updated_at) VALUES ('t1', 'i1', 'garden', ?1, ?1)",
+            [T],
+        )
+        .unwrap();
+        assert!(c
+            .execute(
+                "INSERT INTO idea_tag (id, idea_id, tag, created_at, updated_at) VALUES ('t2', 'i1', 'garden', ?1, ?1)",
+                [T],
+            )
+            .is_err());
     }
 
     #[test]
