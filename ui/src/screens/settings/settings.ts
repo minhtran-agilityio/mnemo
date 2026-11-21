@@ -4,9 +4,12 @@
 // ui/src/ds (section list, card, choice list, text); settings.css lays them out.
 
 import {
+  buildAiOffState,
   buildBanner,
+  buildBusyLine,
   buildPill,
   buildText,
+  buildTrustLabel,
   type ChoiceList,
   createButton,
   createCard,
@@ -22,6 +25,8 @@ import {
   type AiMode,
   type AiState,
   errorMessage,
+  isAppError,
+  type TestPromptResult,
 } from "../../shared/api";
 
 export interface SettingsDeps {
@@ -43,6 +48,8 @@ export interface SettingsDeps {
   getAiMode(): Promise<AiMode>;
   /** Checks Claude Code again. Rejects when the check could not be asked for. */
   checkAiHealth(): Promise<AiHealth>;
+  /** Runs the developer test prompt. Rejects with an AppError (code and plain message). */
+  runTestPrompt(): Promise<TestPromptResult>;
 }
 
 type SectionId = "appearance" | "ai" | "data";
@@ -80,6 +87,48 @@ type AiView =
   | { kind: "checking" }
   | { kind: "known"; health: AiHealth }
   | { kind: "failed"; text: string };
+
+/** What the developer test prompt shows: nothing yet, a run, its answer, its failure, or the limit. */
+type TestPromptView =
+  | { kind: "idle" }
+  | { kind: "running" }
+  | { kind: "done"; answer: string; durationMs: number }
+  | { kind: "failed"; message: string; next: string }
+  | { kind: "limit" };
+
+const TEST_LABEL = "Send test prompt";
+
+/**
+ * The test prompt outlives one Settings view. Leaving Settings and coming back while a run is
+ * going shows it still running, so a second paid run cannot start, and its answer still shows.
+ * `redraw` belongs to the newest view.
+ */
+const testPromptRun: { view: TestPromptView; redraw: (() => void) | null } = {
+  view: { kind: "idle" },
+  redraw: null,
+};
+
+/** Forgets the test prompt state. For tests only. */
+export function resetTestPromptForTests(): void {
+  testPromptRun.view = { kind: "idle" };
+  testPromptRun.redraw = null;
+}
+
+/** The next step for each failure code of the test prompt. */
+const NEXT_STEPS: Readonly<Record<string, string>> = {
+  timeout: "Try again in a moment.",
+  schema_mismatch: "Try again. If it keeps happening, update Claude Code.",
+  exit_error:
+    "Choose Check again to see if Claude Code is signed in, then try again.",
+  unavailable:
+    "Choose Check again to see if Claude Code is installed, then try again.",
+};
+const DEFAULT_NEXT_STEP = "Try again in a moment.";
+
+/** The time a run took, as a short plain text. */
+function formatDuration(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
+}
 
 /**
  * How often, and how many times, the first check is asked for while it is still running. The
@@ -243,7 +292,12 @@ export function renderSettings(
         }),
         button,
       );
-      return card("AI", [...fakeBanner, status, line(ai.health.message)]);
+      return card("AI", [
+        ...fakeBanner,
+        status,
+        line(ai.health.message),
+        ...testBlock(),
+      ]);
     }
     if (ai.kind === "checking") {
       status.append(buildPill({ text: "Checking" }), button);
@@ -251,10 +305,97 @@ export function renderSettings(
         ...fakeBanner,
         status,
         line("Mnemo is checking Claude Code."),
+        ...testBlock(),
       ]);
     }
     status.append(button);
-    return card("AI", [...fakeBanner, status, line(ai.text)]);
+    return card("AI", [...fakeBanner, status, line(ai.text), ...testBlock()]);
+  }
+
+  // The developer test prompt follows shared rule 3: it is offered only when AI can run (Ready,
+  // or the fake) and the limit was not reached. Otherwise the AI-off or limit state shows
+  // instead, and the rest of the app keeps working.
+  function testBlock(): Node[] {
+    if (testPromptRun.view.kind === "limit")
+      return [buildAiOffState({ reason: "limit" })];
+    const ready = ai.kind === "known" && ai.health.state === "ready";
+    if (!ready && aiMode !== "fake")
+      return ai.kind === "checking" ? [] : [buildAiOffState()];
+    const box = doc.createElement("div");
+    box.className = "settings-ai-test";
+    const running = testPromptRun.view.kind === "running";
+    const send = createButton(doc, {
+      label: TEST_LABEL,
+      onClick: () => void sendTestPrompt(),
+    });
+    if (running) setButtonBusy(send, true, { label: TEST_LABEL });
+    box.append(
+      buildText(doc, {
+        tone: "muted",
+        content:
+          aiMode === "fake"
+            ? "Developer test. Fake AI answers with fixed test data."
+            : "Developer test. Each click runs a real Claude prompt and uses Claude usage.",
+      }),
+      send,
+    );
+    if (testPromptRun.view.kind === "running") {
+      box.append(buildBusyLine("Waiting for Claude…"));
+    } else if (testPromptRun.view.kind === "done") {
+      box.append(
+        buildText(doc, { content: testPromptRun.view.answer }),
+        buildTrustLabel("ai"),
+        buildText(doc, {
+          tone: "muted",
+          size: "sm",
+          content: `Answered in ${formatDuration(testPromptRun.view.durationMs)}.`,
+        }),
+      );
+    } else if (testPromptRun.view.kind === "failed") {
+      // The reason is written by Mnemo, not read from Claude, so it is marked as a guess.
+      box.append(
+        buildBanner({
+          tone: "bad",
+          lead: "Test prompt failed.",
+          message: `${testPromptRun.view.message} Nothing changed. ${testPromptRun.view.next}`,
+        }),
+        buildTrustLabel("guess"),
+      );
+    }
+    return [box];
+  }
+
+  // This view is the newest: a run that ends draws its result here.
+  testPromptRun.redraw = () => {
+    if (open === "ai" && body.isConnected) renderBody();
+  };
+
+  async function sendTestPrompt(): Promise<void> {
+    if (testPromptRun.view.kind === "running") return;
+    testPromptRun.view = { kind: "running" };
+    if (open === "ai" && body.isConnected) renderBody();
+    try {
+      const result = await deps.runTestPrompt();
+      testPromptRun.view = {
+        kind: "done",
+        answer: String(result.answer),
+        durationMs: Number(result.durationMs),
+      };
+    } catch (error) {
+      console.error("the test prompt failed:", error);
+      testPromptRun.view =
+        isAppError(error) && error.code === "usage_limit"
+          ? { kind: "limit" }
+          : {
+              kind: "failed",
+              message: errorMessage(error),
+              next:
+                (isAppError(error) ? NEXT_STEPS[error.code] : undefined) ??
+                DEFAULT_NEXT_STEP,
+            };
+    }
+    // The view on screen now may be a newer one than the view that started the run.
+    testPromptRun.redraw?.();
   }
 
   function showAi(next: AiView): void {
@@ -268,7 +409,11 @@ export function renderSettings(
     aiBusy = true;
     if (open === "ai") renderBody();
     try {
-      showAi({ kind: "known", health: await deps.checkAiHealth() });
+      const health = await deps.checkAiHealth();
+      // A new check lets the owner try the test prompt again after the limit.
+      if (testPromptRun.view.kind === "limit")
+        testPromptRun.view = { kind: "idle" };
+      showAi({ kind: "known", health });
     } catch (error) {
       console.error("could not check Claude Code:", error);
       showAi({

@@ -99,7 +99,13 @@ pub fn run() {
                 ai::runner::fake_requested(std::env::var_os(ai::runner::FAKE_AI_ENV).as_deref());
             log::info!("AI runner: {}", if fake { "fake" } else { "real" });
             app.manage(AiRunnerState {
-                runner: ai::runner::select_runner(fake),
+                runner: ai::runner::select_runner(
+                    fake,
+                    paths
+                        .as_ref()
+                        .ok()
+                        .map(|p| ai::runner::runs_dir(&p.data_dir)),
+                ),
                 fake,
             });
 
@@ -172,6 +178,7 @@ pub fn run() {
             commands::get_ai_health,
             commands::check_ai_health,
             commands::get_ai_mode,
+            commands::run_test_prompt,
             commands::add_bookmark,
             commands::get_bookmark,
             commands::list_bookmarks,

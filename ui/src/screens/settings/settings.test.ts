@@ -1,8 +1,12 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Theme } from "../../frame/theme";
-import type { AiHealth, AiMode } from "../../shared/api";
-import { renderSettings, type SettingsDeps } from "./settings";
+import type { AiHealth, AiMode, TestPromptResult } from "../../shared/api";
+import {
+  renderSettings,
+  resetTestPromptForTests,
+  type SettingsDeps,
+} from "./settings";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
@@ -17,6 +21,8 @@ let firstHealth: Array<AiHealth | null | Error>;
 let rechecks: Array<AiHealth | Error>;
 let checks: number;
 let aiMode: AiMode | Error;
+let prompts: Array<(result: TestPromptResult | unknown) => void>;
+let promptRejects: Array<(error: unknown) => void>;
 
 const READY: AiHealth = { state: "ready", message: "Claude Code is ready." };
 const SIGNED_OUT: AiHealth = {
@@ -52,6 +58,11 @@ function deps(): SettingsDeps {
       if (next instanceof Error) throw next;
       return next;
     },
+    runTestPrompt: () =>
+      new Promise<TestPromptResult>((done, fail) => {
+        prompts.push(done as (r: unknown) => void);
+        promptRejects.push(fail);
+      }),
   };
 }
 
@@ -80,6 +91,7 @@ afterEach(async () => {
 });
 
 beforeEach(() => {
+  resetTestPromptForTests();
   container = document.createElement("main");
   document.body.replaceChildren(container);
   current = "system";
@@ -92,6 +104,8 @@ beforeEach(() => {
   rechecks = [];
   checks = 0;
   aiMode = "real";
+  prompts = [];
+  promptRejects = [];
   renderSettings(container, deps());
 });
 
@@ -393,5 +407,134 @@ test("the AI section shows no banner, and the failure is logged, when the mode c
   openSection("AI");
   expect(container.querySelector(".settings-body .banner")).toBeNull();
   expect(log).toHaveBeenCalled();
+  log.mockRestore();
+});
+
+// ---- The developer test prompt ----
+
+function sendButton(): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll("button")].find(
+    (b) => b.textContent?.trim() === "Send test prompt",
+  );
+}
+
+async function openAi(): Promise<void> {
+  await tick();
+  openSection("AI");
+}
+
+test("the test prompt button is offered when AI is Ready", async () => {
+  await openAi();
+  expect(sendButton()).toBeDefined();
+  expect(aiBody()).toContain("uses Claude usage");
+});
+
+test.each([
+  ["not installed", { state: "not_installed", message: "Install it." }],
+  ["not signed in", SIGNED_OUT],
+] as const)(
+  "with AI %s the button is hidden and the AI-off state shows",
+  async (_name, health) => {
+    firstHealth = [health];
+    renderSettings(container, deps());
+    await openAi();
+    expect(sendButton()).toBeUndefined();
+    expect(aiBody()).toContain("AI is off");
+    expect(aiBody()).toContain("Links still save");
+  },
+);
+
+test("with the fake AI the button is offered even when Claude Code is not Ready", async () => {
+  aiMode = "fake";
+  firstHealth = [SIGNED_OUT];
+  renderSettings(container, deps());
+  await openAi();
+  expect(sendButton()).toBeDefined();
+  expect(aiBody()).not.toContain("AI is off");
+});
+
+test("while the test prompt runs, the button is busy, the busy line shows and a second click is ignored", async () => {
+  await openAi();
+  sendButton()?.click();
+  sendButton()?.click();
+  expect(prompts.length).toBe(1);
+  expect(sendButton()?.getAttribute("aria-busy")).toBe("true");
+  expect(
+    container.querySelector(".settings-body [role=status].busy-line")
+      ?.textContent,
+  ).toBe("Waiting for Claude…");
+});
+
+test("leaving Settings during a run and coming back shows it still running, and its answer then shows", async () => {
+  await openAi();
+  sendButton()?.click();
+  // The owner goes to another screen and comes back: Settings is drawn again from scratch.
+  container = document.createElement("main");
+  document.body.replaceChildren(container);
+  renderSettings(container, deps());
+  await openAi();
+  expect(sendButton()?.getAttribute("aria-busy")).toBe("true");
+  sendButton()?.click();
+  expect(prompts.length).toBe(1);
+  prompts[0]?.({ answer: "Hello again.", durationMs: 900 });
+  await tick();
+  expect(aiBody()).toContain("Hello again.");
+});
+
+test("a good answer shows the text, the Written by AI label and the time", async () => {
+  await openAi();
+  sendButton()?.click();
+  prompts[0]?.({ answer: "Hello there.", durationMs: 1234 });
+  await tick();
+  expect(aiBody()).toContain("Hello there.");
+  expect(aiBody()).toContain("Written by AI");
+  expect(aiBody()).toContain("Answered in 1.2 s.");
+  expect(aiBody()).not.toContain("Waiting for Claude");
+  // The button is back for another try.
+  expect(sendButton()?.getAttribute("aria-busy")).not.toBe("true");
+});
+
+test("a failure shows the bad banner with what happened, that nothing changed, the next step and a Guess label", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  await openAi();
+  sendButton()?.click();
+  promptRejects[0]?.({
+    code: "exit_error",
+    message: "Claude Code stopped with an error.",
+  });
+  await tick();
+  const alert = container.querySelector(".settings-body [role=alert]");
+  expect(alert?.textContent).toContain("Test prompt failed.");
+  expect(alert?.textContent).toContain("Claude Code stopped with an error.");
+  expect(alert?.textContent).toContain("Nothing changed.");
+  expect(alert?.textContent).toContain("Check again");
+  expect(aiBody()).toContain("Guess");
+  log.mockRestore();
+});
+
+test("a failure that is not from the core still gives a plain banner", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  await openAi();
+  sendButton()?.click();
+  promptRejects[0]?.(new Error("boom"));
+  await tick();
+  expect(container.querySelector(".settings-body [role=alert]")).not.toBeNull();
+  expect(aiBody()).not.toContain("boom");
+  log.mockRestore();
+});
+
+test("the usage limit shows the limit state instead of the button, and Check again brings the button back", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  await openAi();
+  sendButton()?.click();
+  promptRejects[0]?.({ code: "usage_limit", message: "At the limit." });
+  await tick();
+  expect(sendButton()).toBeUndefined();
+  expect(aiBody()).toContain("At usage limit");
+  expect(aiBody()).toContain("Links still save");
+  checkAgainButton().click();
+  await tick();
+  await tick();
+  expect(sendButton()).toBeDefined();
   log.mockRestore();
 });

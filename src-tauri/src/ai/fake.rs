@@ -90,10 +90,13 @@ mod tests {
 
     fn task() -> AiTask {
         AiTask {
+            name: "title".into(),
             prompt: "Title this".into(),
             schema: r#"{"type":"object"}"#.into(),
             tools: vec!["WebFetch".into()],
             model: "haiku".into(),
+            effort: None,
+            timeout: std::time::Duration::from_secs(5),
         }
     }
 

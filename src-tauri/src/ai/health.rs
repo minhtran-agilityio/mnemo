@@ -12,10 +12,11 @@
 // that is not parseable is a Version problem, never Ready.
 
 use std::ffi::OsString;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use super::process::{self, Limits};
 
 use serde::Serialize;
 
@@ -91,9 +92,6 @@ pub trait ClaudeCli {
     fn run(&self, program: &Path, args: &[&str]) -> Result<CliOutput, ()>;
 }
 
-/// The OS error "text file busy" (the same number on Linux and macOS).
-const ETXTBSY: i32 = 26;
-
 /// The command for one check run. The subscription is used, so an API key in the environment
 /// must not change the answer.
 fn check_command(program: &Path, args: &[&str]) -> Command {
@@ -105,23 +103,6 @@ fn check_command(program: &Path, args: &[&str]) -> Command {
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     command
-}
-
-/// Starts `program`. A program that was written a moment ago can be "text file busy" while
-/// another thread's fork still holds its write handle; that clears in milliseconds, so retry.
-fn spawn_retrying_busy(program: &Path, args: &[&str]) -> Result<std::process::Child, ()> {
-    let mut tries = 0;
-    loop {
-        let spawned = check_command(program, args).spawn();
-        match spawned {
-            Ok(child) => return Ok(child),
-            Err(e) if e.raw_os_error() == Some(ETXTBSY) && tries < 20 => {
-                tries += 1;
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(_) => return Err(()),
-        }
-    }
 }
 
 /// Runs the start check and maps it to one of the four states.
@@ -338,65 +319,24 @@ impl ClaudeCli for SystemClaude {
     }
 
     fn run(&self, program: &Path, args: &[&str]) -> Result<CliOutput, ()> {
-        let mut child = spawn_retrying_busy(program, args)?;
-        let stdout = child.stdout.take().ok_or(())?;
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
-        let shared = std::sync::Arc::clone(&buffer);
-        // The reader is not joined: if a descendant keeps the pipe open it ends when that does.
-        // It writes into a shared buffer, so what it read is kept even if it never finishes.
-        std::thread::spawn(move || {
-            let mut stdout = stdout.take(MAX_OUTPUT);
-            let mut chunk = [0u8; 4096];
-            loop {
-                match stdout.read(&mut chunk) {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        if let Ok(mut bytes) = shared.lock() {
-                            bytes.extend_from_slice(&chunk[..n]);
-                        }
-                    }
-                }
-            }
-            let _ = sender.send(());
-        });
-        let deadline = Instant::now() + CHECK_TIMEOUT;
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(());
-                }
-            }
+        let limits = Limits {
+            timeout: CHECK_TIMEOUT,
+            max_output: MAX_OUTPUT,
+            drain: DRAIN_TIMEOUT,
         };
-        // Wait a short while for the end of the stream.
-        let finished = receiver.recv_timeout(DRAIN_TIMEOUT).is_ok();
-        let bytes = buffer.lock().map_err(|_| ())?.clone();
-        let stdout = complete_output(bytes, finished)?;
+        let out = process::run_bounded(check_command(program, args), limits).map_err(|_| ())?;
+        let stdout = complete_output(out.stdout, out.finished)?;
         Ok(CliOutput {
-            success: status.success(),
+            success: out.status.success(),
             stdout,
         })
     }
 }
 
-/// The text of a check command's output, or `Err` when it may be cut short. Output that hit
-/// the size cap or is not valid UTF-8 is never trusted. When the stream did not end (a
-/// descendant still holds the pipe), the text is kept only if it ends at a line break, so a
-/// half-written line never counts as an answer.
+/// The text of a check command's output, or `Err` when it may be cut short (see
+/// `process::complete_text`).
 fn complete_output(bytes: Vec<u8>, finished: bool) -> Result<String, ()> {
-    if bytes.len() as u64 >= MAX_OUTPUT {
-        return Err(());
-    }
-    if !finished && bytes.last() != Some(&b'\n') {
-        return Err(());
-    }
-    String::from_utf8(bytes).map_err(|_| ())
+    process::complete_text(bytes, finished, MAX_OUTPUT)
 }
 
 #[cfg(test)]
@@ -594,6 +534,7 @@ mod tests {
     mod system {
         use super::super::*;
         use std::os::unix::fs::PermissionsExt;
+        use std::time::Instant;
 
         fn temp_dir(name: &str) -> PathBuf {
             let dir = std::env::temp_dir().join(format!(
