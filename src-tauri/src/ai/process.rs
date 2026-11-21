@@ -188,8 +188,11 @@ pub fn run_bounded_with(
     if let Some(stderr) = child.stderr.take() {
         std::thread::spawn(move || {
             let mut kept = Vec::new();
-            let _ = stderr.take(MAX_STDERR).read_to_end(&mut kept);
+            let mut stderr = stderr;
+            let _ = (&mut stderr).take(MAX_STDERR).read_to_end(&mut kept);
             let _ = err_sender.send(kept);
+            // Keep reading and drop the rest: a closed pipe would end the child with EPIPE.
+            let _ = std::io::copy(&mut stderr, &mut std::io::sink());
         });
     }
     let (sender, receiver) = mpsc::channel::<Vec<u8>>();
@@ -253,9 +256,10 @@ pub fn run_bounded_with(
         }
     };
 
-    // The child has exited. End anything left in its group now, while the group number is
-    // still held by those processes, so the number cannot have been reused by another group.
-    // What they already wrote stays in the pipe and is still read below. If something was
+    // The child has exited. End anything left in its group now, not after the drain wait: while
+    // a member is alive the group number cannot be reused. If no member is left, the number is
+    // free and could in theory be reused within this moment; that needs the whole pid space to
+    // wrap in microseconds. What members already wrote stays in the pipe and is still read. If something was
     // still running, the output may be cut short, so it does not count as finished.
     #[cfg(unix)]
     let cut_short = kill_group(child.id());

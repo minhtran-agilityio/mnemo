@@ -166,15 +166,28 @@ fn says_limit(text: &str) -> bool {
 
 /// A failed run whose output was not a readable result can still be a usage limit: the limit
 /// message may come as plain text on stdout or on stderr. **Unverified:** the spike did not see
-/// the at-limit output. Only a failed exit is looked at, so an answer that mentions a limit is
-/// never mistaken for one. The text is matched in memory and never kept or logged.
+/// the at-limit output. Only a failed exit is looked at, and only lines that are not JSON: JSON
+/// output holds Claude's own reply, which may mention a limit without being one (the JSON events
+/// are judged by `is_limit_error` and `rate_limit_event`). Matched in memory, never kept.
 pub(super) fn limit_from_raw(error: AiError, exit: ExitInfo, raw: &[&[u8]]) -> AiError {
     let unread = matches!(error, AiError::ExitError { .. } | AiError::SchemaMismatch);
-    if !exit.success && unread && raw.iter().any(|r| says_limit(&String::from_utf8_lossy(r))) {
+    if !exit.success && unread && raw.iter().any(|r| plain_lines_say_limit(r)) {
         AiError::UsageLimit
     } else {
         error
     }
+}
+
+/// True when a line of `raw` that is not JSON names a limit. Output that is one JSON value as a
+/// whole (the macOS event array spans many lines) is skipped too.
+fn plain_lines_say_limit(raw: &[u8]) -> bool {
+    if serde_json::from_slice::<Value>(raw).is_ok() {
+        return false;
+    }
+    String::from_utf8_lossy(raw)
+        .lines()
+        .filter(|line| serde_json::from_str::<Value>(line).is_err())
+        .any(says_limit)
 }
 
 /// An error result at the usage limit. **Unverified** shape: HTTP 429, or a known marker.
@@ -798,6 +811,37 @@ mod tests {
             run_claude(&program, &task(), &runs()),
             Err(AiError::UsageLimit)
         );
+    }
+
+    #[test]
+    fn a_failed_run_whose_reply_mentions_a_limit_is_not_the_usage_limit() {
+        // macOS shape: one JSON array over many lines, with Claude's reply quoting a limit.
+        let events = r#"[
+{"type":"assistant","message":{"content":[{"type":"text","text":"The article explains the API rate limit and the usage limit."}]}},
+{"type":"result","subtype":"error_during_execution","is_error":true}
+]"#;
+        let program = stand_in(
+            "reply-limit",
+            &format!("cat <<'EOF'\n{events}\nEOF\nexit 1"),
+        );
+        assert_eq!(
+            run_claude(&program, &task(), &runs()),
+            Err(AiError::ExitError { code: Some(1) })
+        );
+    }
+
+    #[test]
+    fn a_lot_of_stderr_does_not_break_the_run() {
+        // More than the 64 KiB kept: the rest is still read, so the child never gets EPIPE.
+        let program = stand_in(
+            "noisy",
+            &format!(
+                "head -c 300000 /dev/zero | tr '\\0' 'w' >&2 || exit 9\ncat <<'EOF'\n{}\nEOF",
+                result_object()
+            ),
+        );
+        let got = run_claude(&program, &task(), &runs()).unwrap();
+        assert_eq!(got.structured_output, r#"{"greeting":"Hi!"}"#);
     }
 
     #[test]

@@ -129,7 +129,7 @@ pub fn run_stream(
             let exit = ExitInfo::of(out.status);
             reader
                 .finish(&task.schema, exit)
-                .map_err(|e| limit_from_raw(e, exit, &[&out.stderr]))
+                .map_err(|e| limit_from_raw(e, exit, &[&out.stdout, &out.stderr]))
         }
         Err(e) => Err(process_error(e)),
     };
@@ -287,6 +287,13 @@ mod tests {
             got.unwrap().structured_output,
             r#"{"answer":"Hello there"}"#
         );
+    }
+
+    #[test]
+    fn a_failed_stream_with_a_plain_limit_line_on_stdout_is_the_usage_limit() {
+        let program = stand_in("echo 'Claude AI usage limit reached'; exit 1");
+        let got = run_stream(&program, &task(), &runs(), &mut |_| {});
+        assert_eq!(got, Err(AiError::UsageLimit));
     }
 
     #[test]
