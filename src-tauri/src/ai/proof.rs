@@ -80,7 +80,7 @@ fn a_fixture_with_a_permission_denial_names_the_refused_tool() {
 
 #[test]
 #[ignore = "starts a real claude -p run; run it with scripts/ai-runner-proof.sh"]
-fn real_test_prompt_gives_an_answer() {
+fn real_run_gives_an_answer() {
     if !proof_enabled() {
         return;
     }
@@ -94,7 +94,7 @@ fn real_test_prompt_gives_an_answer() {
 
 #[test]
 #[ignore = "starts a real claude -p run; run it with scripts/ai-runner-proof.sh"]
-fn real_tool_not_in_the_allowed_list_is_refused() {
+fn real_run_refuses_a_tool_not_in_the_allowed_list() {
     if !proof_enabled() {
         return;
     }

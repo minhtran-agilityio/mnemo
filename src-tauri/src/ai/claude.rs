@@ -180,7 +180,10 @@ pub(super) fn finish(
     exit: ExitInfo,
 ) -> Result<AiOutput, AiError> {
     let failed = result.is_error == Some(true);
-    let no_answer = result.structured_output.as_ref().is_none_or(Value::is_null);
+    let no_answer = result
+        .structured_output
+        .as_ref()
+        .map_or(true, Value::is_null);
     if is_limit_error(result) || (limit_seen && (failed || no_answer)) {
         return Err(AiError::UsageLimit);
     }
