@@ -44,6 +44,7 @@ impl ClaudeConfig {
         }
     }
 
+    #[cfg(test)]
     pub fn dir(&self) -> &Path {
         &self.dir
     }
@@ -75,7 +76,7 @@ pub fn ensure_config(config_dir: &Path) -> io::Result<ClaudeConfig> {
     std::fs::create_dir_all(config_dir)?;
     if !config_dir.is_dir() {
         return Err(io::Error::new(
-            io::ErrorKind::NotADirectory,
+            io::ErrorKind::InvalidInput,
             "the config path is not a folder",
         ));
     }
