@@ -11,8 +11,12 @@ import {
   createListbox,
   createListRow,
   createSectionList,
+  createSelect,
+  createSettingsRow,
+  createSettingsRows,
   createTable,
   createTree,
+  setSettingsRowError,
   type TreeActionsOptions,
   type TreeNode,
 } from "../../../ds/index";
@@ -405,6 +409,145 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           { grow: true },
         ),
       ],
+      "settings row": () => {
+        const models = ["Haiku 5.5", "Sonnet 5.5"];
+        const efforts = ["Low effort", "Medium effort"];
+        // Each example has its own scope, so no two controls on the tab share a name.
+        let scope = "default";
+        const controls = (name: string, model: string, effort: string) =>
+          [
+            {
+              label: `${scope}: ${name}, model`,
+              options: models,
+              value: model,
+            },
+            {
+              label: `${scope}: ${name}, effort`,
+              options: efforts,
+              value: effort,
+            },
+          ].map((c) => {
+            const { wrap, select } = createSelect(doc, {
+              options: c.options,
+              value: c.value,
+            });
+            select.setAttribute("aria-label", c.label);
+            return wrap;
+          });
+        const feature = (
+          label: string,
+          sub: string,
+          model: string,
+          effort: string,
+          extra: { error?: string; disabled?: boolean } = {},
+        ) =>
+          createSettingsRow(doc, {
+            label,
+            sub,
+            controls: controls(label, model, effort),
+            ...extra,
+          });
+        const card = (label: string, rows: HTMLElement[]) => {
+          const wrap = el(doc, "div", "lst-settings");
+          wrap.append(createSettingsRows(doc, { label, rows }));
+          return wrap;
+        };
+        const H = "Haiku 5.5";
+        const S = "Sonnet 5.5";
+        const LOW = "Low effort";
+        const MED = "Medium effort";
+        const withScope = <T>(name: string, make: () => T): T => {
+          scope = name;
+          return make();
+        };
+        const eight = withScope("default", () => [
+          feature("Save a link", "Summary, tags and folder", H, LOW),
+          feature("Ask Mnemo", "Answers with sources", S, MED),
+          feature(
+            "Weekly digest and roast",
+            '"Why now" lines and roast words',
+            S,
+            MED,
+          ),
+          feature("Note summary", "One paragraph per note", H, LOW),
+          feature("Tag suggestions", "Tags from the text", H, LOW),
+          feature("Folder suggestions", "Where a link belongs", H, LOW),
+          feature("Idea cards", "Next step for each idea", S, MED),
+          feature("Task extraction", "Tasks found in notes", S, MED),
+        ]);
+        // Exactly 120 characters.
+        const longLabel =
+          "Một nhãn rất dài về mô hình cho tính năng này, được viết ra để thử cách xuống dòng của một hàng cài đặt khi chữ quá dài.";
+        const grown = (text: string, node: HTMLElement) =>
+          state(doc, text, node, { grow: true });
+        const live = withScope("live", () => {
+          const row = feature("Ask Mnemo", "Answers with sources", S, MED);
+          const select = row.querySelector("select");
+          select?.addEventListener("change", () =>
+            setSettingsRowError(
+              row,
+              select.value === S
+                ? null
+                : "Could not save. The next run keeps the old choice.",
+            ),
+          );
+          return card("Live example", [row]);
+        });
+        return [
+          grown(
+            "default: eight rows in a card, two selects each",
+            card("Model and effort per feature", eight),
+          ),
+          grown(
+            "overflow: a 120-character label and a long sub-line wrap",
+            withScope("overflow", () =>
+              card("Long label example", [
+                feature(
+                  longLabel,
+                  "A long sub-line that wraps onto a second line instead of being cut with an ellipsis, and keeps its words whole.",
+                  S,
+                  MED,
+                ),
+                feature("x".repeat(120), "Unbroken text wraps too", H, LOW),
+              ]),
+            ),
+          ),
+          grown(
+            "error: one line under the row",
+            withScope("error", () =>
+              card("Error example", [
+                feature("Ask Mnemo", "Answers with sources", S, MED, {
+                  error: "Could not save. The next run keeps the old choice.",
+                }),
+              ]),
+            ),
+          ),
+          grown(
+            "live error: pick Haiku 5.5 to show the line on this row, pick Sonnet 5.5 to clear it",
+            live,
+          ),
+          grown(
+            "disabled: a save is pending",
+            withScope("disabled", () =>
+              card("Disabled example", [
+                feature("Save a link", "Summary, tags and folder", H, LOW, {
+                  disabled: true,
+                }),
+              ]),
+            ),
+          ),
+          grown(
+            "narrow: under the text width the controls drop under the label",
+            withScope("narrow", () => {
+              const wrap = card("Narrow example", [
+                feature("Save a link", "Summary, tags and folder", H, LOW),
+              ]);
+              wrap.classList.add("lst-settings-narrow");
+              return wrap;
+            }),
+          ),
+        ];
+      },
       "section list": () => {
         const sections = [
           { id: "appearance", label: "Appearance", value: "System" },

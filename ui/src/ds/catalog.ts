@@ -280,6 +280,7 @@ export const TOKEN_GROUPS: readonly TokenGroup[] = [
       "--size-basis-column",
       "--size-basis-decisions",
       "--size-basis-tabs",
+      "--size-basis-setting",
       "--size-decisions-max",
       "--size-cov-bar",
       "--measure-intro",
