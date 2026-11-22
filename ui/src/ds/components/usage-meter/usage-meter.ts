@@ -57,28 +57,37 @@ function clamp(percent: number): number {
   return Math.round(Math.min(100, Math.max(0, percent)));
 }
 
-function resolveLines(lines: UsageLines): { warnAt: number; pauseAt: number } {
-  return {
-    warnAt: lines.warnAt ?? USAGE_WARN_AT,
-    pauseAt: lines.pauseAt ?? USAGE_PAUSE_AT,
-  };
+function line(value: number | undefined, fallback: number): number {
+  if (value === undefined || Number.isNaN(value)) return fallback;
+  return Math.min(100, Math.max(0, value));
 }
+
+/** Both lines clamped to 0 to 100 (NaN falls back to the default); pause is never below warn. */
+function resolveLines(lines: UsageLines): { warnAt: number; pauseAt: number } {
+  const warnAt = line(lines.warnAt, USAGE_WARN_AT);
+  const pauseAt = Math.max(warnAt, line(lines.pauseAt, USAGE_PAUSE_AT));
+  return { warnAt, pauseAt };
+}
+
+let noteCount = 0;
 
 function note(
   tone: UsageTone,
   lines: { warnAt: number; pauseAt: number },
   resetsAt?: string,
+  unverified = false,
 ): HTMLElement {
   const box = document.createElement("div");
   box.className = "meter-note";
+  noteCount += 1;
+  box.id = `meter-note-${noteCount}`;
   const line = document.createElement("span");
   if (tone === "warn") {
     box.append(createIcon(TriangleAlert, "sm"));
-    line.textContent = `Over ${lines.warnAt}%. Background jobs pause at ${lines.pauseAt}%.`;
+    line.textContent = `Over ${lines.warnAt}%. Background jobs pause at ${lines.pauseAt}%.${unverified ? " The figure is unverified." : ""}`;
   } else if (tone === "pause") {
     box.append(createIcon(Pause, "sm"));
-    line.textContent =
-      "Background jobs paused. Links still save, with no summary.";
+    line.textContent = `Background jobs paused. Links still save, with no summary.${unverified ? " The figure is unverified." : ""}`;
   } else {
     line.textContent = resetsAt ? `Resets at ${resetsAt}.` : "";
   }
@@ -113,7 +122,7 @@ function bar(
     ? `${percent}% (Unverified)`
     : `${percent}% used`;
   top.append(name, value);
-  if (resetsAt && unverified) {
+  if (resetsAt) {
     const reset = document.createElement("span");
     reset.className = "meter-reset";
     reset.textContent = `resets ${resetsAt}`;
@@ -131,7 +140,9 @@ function bar(
     `${label} ${percent}%${unverified ? " (Unverified)" : ""}`,
   );
   const fill = document.createElement("span");
-  fill.className = "meter-fill";
+  const own = usageTone(percent, lines.warnAt, lines.pauseAt);
+  fill.className =
+    own === "normal" ? "meter-fill" : `meter-fill meter-fill-${own}`;
   fill.style.width = `${percent}%`;
   track.append(fill);
   for (const at of [lines.warnAt, lines.pauseAt]) {
@@ -154,12 +165,17 @@ export function buildUsageMeter(options: UsageMeterOptions): HTMLElement {
     options.percent,
     lines,
     options.unverified ?? false,
-    options.resetsAt,
+    // The reset time shows once: in the note when the tone is normal, else next to the value.
+    usageTone(clamp(options.percent), lines.warnAt, lines.pauseAt) === "normal"
+      ? undefined
+      : options.resetsAt,
   );
   const tone = usageTone(percent, lines.warnAt, lines.pauseAt);
   const meter = document.createElement("div");
   meter.className = tone === "normal" ? "meter" : `meter meter-${tone}`;
-  meter.append(top, track, note(tone, lines, options.resetsAt));
+  const noteBox = note(tone, lines, options.resetsAt, options.unverified);
+  track.setAttribute("aria-describedby", noteBox.id);
+  meter.append(top, track, noteBox);
   if (options.readAgo) meter.append(ageLine(options.readAgo));
   return meter;
 }
@@ -186,21 +202,34 @@ export function buildUsageWindows(options: UsageWindowsOptions): HTMLElement {
     group.append(b.top, b.track);
     meter.append(group);
   }
-  const resets = options.windows.find((w) => w.resetsAt && !w.unverified);
-  meter.append(note(tone, lines, resets?.resetsAt));
+  // Each window's reset time is in its own row; the note does not repeat it.
+  const noteBox = note(
+    tone,
+    lines,
+    undefined,
+    options.windows.some((w) => w.unverified),
+  );
+  for (const b of bars) b.track.setAttribute("aria-describedby", noteBox.id);
+  meter.append(noteBox);
   if (options.readAgo) meter.append(ageLine(options.readAgo));
   return meter;
 }
 
-export interface RunCountOptions {
-  readonly label: string;
-  /** One number. Used alone it keeps the old fixed note. */
-  readonly count: number;
-  /** Runs today. With this or `week`, the count is shown as "N today, M this week". */
-  readonly today?: number;
-  /** Runs this week. */
-  readonly week?: number;
-}
+/** Either one number (the old fixed note) or runs today and this week together. */
+export type RunCountOptions =
+  | {
+      readonly label: string;
+      readonly count: number;
+      readonly today?: never;
+      readonly week?: never;
+    }
+  | {
+      readonly label: string;
+      /** Runs today and this week, shown as "N today, M this week". */
+      readonly today: number;
+      readonly week: number;
+      readonly count?: never;
+    };
 
 /**
  * The meter when only Mnemo's own runs are known: a count and a plain note, no bar. The
@@ -215,11 +244,11 @@ export function buildRunCount(options: RunCountOptions): HTMLElement {
   label.textContent = options.label;
   const value = document.createElement("span");
   value.className = "meter-value";
-  const split = options.today !== undefined || options.week !== undefined;
-  const parts: string[] = [];
-  if (options.today !== undefined) parts.push(`${options.today} today`);
-  if (options.week !== undefined) parts.push(`${options.week} this week`);
-  value.textContent = split ? parts.join(", ") : String(options.count);
+  const split = options.count === undefined;
+  value.textContent =
+    options.count === undefined
+      ? `${options.today} today, ${options.week} this week`
+      : String(options.count);
   top.append(label, value);
   const box = document.createElement("div");
   box.className = "meter-note";

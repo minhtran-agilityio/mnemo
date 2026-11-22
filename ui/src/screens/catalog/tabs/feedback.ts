@@ -203,7 +203,7 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
         state(
           doc,
           "run count today and this week",
-          buildRunCount({ label: "Mnemo runs", count: 4, today: 4, week: 19 }),
+          buildRunCount({ label: "Mnemo runs", today: 4, week: 19 }),
           { grow: true },
         ),
         state(

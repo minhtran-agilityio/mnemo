@@ -167,7 +167,6 @@ test("two windows: the higher share drives the tone", () => {
 test("the run count shows today and this week and says the share is unknown", () => {
   const meter = buildRunCount({
     label: "Mnemo runs",
-    count: 4,
     today: 4,
     week: 19,
   });
@@ -189,4 +188,112 @@ test("a long label wraps and keeps the value", () => {
     meter.querySelector(".meter-label")?.textContent?.length,
   ).toBeGreaterThan(100);
   expect(meter.querySelector(".meter-value")?.textContent).toBe("5% used");
+});
+
+test("a reset time shows once, for each window", () => {
+  const single = buildUsageMeter({
+    label: "x",
+    percent: 72,
+    unverified: true,
+    resetsAt: "14:30",
+  });
+  expect(single.textContent?.match(/14:30/g)).toHaveLength(1);
+  const calm = buildUsageMeter({ label: "x", percent: 10, resetsAt: "14:30" });
+  expect(calm.textContent?.match(/14:30/g)).toHaveLength(1);
+  const two = buildUsageWindows({
+    windows: [
+      { label: "5h", percent: 10, resetsAt: "14:30", unverified: true },
+      { label: "7d", percent: 20, resetsAt: "Mon 09:00" },
+    ],
+  });
+  expect(two.textContent?.match(/14:30/g)).toHaveLength(1);
+  expect(two.textContent?.match(/Mon 09:00/g)).toHaveLength(1);
+});
+
+test("the lines are clamped, NaN falls back, pause is never below warn", () => {
+  const m = buildUsageMeter({
+    label: "x",
+    percent: 50,
+    warnAt: -10,
+    pauseAt: 500,
+  });
+  expect(
+    [...m.querySelectorAll<HTMLElement>(".meter-tick")].map(
+      (t) => t.style.left,
+    ),
+  ).toEqual(["0%", "100%"]);
+  const nan = buildUsageMeter({
+    label: "x",
+    percent: 70,
+    warnAt: Number.NaN,
+    pauseAt: Number.NaN,
+  });
+  expect(
+    [...nan.querySelectorAll<HTMLElement>(".meter-tick")].map(
+      (t) => t.style.left,
+    ),
+  ).toEqual(["60%", "95%"]);
+  const swapped = buildUsageMeter({
+    label: "x",
+    percent: 85,
+    warnAt: 80,
+    pauseAt: 50,
+  });
+  expect(swapped.classList.contains("meter-pause")).toBe(true);
+  const ticks = [...swapped.querySelectorAll<HTMLElement>(".meter-tick")];
+  expect(ticks.map((t) => t.style.left)).toEqual(["80%", "80%"]);
+});
+
+test("the pause is the owner's line", () => {
+  const warn = buildUsageMeter({
+    label: "x",
+    percent: 80,
+    warnAt: 70,
+    pauseAt: 90,
+  });
+  expect(warn.querySelector(".meter-note")?.textContent).toContain(
+    "pause at 90%",
+  );
+});
+
+test("in two windows each bar is coloured by its own share", () => {
+  const m = buildUsageWindows({
+    windows: [
+      { label: "a", percent: 99 },
+      { label: "b", percent: 41 },
+    ],
+  });
+  const fills = [...m.querySelectorAll(".meter-fill")];
+  expect(fills[0]?.classList.contains("meter-fill-pause")).toBe(true);
+  expect(fills[1]?.className).toBe("meter-fill");
+});
+
+test("each window's meter is described by the shared note", () => {
+  const m = buildUsageWindows({
+    windows: [
+      { label: "a", percent: 80 },
+      { label: "b", percent: 41 },
+    ],
+  });
+  const id = m.querySelector(".meter-note")?.id;
+  expect(id).toBeTruthy();
+  for (const track of m.querySelectorAll('[role="meter"]')) {
+    expect(track.getAttribute("aria-describedby")).toBe(id);
+  }
+});
+
+test("an unverified figure that drives the tone says so in the note", () => {
+  const m = buildUsageWindows({
+    windows: [
+      { label: "a", percent: 80, unverified: true },
+      { label: "b", percent: 41 },
+    ],
+  });
+  expect(m.querySelector(".meter-note")?.textContent).toContain(
+    "The figure is unverified.",
+  );
+  const ok = buildUsageMeter({ label: "x", percent: 80 });
+  expect(ok.querySelector(".meter-note")?.textContent).not.toContain(
+    "unverified",
+  );
 });

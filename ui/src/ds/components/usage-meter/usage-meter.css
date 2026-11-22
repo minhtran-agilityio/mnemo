@@ -92,10 +92,10 @@
   gap: var(--space-1);
 }
 
-.meter-windows.meter-warn .meter-fill {
+.meter-fill-warn {
   background: var(--warn-ink);
 }
 
-.meter-windows.meter-pause .meter-fill {
+.meter-fill-pause {
   background: var(--bad);
 }
