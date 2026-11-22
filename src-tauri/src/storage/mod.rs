@@ -1,4 +1,5 @@
 // Owns persistence: reading and writing Mnemo's local data. The only module that touches SQLite.
+pub mod ai_control;
 #[cfg(test)]
 mod concurrency;
 mod error;

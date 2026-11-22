@@ -47,7 +47,37 @@ const FAIL_INTERRUPTED_SQL: &str =
     "UPDATE run SET state = 'failed', outcome = 'failed', error = ?2, ended_at = ?1, \
      updated_at = ?1 WHERE state IN ('running', 'waiting')";
 
+// Every row that started at or after the boundary, deleted or not: a deleted run still used
+// the limit. A run that waited and was cancelled never started, so it is not counted. No index
+// covers started_at; this runs when Settings > AI opens, on a table of a few rows a day.
+const COUNT_STARTED_SQL: &str = "SELECT \
+     COALESCE(SUM(CASE WHEN started_at >= ?1 THEN 1 ELSE 0 END), 0), \
+     COALESCE(SUM(CASE WHEN started_at >= ?2 THEN 1 ELSE 0 END), 0) \
+     FROM run WHERE started_at IS NOT NULL AND started_at >= min(?1, ?2)";
+
+/// How many runs started today and this week.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunCounts {
+    pub today: i64,
+    pub week: i64,
+}
+
 impl Storage {
+    /// Counts the runs that started at or after `today_start` and at or after `week_start` (UTC
+    /// ISO 8601, the same form as `started_at`). The caller sets the boundaries.
+    pub fn count_started_runs_since(
+        &self,
+        today_start: &str,
+        week_start: &str,
+    ) -> Result<RunCounts, StorageError> {
+        let (today, week) =
+            self.conn
+                .query_row(COUNT_STARTED_SQL, params![today_start, week_start], |r| {
+                    Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+                })?;
+        Ok(RunCounts { today, week })
+    }
+
     /// Writes a new run row in state waiting, with no start time. `now` is the queue time.
     pub fn enqueue_run(&self, task_type: &str, now: &str) -> Result<Run, StorageError> {
         self.add_at::<Run>(
@@ -127,6 +157,43 @@ mod tests {
     const T0: &str = "2026-01-01T00:00:00Z";
     const T1: &str = "2026-01-01T00:00:01Z";
     const T2: &str = "2026-01-01T00:00:03Z";
+
+    #[test]
+    fn count_started_runs_today_and_this_week_from_the_run_table() {
+        let (mut s, _dir) = open_temp();
+        let week = "2026-11-16T00:00:00Z";
+        let today = "2026-11-23T00:00:00Z";
+        let started = |s: &Storage, at: &str| {
+            let id = s.enqueue_run("summary", at).unwrap().base.id;
+            s.start_run(&id, at).unwrap();
+            s.finish_run(&id, &RunEnd::Done, Some(1), at).unwrap();
+            id
+        };
+        started(&s, "2026-11-15T23:59:59Z"); // last week
+        started(&s, "2026-11-16T00:00:00Z"); // this week, at the boundary
+        started(&s, "2026-11-20T10:00:00Z"); // this week
+        started(&s, "2026-11-23T08:00:00Z"); // today
+        let deleted = started(&s, "2026-11-23T09:00:00Z"); // today, then deleted
+        s.delete_at::<Run>("2026-11-23T09:30:00Z", &deleted)
+            .unwrap();
+        // Waiting, and cancelled while waiting: they never started.
+        s.enqueue_run("summary", "2026-11-23T10:00:00Z").unwrap();
+        let cancelled = s
+            .enqueue_run("summary", "2026-11-23T10:00:00Z")
+            .unwrap()
+            .base
+            .id;
+        s.finish_run(&cancelled, &RunEnd::Cancelled, None, "2026-11-23T10:01:00Z")
+            .unwrap();
+        let got = s.count_started_runs_since(today, week).unwrap();
+        assert_eq!(got, RunCounts { today: 2, week: 4 });
+        // The week holds today; with no runs both are 0.
+        let (empty, _d) = open_temp();
+        assert_eq!(
+            empty.count_started_runs_since(today, week).unwrap(),
+            RunCounts { today: 0, week: 0 }
+        );
+    }
 
     #[test]
     fn runs_enqueue_writes_one_waiting_row_without_start() {
