@@ -70,26 +70,42 @@ export function buildErrorState(options: StateTextOptions): HTMLDivElement {
 }
 
 export interface AiOffStateOptions {
-  /** Why AI is not running: the owner turned it off, or the usage limit was reached. */
-  readonly reason?: "off" | "limit";
+  /** Why AI is not running: the owner turned it off, the usage limit was reached, or background work is paused. */
+  readonly reason?: "off" | "limit" | "paused";
+  /** For "limit": when the limit resets, as text (for example "14:30"). Leave it out when unknown. */
+  readonly resetAt?: string;
+  /** One action, for example "Turn AI on" or "Resume". */
   readonly action?: StateAction;
 }
+
+const STILL_WORKS = "Links still save and search still works.";
 
 /** AI is not available. Links still save and search still works. */
 export function buildAiOffState(
   options: AiOffStateOptions = {},
 ): HTMLDivElement {
-  if (options.reason === "limit")
+  const { action } = options;
+  if (options.reason === "limit") {
+    const reset = options.resetAt?.trim();
+    const until = reset ? `until ${reset}` : "until the limit resets";
     return buildStateBox({
       icon: Pause,
       title: "At usage limit",
-      body: "Links still save and search still works. Summaries and suggestions wait until the limit resets.",
-      action: options.action,
+      body: `Usage limit reached. Background work is paused ${until}, or until you resume it. ${STILL_WORKS}`,
+      action,
+    });
+  }
+  if (options.reason === "paused")
+    return buildStateBox({
+      icon: Pause,
+      title: "Background work is paused",
+      body: `Summaries and suggestions wait until you resume it. ${STILL_WORKS}`,
+      action,
     });
   return buildStateBox({
     icon: Power,
     title: "AI is off",
-    body: "Links still save and search still works. Summaries and suggestions wait until AI is on.",
-    action: options.action,
+    body: `${STILL_WORKS} Summaries and suggestions wait until AI is on.`,
+    action,
   });
 }

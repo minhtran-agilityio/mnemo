@@ -64,3 +64,39 @@ test("the AI-off state says links still save, for both reasons", () => {
   expect(limit.querySelector("b")?.textContent).toBe("At usage limit");
   expect(limit.querySelector("p")?.textContent).toContain("Links still save");
 });
+
+test("the limit reason shows the reset time, or none when unknown", () => {
+  const known = buildAiOffState({ reason: "limit", resetAt: "14:30" });
+  expect(known.querySelector("p")?.textContent).toContain(
+    "Usage limit reached. Background work is paused until 14:30, or until you resume it.",
+  );
+  const unknown = buildAiOffState({ reason: "limit" });
+  expect(unknown.querySelector("p")?.textContent).not.toMatch(/\d:\d/);
+  expect(unknown.querySelector("p")?.textContent).toContain("Links still save");
+});
+
+test("the paused reason has its own title and keeps the promise", () => {
+  const box = buildAiOffState({ reason: "paused" });
+  expect(box.querySelector("b")?.textContent).toBe("Background work is paused");
+  expect(box.querySelector("p")?.textContent).toContain("search still works");
+  expect(box.querySelector("button")).toBeNull();
+});
+
+test("the action is optional, is a real button and works by keyboard click", () => {
+  const onClick = vi.fn();
+  const box = buildAiOffState({
+    reason: "paused",
+    action: { label: "Resume", onClick },
+  });
+  const button = box.querySelector("button");
+  expect(button?.type).toBe("button");
+  expect(button?.textContent).toBe("Resume");
+  button?.click();
+  expect(onClick).toHaveBeenCalledOnce();
+});
+
+test("a long reset text goes in as text", () => {
+  const long = "x".repeat(300);
+  const box = buildAiOffState({ reason: "limit", resetAt: long });
+  expect(box.querySelector("p")?.textContent).toContain(long);
+});

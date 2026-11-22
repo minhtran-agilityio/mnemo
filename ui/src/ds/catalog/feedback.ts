@@ -130,11 +130,11 @@ export const FEEDBACK = [
   {
     name: "AI-off state",
     tab: "Feedback",
-    variants: ["off", "at limit"],
-    states: ["default", "hover", "focus"],
+    variants: ["off", "at limit", "at limit, reset unknown", "paused"],
+    states: ["default", "hover", "focus", "long content"],
     source: "ds",
     className: "state-box",
-    notes: "Links still save and search still works.",
+    notes: `Links still save and search still works, in every reason. At limit shows the reset time when known; paused is for work stopped by the owner or at the pause line (${ref(146)}). The action is optional.`,
   },
   {
     name: "text",

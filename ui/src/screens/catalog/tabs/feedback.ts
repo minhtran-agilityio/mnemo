@@ -304,7 +304,37 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
             action: { label: "Open AI settings", onClick: noop },
           }),
         ),
-        state(doc, "at limit", buildAiOffState({ reason: "limit" })),
+        state(
+          doc,
+          "at limit",
+          buildAiOffState({
+            reason: "limit",
+            resetAt: "14:30",
+            action: { label: "Resume", onClick: noop },
+          }),
+        ),
+        state(
+          doc,
+          "at limit, reset unknown",
+          buildAiOffState({ reason: "limit" }),
+        ),
+        state(
+          doc,
+          "paused",
+          buildAiOffState({
+            reason: "paused",
+            action: { label: "Resume", onClick: noop },
+          }),
+        ),
+        state(
+          doc,
+          "long content",
+          buildAiOffState({
+            reason: "limit",
+            resetAt:
+              "Thursday 27 November 2026 at 14:30 Pacific Standard Time (UTC-8)",
+          }),
+        ),
       ],
       text: () => {
         const word = el(doc, "strong", undefined, "zebra");
