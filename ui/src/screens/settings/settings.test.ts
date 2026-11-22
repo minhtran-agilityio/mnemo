@@ -211,7 +211,9 @@ function dialogButton(label: string): HTMLButtonElement {
 }
 
 function typeWord(word: string): void {
-  const input = document.querySelector("dialog input") as HTMLInputElement;
+  const input = document
+    .querySelector("dialog")
+    ?.querySelector("input") as HTMLInputElement;
   input.value = word;
   input.dispatchEvent(new Event("input"));
 }
