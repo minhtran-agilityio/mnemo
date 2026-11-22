@@ -76,7 +76,7 @@ impl Storage {
                     Some(d) => format!("{open_err} Earlier, a delete failed: {d}"),
                     None => open_err.to_string(),
                 };
-                self.unavailable = Some(reason.clone());
+                self.unavailable = true;
                 Err(StorageError::Open(reason))
             }
         }

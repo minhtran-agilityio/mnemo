@@ -37,7 +37,7 @@ pub struct Storage {
     db_path: PathBuf,
     /// Set when a Reset deleted the data but could not open a new database. The
     /// connection is then an empty stand-in; callers must treat the storage as down.
-    unavailable: Option<String>,
+    unavailable: bool,
 }
 
 #[allow(dead_code)] // Status readers; callers arrive with later tickets.
@@ -80,13 +80,13 @@ impl Storage {
             conn,
             files_dir,
             db_path: path.to_path_buf(),
-            unavailable: None,
+            unavailable: false,
         })
     }
 
     /// True after a failed Reset left no usable database. The app must be restarted.
     pub fn is_unavailable(&self) -> bool {
-        self.unavailable.is_some()
+        self.unavailable
     }
 
     /// The journal mode in use. Expected to be "wal".

@@ -1,5 +1,6 @@
 // Commands the UI can call through Tauri's invoke bridge, and the state they share.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
@@ -41,11 +42,51 @@ pub struct StartupError {
 
 /// The storage the commands use: the open database, or why it could not be opened.
 /// It is always registered, so a command gets an error back instead of a panic.
-pub struct AppStorage(Result<Mutex<Storage>, StartupError>);
+pub struct AppStorage {
+    db: Result<Mutex<Storage>, StartupError>,
+    /// True while an export copies its files without the storage lock. Reset refuses
+    /// to run then. It is set and read only while the lock is held, so they cannot overlap.
+    exporting: AtomicBool,
+}
+
+/// Clears the export-in-progress flag when the export ends, also on a panic.
+struct ExportingFlag<'a>(&'a AtomicBool);
+
+impl Drop for ExportingFlag<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
 
 impl AppStorage {
     pub fn new(opened: Result<Storage, StartupError>) -> Self {
-        AppStorage(opened.map(Mutex::new))
+        AppStorage {
+            db: opened.map(Mutex::new),
+            exporting: AtomicBool::new(false),
+        }
+    }
+
+    /// Exports into a new folder inside `folder`. The records are written under the
+    /// storage lock; the file copy runs after it is released, so reads and saves are not
+    /// held up. Reset is refused until the copy ends.
+    fn export(&self, folder: &str, now: &str) -> Result<ExportSummary, AppError> {
+        let (job, _running) = {
+            let guard = self.get()?;
+            if self.exporting.swap(true, Ordering::SeqCst) {
+                return Err(AppError {
+                    code: "export_running",
+                    message: "An export is already running. Wait for it to finish.".to_string(),
+                });
+            }
+            let running = ExportingFlag(&self.exporting);
+            (
+                guard
+                    .export_begin(std::path::Path::new(folder), now)
+                    .map_err(export_failed)?,
+                running,
+            )
+        };
+        job.finish().map_err(export_failed)
     }
 
     /// A storage that a failed Reset left without a database answers every call with
@@ -64,7 +105,7 @@ impl AppStorage {
     /// A lock poisoned by an earlier panic is recovered after rolling back any
     /// transaction the panicking code left open.
     pub fn get(&self) -> Result<MutexGuard<'_, Storage>, AppError> {
-        match &self.0 {
+        match &self.db {
             Ok(m) => match m.lock() {
                 Ok(guard) => Self::usable(guard),
                 Err(poisoned) => {
@@ -298,15 +339,7 @@ fn export_failed(e: ExportError) -> AppError {
 }
 
 fn export_item(storage: &AppStorage, folder: &str, now: &str) -> Result<ExportSummary, AppError> {
-    // The storage lock is held only while the records are written. The file copy runs
-    // after the guard is dropped, so the rest of the app is not blocked by it.
-    let job = {
-        let guard = storage.get()?;
-        guard
-            .export_begin(std::path::Path::new(folder), now)
-            .map_err(export_failed)?
-    };
-    job.finish().map_err(export_failed)
+    storage.export(folder, now)
 }
 
 /// Exports every live record into a new dated export folder inside `folder` (storage names it).
@@ -319,7 +352,14 @@ pub async fn export_data(app: tauri::AppHandle, folder: String) -> Result<Export
 }
 
 fn reset_item(storage: &AppStorage, confirm: &str) -> Result<(), AppError> {
-    storage.get()?.reset(confirm).map_err(|e| match e {
+    let mut guard = storage.get()?;
+    if storage.exporting.load(Ordering::SeqCst) {
+        return Err(AppError {
+            code: "export_running",
+            message: "An export is running. Wait for it to finish, then reset.".to_string(),
+        });
+    }
+    guard.reset(confirm).map_err(|e| match e {
         StorageError::Invalid(message) => AppError {
             code: "reset_not_confirmed",
             message,
@@ -328,7 +368,7 @@ fn reset_item(storage: &AppStorage, confirm: &str) -> Result<(), AppError> {
             log::error!("reset failed: {other}");
             AppError {
                 code: "reset_failed",
-                message: "Mnemo could not delete everything. Some data may be left, and Mnemo may need to be restarted. Quit Mnemo and start it again.".to_string(),
+                message: "Mnemo could not delete everything. Some data may be left. Mnemo is reloading to show what is left; if errors continue, quit Mnemo and start it again.".to_string(),
             }
         }
     })
@@ -1121,6 +1161,33 @@ mod tests {
         // The guard is gone: another caller can lock while the copy is still to do.
         assert!(state.get().is_ok());
         assert!(job.finish().is_ok());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn reset_is_refused_while_an_export_is_copying_and_allowed_after() {
+        let (state, dir) = app_storage();
+        // Same steps as `export`, paused after the lock is released and before the copy.
+        let job = {
+            let g = state.get().unwrap();
+            state.exporting.store(true, Ordering::SeqCst);
+            g.export_begin(&dir, "2026-11-21T12:00:00Z").unwrap()
+        };
+        let err = reset_item(&state, "RESET").unwrap_err();
+        assert_eq!(err.code, "export_running");
+        assert!(err.message.contains("Wait for it to finish"));
+        // Reads and saves are not held up by the copy.
+        assert!(state.get().is_ok());
+        let second = state.export(&dir.to_string_lossy(), "2026-11-21T12:00:01Z");
+        assert_eq!(second.unwrap_err().code, "export_running");
+        assert!(job.finish().is_ok());
+        state.exporting.store(false, Ordering::SeqCst);
+        reset_item(&state, "RESET").unwrap();
+        // A whole export clears the flag by itself.
+        state
+            .export(&dir.to_string_lossy(), "2026-11-21T12:00:02Z")
+            .unwrap();
+        reset_item(&state, "RESET").unwrap();
         let _ = std::fs::remove_dir_all(dir);
     }
 
