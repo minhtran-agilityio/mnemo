@@ -110,6 +110,7 @@ The UI Catalog tabs need fixed lengths that no token covered (prototype v3 uses 
 | `--size-dot` | 8px |
 | `--size-dot-sm` | 6px |
 | `--size-meter-max` | 320px |
+| `--size-copy-line-min` | 12rem |
 | `--size-meter-height` | 10px |
 | `--size-meter-tick-overhang` | 3px |
 | `--size-progress-max` | 280px |

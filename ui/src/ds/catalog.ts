@@ -308,6 +308,7 @@ export const TOKEN_GROUPS: readonly TokenGroup[] = [
       "--size-dot",
       "--size-dot-sm",
       "--size-meter-max",
+      "--size-copy-line-min",
       "--size-meter-height",
       "--size-meter-tick-overhang",
       "--size-progress-max",

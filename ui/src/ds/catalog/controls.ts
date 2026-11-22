@@ -132,6 +132,23 @@ export const CONTROLS = [
     notes: "Enter adds. Backspace on an empty box removes the last.",
   },
   {
+    name: "copy line",
+    className: "copy-line",
+    tab: "Controls",
+    variants: ["command", "path with spaces and Vietnamese marks"],
+    states: [
+      "default",
+      "hover",
+      "focus",
+      "pressed",
+      "copied",
+      "copy failed",
+      "long content",
+    ],
+    source: "ds",
+    notes: `A read-only path or command with a Copy button (${ref(153)}). Copied says so in words and returns to idle after 2 s. When the clipboard is missing or refuses, a visible line says to select and copy the text, and the text is selected. Text goes in as text. Empty, loading, partial, AI off and disabled do not apply.`,
+  },
+  {
     name: "shortcut hint",
     className: "shortcut",
     tab: "Controls",
