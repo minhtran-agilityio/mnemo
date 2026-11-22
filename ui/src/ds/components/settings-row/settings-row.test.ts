@@ -237,3 +237,40 @@ test("a blank note is marked empty so it leaves no gap", () => {
     ],
   ).toBeTruthy();
 });
+
+test("enable without an earlier disable leaves a pre-disabled button disabled", () => {
+  const reset = document.createElement("button");
+  reset.disabled = true;
+  const row = createSettingsRow(document, { label: "A", controls: [reset] });
+  setSettingsRowDisabled(row, false);
+  expect(reset.disabled).toBe(true);
+});
+
+test("a control put in the row between disable and enable is not touched", () => {
+  const save = document.createElement("button");
+  const row = createSettingsRow(document, { label: "A", controls: [save] });
+  setSettingsRowDisabled(row, true);
+  const late = document.createElement("button");
+  late.disabled = true;
+  row.querySelector(".setting-row-controls")?.append(late);
+  setSettingsRowDisabled(row, false);
+  expect(save.disabled).toBe(false);
+  expect(late.disabled).toBe(true);
+});
+
+test("setSettingsRowDisabled refuses an element that is not a settings row", () => {
+  expect(() =>
+    setSettingsRowDisabled(document.createElement("div"), true),
+  ).toThrow();
+});
+
+test("aria-invalid goes on roles that accept it, not on presentational children", () => {
+  const sw = document.createElement("div");
+  sw.setAttribute("role", "switch");
+  const img = document.createElement("span");
+  img.setAttribute("role", "presentation");
+  const row = createSettingsRow(document, { label: "A", controls: [sw, img] });
+  setSettingsRowError(row, "x");
+  expect(sw.getAttribute("aria-invalid")).toBe("true");
+  expect(img.hasAttribute("aria-invalid")).toBe(false);
+});

@@ -26,8 +26,9 @@ export interface SettingsRowsOptions {
 let counter = 0;
 
 const DISABLE = "button, input, select, textarea";
-// Controls that can be marked invalid: native fields and custom ones with a role.
-const INVALIDATE = "input, select, textarea, [role]";
+// Controls that can be marked invalid: native fields and custom ones whose role accepts aria-invalid.
+const INVALIDATE =
+  'input, select, textarea, [role="switch"], [role="combobox"], [role="textbox"], [role="checkbox"], [role="radiogroup"], [role="radio"], [role="listbox"], [role="spinbutton"], [role="slider"]';
 
 interface RowState {
   readonly note: HTMLElement;
@@ -36,8 +37,8 @@ interface RowState {
   readonly errorId: string;
   err: HTMLElement | null;
   errText: Text | null;
-  /** Controls the caller had disabled before the row was disabled; they stay disabled. */
-  keptDisabled: Set<Element> | null;
+  /** Controls the row itself disabled; only these are enabled again. */
+  readonly ownDisabled: Set<Element>;
   /** aria-invalid as the caller had it, per control, while an error is shown. */
   invalidBefore: Map<Element, string | null> | null;
 }
@@ -54,21 +55,28 @@ export function setSettingsRowDisabled(
   disabled: boolean,
 ): void {
   const state = rows.get(row);
-  const found = row.querySelectorAll<HTMLElement>(DISABLE);
-  if (disabled) {
-    if (state && !state.keptDisabled) {
-      state.keptDisabled = new Set(
-        [...found].filter((c) => (c as HTMLButtonElement).disabled),
-      );
-    }
-    for (const c of found) (c as HTMLButtonElement).disabled = true;
-  } else {
-    const kept = state?.keptDisabled;
-    for (const c of found) (c as HTMLButtonElement).disabled = !!kept?.has(c);
-    if (state) state.keptDisabled = null;
+  if (!state) {
+    throw new Error(
+      "setSettingsRowDisabled: not a row made by createSettingsRow",
+    );
   }
-  const box = state?.controls;
-  if (!box) return;
+  const found = row.querySelectorAll<HTMLElement>(DISABLE);
+  // Only controls this function turned off are turned on again; one the caller disabled, or one
+  // put in the row in between, is never touched on the way back.
+  if (disabled) {
+    for (const c of found) {
+      if (!(c as HTMLButtonElement).disabled) {
+        (c as HTMLButtonElement).disabled = true;
+        state.ownDisabled.add(c);
+      }
+    }
+  } else {
+    for (const c of found) {
+      if (state.ownDisabled.has(c)) (c as HTMLButtonElement).disabled = false;
+    }
+    state.ownDisabled.clear();
+  }
+  const box = state.controls;
   if (disabled) box.setAttribute("inert", "");
   else box.removeAttribute("inert");
 }
@@ -171,7 +179,7 @@ export function createSettingsRow(
     errorId: `${id}-error`,
     err: null,
     errText: null,
-    keptDisabled: null,
+    ownDisabled: new Set(),
     invalidBefore: null,
   });
   setSettingsRowError(row, options.error ?? null);

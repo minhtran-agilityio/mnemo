@@ -475,10 +475,9 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           feature("Idea cards", "Next step for each idea", S, MED),
           feature("Task extraction", "Tasks found in notes", S, MED),
         ]);
-        const longLabel = "Một nhãn rất dài về mô hình cho tính năng này "
-          .repeat(3)
-          .trim()
-          .slice(0, 120);
+        // Exactly 120 characters.
+        const longLabel =
+          "Một nhãn rất dài về mô hình cho tính năng này, được viết ra để thử cách xuống dòng của một hàng cài đặt khi chữ quá dài.";
         const grown = (text: string, node: HTMLElement) =>
           state(doc, text, node, { grow: true });
         const live = withScope("live", () => {
