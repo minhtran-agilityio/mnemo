@@ -158,28 +158,36 @@ impl ExportJob {
     /// Copies the files and returns the summary. A failure removes the export folder.
     pub fn finish(self) -> Result<ExportSummary, ExportError> {
         match self.copy_all() {
-            Ok(()) => Ok(ExportSummary {
+            Ok(vanished) => Ok(ExportSummary {
                 folder: self.dir.to_string_lossy().into_owned(),
                 counts: self.counts,
-                files_missing: self.files_missing,
+                files_missing: self.files_missing + vanished,
             }),
             Err(cause) => Err(fail_and_clean(&self.dir, cause)),
         }
     }
 
-    fn copy_all(&self) -> Result<(), StorageError> {
+    fn copy_all(&self) -> Result<u64, StorageError> {
         let dest = self.dir.join(FILES_DIR);
         fs::create_dir(&dest).map_err(io_failed)?;
+        let mut missing = 0;
         for (src, target) in &self.copies {
-            fs::copy(src, target).map_err(io_failed)?;
+            match fs::copy(src, target) {
+                Ok(_) => {}
+                // The file went away after it was planned: count it as missing.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => missing += 1,
+                Err(e) => return Err(io_failed(e)),
+            }
         }
-        Ok(())
+        Ok(missing)
     }
 }
 
 fn fail_and_clean(dir: &Path, cause: StorageError) -> ExportError {
     let folder = match fs::remove_dir_all(dir) {
         Ok(()) => FolderState::Removed,
+        // Nothing is there, so nothing is left for the owner to delete.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => FolderState::Removed,
         Err(_) => FolderState::Left,
     };
     ExportError::Failed { cause, folder }
@@ -408,6 +416,9 @@ impl Storage {
         ))
     }
 
+    /// Keeps the whole copy list in memory (two paths per file): accepted, because the
+    /// list is small next to the files themselves and it lets the copy run without the lock.
+    ///
     /// Lists, for each live record whose file is on disk, where to copy it from and to
     /// (`dest/<disk name>`). Returns that list and how many live records had no file.
     fn plan_file_copies(
@@ -728,12 +739,12 @@ pub(crate) mod tests {
 
     #[test]
     fn a_failed_copy_removes_the_folder_and_says_so() {
-        let (s, d) = open_temp();
+        let (s, _d) = open_temp();
         s.save_file("a.bin", &[1, 2, 3]).unwrap();
         let out = TempDir::new();
         let job = s.export_begin(out.path(), NOW).unwrap();
-        // Remove the stored file after planning, so the copy fails.
-        fs::remove_dir_all(d.path().join("files")).unwrap();
+        // A files folder that is already there makes the copy fail (not a vanished source).
+        fs::create_dir(job.dir.join(FILES_DIR)).unwrap();
         let folder = job.dir.clone();
         match job.finish() {
             Err(ExportError::Failed { folder: state, .. }) => {
@@ -745,12 +756,36 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_failed_write_that_cannot_clean_up_says_the_folder_is_left() {
+    fn a_folder_that_is_already_gone_counts_as_removed() {
         let e = fail_and_clean(
             Path::new("/nonexistent-mnemo-dir/x"),
             StorageError::FileMissing,
         );
-        // remove_dir_all of a missing path fails, so the state is Left.
+        assert!(matches!(
+            e,
+            ExportError::Failed {
+                folder: FolderState::Removed,
+                ..
+            }
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_write_that_cannot_clean_up_says_the_folder_is_left() {
+        use std::os::unix::fs::PermissionsExt;
+        let parent = TempDir::new();
+        let dir = parent.path().join("export");
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("a.json"), b"x").unwrap();
+        // A read-only parent: the folder cannot be unlinked from it.
+        fs::set_permissions(parent.path(), fs::Permissions::from_mode(0o555)).unwrap();
+        let writable = fs::write(parent.path().join("probe"), b"x").is_ok();
+        let e = fail_and_clean(&dir, StorageError::FileMissing);
+        fs::set_permissions(parent.path(), fs::Permissions::from_mode(0o755)).unwrap();
+        if writable {
+            return; // running as root: permissions do not apply
+        }
         assert!(matches!(
             e,
             ExportError::Failed {
@@ -758,6 +793,20 @@ pub(crate) mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn a_file_that_vanishes_after_planning_counts_as_missing() {
+        let (s, _d) = open_temp();
+        s.save_file("a.txt", b"hello").unwrap();
+        let out = TempDir::new();
+        let job = s.export_begin(out.path(), NOW).unwrap();
+        for (src, _) in &job.copies {
+            fs::remove_file(src).unwrap();
+        }
+        assert_eq!(job.copies.len(), 1);
+        let sum = job.finish().unwrap();
+        assert_eq!(sum.files_missing, 1);
     }
 
     #[test]
