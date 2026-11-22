@@ -172,14 +172,26 @@ impl ExportJob {
         fs::create_dir(&dest).map_err(io_failed)?;
         let mut missing = 0;
         for (src, target) in &self.copies {
-            match fs::copy(src, target) {
-                Ok(_) => {}
-                // The file went away after it was planned: count it as missing.
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => missing += 1,
-                Err(e) => return Err(io_failed(e)),
+            if copy_planned(src, target)? {
+                missing += 1;
             }
         }
         Ok(missing)
+    }
+}
+
+/// Copies one planned file. Ok(true) means the source went away after it was planned, so it is
+/// counted as missing. Any other error, a NotFound for a gone export folder included, fails.
+fn copy_planned(src: &Path, target: &Path) -> Result<bool, StorageError> {
+    match fs::copy(src, target) {
+        Ok(_) => Ok(false),
+        Err(e)
+            if e.kind() == std::io::ErrorKind::NotFound
+                && matches!(src.try_exists(), Ok(false)) =>
+        {
+            Ok(true)
+        }
+        Err(e) => Err(io_failed(e)),
     }
 }
 
@@ -807,6 +819,22 @@ pub(crate) mod tests {
         assert_eq!(job.copies.len(), 1);
         let sum = job.finish().unwrap();
         assert_eq!(sum.files_missing, 1);
+    }
+
+    #[test]
+    fn a_missing_source_counts_as_missing_but_a_missing_target_folder_fails() {
+        let d = TempDir::new();
+        let src = d.path().join("src.txt");
+        fs::write(&src, b"x").unwrap();
+        // The export folder is gone: the target's parent does not exist.
+        let gone = d.path().join("gone").join("src.txt");
+        assert!(copy_planned(&src, &gone).is_err());
+        // The source is gone: counted as missing, not a failure.
+        let ok_target = d.path().join("copy.txt");
+        assert!(copy_planned(&d.path().join("nope.txt"), &ok_target).unwrap());
+        // A normal copy.
+        assert!(!copy_planned(&src, &ok_target).unwrap());
+        assert_eq!(fs::read(&ok_target).unwrap(), b"x");
     }
 
     #[test]
