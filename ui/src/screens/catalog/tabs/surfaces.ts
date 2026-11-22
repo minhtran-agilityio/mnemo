@@ -455,9 +455,59 @@ export const renderSurfaces: TabRenderer = (panel, ctx) => {
           onConfirm: () => {},
           onKeep: () => {},
         });
+        const resetOptions = {
+          title: "Reset Mnemo?",
+          message:
+            "This deletes everything and makes no backup. Use Export or the backup command first.",
+          lose: [
+            "all notes, links, ideas, projects, tasks, events, runs, memories, labels, files and settings (theme included)",
+          ],
+          keepLabel: "Cancel",
+          confirmLabel: "Reset",
+          typeToConfirm: { word: "RESET", label: "Type RESET to confirm" },
+          onConfirm: () => {
+            result("Reset. (Catalog only.)");
+          },
+          onKeep: () => {
+            result("Cancelled.");
+          },
+        } as const;
+        const resetDialog = createConfirmDialog(resetOptions);
+        ctx.signal.addEventListener("abort", () => resetDialog.close());
+        const openReset = button(doc, "btn", "Reset Mnemo…");
+        openReset.addEventListener("click", () => resetDialog.open(openReset));
+        const resetSample = createConfirmSample({
+          ...resetOptions,
+          onConfirm: () => {},
+          onKeep: () => {},
+        });
+        const enabledSample = createConfirmSample({
+          ...resetOptions,
+          onConfirm: () => {},
+          onKeep: () => {},
+        });
+        const typedInput = enabledSample.querySelector("input");
+        if (typedInput) {
+          typedInput.value = "RESET";
+          typedInput.dispatchEvent(new Event("input"));
+        }
         return [
           state(doc, "live: safe button has the focus", [open]),
           state(doc, "drawn in the page", sample, { grow: true }),
+          state(
+            doc,
+            "type to confirm, word typed: confirm enabled",
+            enabledSample,
+            {
+              grow: true,
+            },
+          ),
+          state(doc, "type to confirm, live: confirm off until RESET", [
+            openReset,
+          ]),
+          state(doc, "type to confirm, drawn in the page", resetSample, {
+            grow: true,
+          }),
         ];
       },
 
