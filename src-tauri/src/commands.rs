@@ -282,7 +282,7 @@ fn export_item(storage: &AppStorage, folder: &str, now: &str) -> Result<ExportSu
         .map_err(export_failed)
 }
 
-/// Exports every live record into a new `mnemo-export-<time>` folder inside `folder`.
+/// Exports every live record into a new dated export folder inside `folder` (storage names it).
 #[tauri::command]
 pub async fn export_data(app: tauri::AppHandle, folder: String) -> Result<ExportSummary, AppError> {
     off_main_thread(app, move |storage| {
