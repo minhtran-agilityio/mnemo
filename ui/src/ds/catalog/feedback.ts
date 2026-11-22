@@ -47,12 +47,22 @@ export const FEEDBACK = [
   {
     name: "usage meter",
     tab: "Feedback",
-    variants: ["normal", "warning", "paused", "own runs only"],
+    variants: [
+      "normal",
+      "warning",
+      "paused",
+      "owner lines",
+      "unverified",
+      "stored percent with age",
+      "two windows",
+      "own runs only",
+      "run count today and this week",
+    ],
     states: ["default"],
     source: "ds",
     className: "meter",
     notes:
-      "Ticks mark the 60% warning and the 95% pause. Shares are of the current usage window.",
+      "Ticks mark the warning and the pause lines: 60 and 95 by default, or the owner's. Shares are of the current usage window. In two windows the higher share drives the tone. Not interactive, no loading, error or disabled state.",
   },
   {
     name: "progress",
