@@ -83,7 +83,41 @@ The dev build reads `src-tauri/tauri.dev.conf.json` on top of `src-tauri/tauri.c
 
 Mnemo keeps all its data in one SQLite file named `mnemo.db` inside the Tauri app data folder (`~/.local/share/io.mnemo.desktop/` on Ubuntu, `~/Library/Application Support/io.mnemo.desktop/` on macOS). The file is created on first start and updated by numbered migrations when the app opens. If the file cannot be opened, the Mnemo window opens on a plain error page instead of the app, and nothing is deleted. The page shows only a short reason; the full error, which can name file paths, is printed to the terminal. If even that window cannot be built, Mnemo prints the error and exits with code 1. The error page was checked in a real window on Ubuntu 22.04; on macOS it is **Unverified**.
 
-Do not put this file in Dropbox, iCloud Drive or any other synced folder. Syncing a live SQLite file can corrupt it. There is no sync in version 1. To back up, copy the whole data folder while Mnemo is closed.
+Do not put this file in Dropbox, iCloud Drive or any other synced folder. Syncing a live SQLite file can corrupt it. There is no sync in version 1. The sections below say how to back up, restore, export and reset. Settings > Data shows the real data folder path and the same copy commands, and has an Open data folder button.
+
+### Back up
+
+There is no "Back up now" button. A backup is a copy of the whole data folder (the database and the `files/` folder), so close Mnemo first.
+
+1. Close Mnemo first: choose Quit from the tray icon. Closing the window only hides it.
+2. Copy the folder. On Ubuntu 22.04:
+
+   ```
+   cp -a "$HOME/.local/share/io.mnemo.desktop" ~/mnemo-backup-$(date +%Y-%m-%d)
+   ```
+
+   On macOS (Apple Silicon):
+
+   ```
+   cp -Rp "$HOME/Library/Application Support/io.mnemo.desktop" ~/mnemo-backup-$(date +%Y-%m-%d)
+   ```
+
+3. Start Mnemo again.
+
+### Restore
+
+1. Quit Mnemo from the tray icon.
+2. Move the current data folder aside (do not delete it yet), for example `mv "<data folder>" "<data folder>.old"`.
+3. Copy the backup folder to the data folder path. On Ubuntu 22.04: `cp -a ~/mnemo-backup-YYYY-MM-DD "$HOME/.local/share/io.mnemo.desktop"`. On macOS: `cp -Rp ~/mnemo-backup-YYYY-MM-DD "$HOME/Library/Application Support/io.mnemo.desktop"`.
+4. Start Mnemo. It opens with all the data of the backup. Delete the `.old` folder when you are sure.
+
+### Export
+
+Settings > Data > Export asks for a folder in a native folder dialog and makes a new `mnemo-export-<date>-<time>/` folder inside it. It never overwrites an existing folder. The export holds `notes/` (one Markdown file per note), one JSON file each for bookmarks, ideas, projects, tasks, events, runs, memories, labels, links and files, and a copy of `files/`. Deleted items are not exported. An export is for reading and for other tools; importing it back into Mnemo is not part of version 1. Use a backup to move Mnemo to another machine.
+
+### Reset
+
+Settings > Data > Reset deletes everything: the whole database (all items, labels, links, settings and the theme) and the `files/` folder. Mnemo then starts empty, as after a fresh install. Reset makes no backup. Type `RESET` in the dialog to confirm; Cancel leaves all data. Export or back up first. The error log is not deleted.
 
 ## Test
 
