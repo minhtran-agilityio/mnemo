@@ -9,6 +9,7 @@
 use serde::Deserialize;
 
 use super::fake::{FakeResult, FakeRunner};
+use super::models::default_choice;
 use super::runner::{AiRunner, AiTask};
 
 #[derive(Deserialize)]
@@ -16,20 +17,25 @@ struct TitleAnswer {
     title: String,
 }
 
-/// Asks the model for a short title. `None` when the run failed or the answer is unusable.
-fn suggest_title(runner: &dyn AiRunner, text: &str) -> Option<String> {
-    let task = AiTask {
+/// The task that asks the model for a short title. Its model and effort come from its row.
+pub(super) fn task(text: &str) -> AiTask {
+    let (model, effort) = default_choice("suggest_title");
+    AiTask {
         name: "suggest_title".to_string(),
         prompt: format!("Give a short title for: {text}"),
         schema:
             r#"{"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}"#
                 .to_string(),
         tools: vec![],
-        model: "haiku".to_string(),
-        effort: None,
+        model,
+        effort,
         timeout: std::time::Duration::from_secs(60),
-    };
-    let output = runner.run_task(&task).ok()?;
+    }
+}
+
+/// Asks the model for a short title. `None` when the run failed or the answer is unusable.
+fn suggest_title(runner: &dyn AiRunner, text: &str) -> Option<String> {
+    let output = runner.run_task(&task(text)).ok()?;
     let answer: TitleAnswer = serde_json::from_str(&output.structured_output).ok()?;
     Some(answer.title).filter(|t| !t.trim().is_empty())
 }
@@ -47,6 +53,7 @@ fn a_valid_result_gives_the_title_and_records_the_request() {
     assert!(seen[0].prompt.contains("ownership and borrowing"));
     assert!(seen[0].schema.contains("title"));
     assert_eq!(seen[0].model, "haiku");
+    assert_eq!(seen[0].effort.as_deref(), Some("low"));
     assert!(seen[0].tools.is_empty());
 }
 

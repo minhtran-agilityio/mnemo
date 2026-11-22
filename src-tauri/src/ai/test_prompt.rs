@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
+use super::models::default_choice;
 use super::runner::{AiError, AiRunner, AiTask};
 
 /// The answer shape of the test prompt.
@@ -14,8 +15,9 @@ struct TestAnswer {
     answer: String,
 }
 
-/// The fixed task: no tools, the small model, and a short timeout.
+/// The fixed task: no tools, a short timeout, and the model and effort of its row in `models`.
 pub fn task() -> AiTask {
+    let (model, effort) = default_choice("test_prompt");
     AiTask {
         name: "test_prompt".to_string(),
         prompt: "Write one short friendly sentence for the owner of a notes app. Put it in the answer field."
@@ -24,8 +26,8 @@ pub fn task() -> AiTask {
             r#"{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"#
                 .to_string(),
         tools: vec![],
-        model: "haiku".to_string(),
-        effort: None,
+        model,
+        effort,
         timeout: Duration::from_secs(60),
     }
 }
