@@ -281,12 +281,31 @@ test("a failed reset shows a message and does not start the app over", async () 
   expect(aiBody()).toContain("Mnemo could not reset your data");
 });
 
+test("a reset that failed part way reloads the app so no stale data stays on screen", async () => {
+  resetFails = Object.assign(new Error("x"), {
+    code: "reset_failed",
+    message: "Mnemo could not delete everything.",
+  });
+  openSection("Data");
+  await tick();
+  openReset();
+  typeWord("RESET");
+  dialogButton("Reset all data").click();
+  await tick();
+  await tick();
+  expect(aiBody()).toContain("Mnemo could not reset your data");
+  expect(afterResets).toBe(0);
+  await new Promise((done) => setTimeout(done, RESET_RESTART_MS + 50));
+  expect(afterResets).toBe(1);
+});
+
 test("the Reset dialog says what is deleted, that no backup is made, and points to Export", async () => {
   openSection("Data");
   await tick();
   openReset();
   const text = document.querySelector("dialog")?.textContent ?? "";
-  expect(text).toMatch(/deletes everything/i);
+  expect(text).toMatch(/deletes the Mnemo database/i);
+  expect(text).toMatch(/error log and the AI run output are kept/i);
   expect(text).toMatch(/no backup/i);
   expect(text).toMatch(/Export/);
   expect(text).toMatch(/settings/i);

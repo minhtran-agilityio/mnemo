@@ -67,7 +67,7 @@ export interface SettingsDeps {
   dataFolderInfo(): Promise<DataFolderInfo>;
   /** Opens the data folder in the file manager. Rejects with an AppError. */
   openDataFolder(): Promise<void>;
-  /** Runs after a reset worked: forget the cached theme and start the app over. */
+  /** Runs after a reset worked, or failed part way: forget the cached theme and start the app over. */
   afterReset(): void;
 }
 
@@ -154,6 +154,14 @@ function exportSentence(summary: ExportSummary): string {
       ? ` ${summary.filesMissing} file${summary.filesMissing === 1 ? " was" : "s were"} missing from the files folder and could not be copied.`
       : "";
   return `Saved in the folder ${summary.folder}. It holds ${what}.${missing}`;
+}
+
+/** The export failure sentence. The core's message says what is left of the export folder;
+ * "Nothing was changed." is added only when that message does not already say so. */
+function exportFailureText(error: unknown): string {
+  const message = errorMessage(error);
+  const says = /unchanged|nothing was/i.test(message);
+  return `Mnemo could not export your data. ${message}${says ? "" : " Nothing was changed."}`;
 }
 
 /** How long the reset result stays on screen before the app starts over. */
@@ -416,7 +424,7 @@ export function renderSettings(
       buildText(doc, {
         tone: "muted",
         content:
-          "Reset deletes everything Mnemo has stored and starts empty, like a first start. It makes no backup.",
+          "Reset deletes the Mnemo database and the saved files and starts empty, like a first start. The error log and the AI run output are kept. It makes no backup.",
       }),
       resetButton,
       ...statusBanner(resetView, "Resetting..."),
@@ -441,7 +449,7 @@ export function renderSettings(
       console.error("the export failed:", error);
       exportView = {
         kind: "failed",
-        text: `Mnemo could not export your data. ${errorMessage(error)} Nothing was changed.`,
+        text: exportFailureText(error),
       };
     } finally {
       redrawData();
@@ -465,7 +473,7 @@ export function renderSettings(
       doc,
       title: "Reset all Mnemo data?",
       message:
-        "This deletes everything Mnemo has stored. Mnemo makes no backup first, and this cannot be undone. Use Export or the backup command first if you want to keep a copy.",
+        "This deletes the Mnemo database and the saved files folder. The error log and the AI run output are kept. Mnemo makes no backup first, and this cannot be undone. Use Export or the backup command first if you want to keep a copy.",
       lose: [
         "All notes, links, ideas, projects, tasks, events, runs, memories and labels",
         "All saved files",
@@ -489,11 +497,15 @@ export function renderSettings(
       await deps.resetData(RESET_WORD);
     } catch (error) {
       console.error("the reset failed:", error);
+      // "reset_failed" means the delete got as far as starting, so part of the data may be
+      // gone and the screens may show stale rows. Reload so the app shows what is really left.
+      const partial = isAppError(error) && error.code === "reset_failed";
       resetView = {
         kind: "failed",
-        text: `Mnemo could not reset your data. ${errorMessage(error)}`,
+        text: `Mnemo could not reset your data. ${errorMessage(error)}${partial ? " Mnemo is reloading to show what is left." : ""}`,
       };
       redrawData();
+      if (partial) setTimeout(() => deps.afterReset(), RESET_RESTART_MS);
       return;
     }
     // The core is empty now. Say so for a moment, then start the app over like a first start.

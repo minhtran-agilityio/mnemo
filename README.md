@@ -117,7 +117,7 @@ Settings > Data > Export asks for a folder in a native folder dialog and makes a
 
 ### Reset
 
-Settings > Data > Reset deletes everything: the whole database (all items, labels, links, settings and the theme) and the `files/` folder. Mnemo then starts empty, as after a fresh install. Reset makes no backup. Type `RESET` in the dialog to confirm; Cancel leaves all data. Export or back up first. The error log is not deleted.
+Settings > Data > Reset deletes the whole database (all items, labels, links, settings and the theme) and the `files/` folder. Mnemo then starts empty, as after a fresh install. Reset keeps the error log and the AI run output; it deletes only the database (with its `-wal` and `-shm` files) and `files/`. Reset makes no backup. Type `RESET` in the dialog to confirm; Cancel leaves all data. Export or back up first. If Reset fails part way, Mnemo reloads to show what is left; if it cannot open a new database, every action says so until you quit and start Mnemo again.
 
 ## Test
 
