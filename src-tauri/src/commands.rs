@@ -7,6 +7,7 @@ use tauri::Manager;
 
 use crate::ai::claude::error_kind;
 use crate::ai::health::{self, AiHealth};
+use crate::ai::models::{self, AiModelTable, ModelChoices, ModelError, ModelRow};
 use crate::ai::runner::{AiError, AiRunner};
 use crate::ai::test_prompt;
 use crate::storage::files::OrphanReport;
@@ -255,6 +256,77 @@ pub async fn set_setting(
     value: String,
 ) -> Result<(), AppError> {
     off_main_thread(app, move |storage| write_setting(storage, &key, &value)).await
+}
+
+/// Gives the runner the owner's model row for a task from the app storage. When the storage is
+/// not available it gives the code default, so AI keeps working (shared rule 3).
+pub struct StoredChoices(pub tauri::AppHandle);
+
+impl ModelChoices for StoredChoices {
+    fn row(&self, task: &str) -> Option<ModelRow> {
+        match self.0.state::<AppStorage>().get() {
+            Ok(storage) => models::row_for(&storage, task),
+            Err(_) => models::default_row(task),
+        }
+    }
+}
+
+/// The error the UI sees when a model row was not changed. An unknown value is the owner's
+/// mistake and has its own code; a storage failure uses the same words as every setting.
+fn model_failed(e: ModelError) -> AppError {
+    match e {
+        ModelError::Storage(inner) => storage_failed(inner),
+        other => AppError {
+            code: "invalid_ai_model",
+            message: other.to_string(),
+        },
+    }
+}
+
+fn list_ai_models_with(storage: &AppStorage) -> Result<AiModelTable, AppError> {
+    let guard = storage.get()?;
+    Ok(models::table(&guard))
+}
+
+fn set_ai_model_with(
+    storage: &AppStorage,
+    feature: &str,
+    model: &str,
+    effort: &str,
+) -> Result<AiModelTable, AppError> {
+    let guard = storage.get()?;
+    models::set_row(&guard, feature, model, effort).map_err(model_failed)
+}
+
+fn reset_ai_models_with(storage: &AppStorage) -> Result<AiModelTable, AppError> {
+    let guard = storage.get()?;
+    models::reset_rows(&guard).map_err(model_failed)
+}
+
+/// The model and effort of every AI feature, with the allowed values.
+#[tauri::command]
+pub async fn list_ai_models(app: tauri::AppHandle) -> Result<AiModelTable, AppError> {
+    off_main_thread(app, list_ai_models_with).await
+}
+
+/// Saves the model and effort of one feature. An unknown value changes nothing.
+#[tauri::command]
+pub async fn set_ai_model(
+    app: tauri::AppHandle,
+    feature: String,
+    model: String,
+    effort: String,
+) -> Result<AiModelTable, AppError> {
+    off_main_thread(app, move |s| {
+        set_ai_model_with(s, &feature, &model, &effort)
+    })
+    .await
+}
+
+/// Puts every feature back to its default model and effort.
+#[tauri::command]
+pub async fn reset_ai_models(app: tauri::AppHandle) -> Result<AiModelTable, AppError> {
+    off_main_thread(app, reset_ai_models_with).await
 }
 
 /// The latest Claude Code check, kept in memory only. `None` until the first check ends.
@@ -1435,5 +1507,64 @@ mod tests {
             delete_item::<Run>(&closed, "x").unwrap_err().code,
             "storage_unavailable"
         );
+    }
+
+    fn row_of(table: &AiModelTable, feature: &str) -> (String, String) {
+        let r = table.rows.iter().find(|r| r.feature == feature).unwrap();
+        (r.model.value().to_string(), r.effort.value().to_string())
+    }
+
+    #[test]
+    fn set_ai_model_with_an_unknown_model_gives_invalid_ai_model_and_keeps_the_row() {
+        let (state, dir) = app_storage();
+        set_ai_model_with(&state, "save", "sonnet", "high").unwrap();
+        let err = set_ai_model_with(&state, "save", "gpt-4", "low").unwrap_err();
+        assert_eq!(err.code, "invalid_ai_model");
+        assert!(err.message.contains("gpt-4"));
+        let table = list_ai_models_with(&state).unwrap();
+        assert_eq!(row_of(&table, "save"), ("sonnet".into(), "high".into()));
+        let err = set_ai_model_with(&state, "save", "opus", "xhigh").unwrap_err();
+        assert_eq!(err.code, "invalid_ai_model");
+        let err = set_ai_model_with(&state, "nope", "opus", "low").unwrap_err();
+        assert_eq!(err.code, "invalid_ai_model");
+        let table = list_ai_models_with(&state).unwrap();
+        assert_eq!(row_of(&table, "save"), ("sonnet".into(), "high".into()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ai_model_commands_list_set_reset_end_to_end() {
+        let (state, dir) = app_storage();
+        let first = list_ai_models_with(&state).unwrap();
+        assert_eq!(first.rows.len(), models::DEFAULTS.len());
+        assert_eq!(row_of(&first, "save"), ("haiku".into(), "low".into()));
+        let set = set_ai_model_with(&state, "ask", "opus", "high").unwrap();
+        assert_eq!(row_of(&set, "ask"), ("opus".into(), "high".into()));
+        assert_eq!(list_ai_models_with(&state).unwrap(), set);
+        let reset = reset_ai_models_with(&state).unwrap();
+        assert_eq!(row_of(&reset, "ask"), ("sonnet".into(), "medium".into()));
+        assert_eq!(reset.rows, models::DEFAULTS.to_vec());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ai_model_error_message_has_no_path_or_debug_text() {
+        let (state, dir) = app_storage();
+        let mut errors = vec![
+            set_ai_model_with(&state, "save", "gpt-4", "low").unwrap_err(),
+            set_ai_model_with(&state, "save", "opus", "xhigh").unwrap_err(),
+            set_ai_model_with(&state, "nope", "opus", "low").unwrap_err(),
+        ];
+        let closed = AppStorage::new(Err(StartupError {
+            code: "x",
+            detail: "/secret/path".into(),
+        }));
+        errors.push(list_ai_models_with(&closed).unwrap_err());
+        for e in errors {
+            for bad in ["/", "\\", "Error", "panicked", "Storage(", "{", "secret"] {
+                assert!(!e.message.contains(bad), "{} has {bad}", e.message);
+            }
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

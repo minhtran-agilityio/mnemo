@@ -103,13 +103,17 @@ pub fn run() {
                 ai::runner::fake_requested(std::env::var_os(ai::runner::FAKE_AI_ENV).as_deref());
             log::info!("AI runner: {}", if fake { "fake" } else { "real" });
             app.manage(AiRunnerState {
-                runner: ai::runner::select_runner(
-                    fake,
-                    paths
-                        .as_ref()
-                        .ok()
-                        .map(|p| ai::runner::runs_dir(&p.data_dir)),
-                ),
+                // Every run reads its feature's model and effort from the settings table.
+                runner: std::sync::Arc::new(ai::models::ConfiguredRunner::new(
+                    ai::runner::select_runner(
+                        fake,
+                        paths
+                            .as_ref()
+                            .ok()
+                            .map(|p| ai::runner::runs_dir(&p.data_dir)),
+                    ),
+                    std::sync::Arc::new(commands::StoredChoices(app.handle().clone())),
+                )),
                 fake,
             });
 
@@ -183,6 +187,9 @@ pub fn run() {
             commands::check_ai_health,
             commands::get_ai_mode,
             commands::run_test_prompt,
+            commands::list_ai_models,
+            commands::set_ai_model,
+            commands::reset_ai_models,
             commands::add_bookmark,
             commands::get_bookmark,
             commands::list_bookmarks,
