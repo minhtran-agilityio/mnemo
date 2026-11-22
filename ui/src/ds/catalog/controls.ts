@@ -103,10 +103,23 @@ export const CONTROLS = [
     name: "select",
     className: "select",
     tab: "Controls",
-    variants: ["pick one (native)", "pick many"],
-    states: ["default", "open"],
+    variants: [
+      "pick one (native)",
+      "pick one inline (auto width)",
+      "pick many",
+    ],
+    states: [
+      "default",
+      "hover",
+      "focus-visible",
+      "disabled",
+      "error",
+      "overflow",
+      "open",
+    ],
     source: "ds",
-    notes: "Escape closes and returns focus to the button.",
+    notes:
+      "Escape closes and returns focus to the button. An inline select has no visible label: the caller sets aria-label on it. Error uses the field error line. Open applies to pick many only. Loading, empty, success, partial and AI off do not apply.",
   },
   {
     name: "menu",

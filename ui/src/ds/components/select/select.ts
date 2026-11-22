@@ -12,15 +12,22 @@ export interface SelectOptions {
   readonly options: readonly string[];
   readonly value?: string;
   readonly disabled?: boolean;
+  /** Compact size: the select is as wide as its longest option, not its parent. Default is full width. */
+  readonly inline?: boolean;
 }
 
-/** Returns the wrapper (put it in a Field as `control`) and the select (the Field's `target`). */
+/**
+ * Returns the wrapper (put it in a Field as `control`) and the select (the Field's `target`).
+ * An inline select (`inline: true`) usually has no visible label, so the caller MUST name it with
+ * `select.setAttribute("aria-label", "Model for Save a link")`. A refused value shows through
+ * `createField` with `error`, which sets aria-invalid and aria-describedby on the select.
+ */
 export function createSelect(
   doc: Document,
   options: SelectOptions,
 ): { wrap: HTMLElement; select: HTMLSelectElement } {
   const wrap = doc.createElement("span");
-  wrap.className = "selwrap";
+  wrap.className = options.inline ? "selwrap selwrap--inline" : "selwrap";
   const select = doc.createElement("select");
   select.className = "select";
   select.id = nextControlId("select");
