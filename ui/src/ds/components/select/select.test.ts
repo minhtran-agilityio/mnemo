@@ -82,7 +82,7 @@ test("the caller names an inline select with aria-label, and a field error is li
   expect(select.getAttribute("aria-invalid")).toBe("true");
 });
 
-test("an inline select with long option text keeps all of it", () => {
+test("an inline select keeps the full text of a long option (layout is checked by the ds-09 acceptance test)", () => {
   const long = "x".repeat(300);
   const { select } = createSelect(document, { options: [long], inline: true });
   expect(select.options[0]?.textContent).toBe(long);

@@ -405,7 +405,6 @@ export const renderControls: TabRenderer = (panel, ctx) => {
         const longOne = inlineSelect("Model", [
           "Sonnet 5.5 with a very long option name that must be cut and not widen the row or scroll",
         ]);
-        longOne.wrap.style.maxWidth = "100%";
         return [
           state(
             doc,
