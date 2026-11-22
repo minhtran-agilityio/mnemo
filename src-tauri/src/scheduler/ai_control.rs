@@ -8,7 +8,8 @@
 // `ai_*` settings keys, `storage::ai_control`) on each change; a failed write leaves the cache
 // as it was. `may_run` only reads the cache, so the queue can ask it under its own lock.
 //
-// Lock order: the queue's lock, then this control's lock, then the app storage. Listeners (the
+// Lock order: this control's lock, then the app storage; the queue never holds its own lock
+// while it asks this control. Listeners (the
 // queue's dispatch, the UI event) are called after this control's lock is let go.
 
 use std::fmt;
@@ -418,7 +419,8 @@ impl AiControl {
     }
 
     /// May a task of `priority` start at `now`? Only reads; never writes and never calls a
-    /// listener, so the queue may ask it while it holds its own lock.
+    /// listener. It waits for the control's lock, which a change holds across its storage write,
+    /// so a caller must not hold a lock of its own that others need.
     pub fn may_run(&self, priority: Priority, now: i64) -> Decision {
         self.lock().decide(priority, now)
     }
@@ -1576,6 +1578,68 @@ mod tests {
         at.store(NOW + HOUR, Ordering::SeqCst);
         assert!(done(&background).is_ok());
         assert_eq!(fake.starts(), 2);
+    }
+
+    /// A store whose save of the switch waits until the test lets it go.
+    struct SlowStore {
+        inner: Arc<TestStore>,
+        entered: std::sync::mpsc::Sender<()>,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+
+    impl ControlStore for SlowStore {
+        fn load(&self) -> Result<StoredAiControl, ControlStoreError> {
+            self.inner.load()
+        }
+        fn save_enabled(&self, on: bool) -> Result<(), ControlStoreError> {
+            let _ = self.entered.send(());
+            let _ = self.release.lock().unwrap().recv_timeout(WAIT);
+            self.inner.save_enabled(on)
+        }
+        fn save_thresholds(&self, w: i64, p: i64) -> Result<(), ControlStoreError> {
+            self.inner.save_thresholds(w, p)
+        }
+        fn save_pause(&self, pause: Option<&StoredPause>) -> Result<(), ControlStoreError> {
+            self.inner.save_pause(pause)
+        }
+        fn save_reading(&self, reading: &StoredReading) -> Result<(), ControlStoreError> {
+            self.inner.save_reading(reading)
+        }
+    }
+
+    #[test]
+    fn ai_control_queue_operations_do_not_stall_while_the_control_waits_on_storage() {
+        let (entered_tx, entered) = std::sync::mpsc::channel();
+        let (release_tx, release) = std::sync::mpsc::channel();
+        let store = Arc::new(SlowStore {
+            inner: TestStore::new(),
+            entered: entered_tx,
+            release: Mutex::new(release),
+        });
+        let (clock, _at) = test_clock(NOW);
+        let control = AiControl::new(store, clock);
+        let fake = Arc::new(FakeRunner::new(valid()));
+        let notify: Notifier = Arc::new(|_| {});
+        let q = RunQueue::new(fake, StoreLog::new(), notify, control.clone());
+        // A change of the switch holds the control while its write waits.
+        let c = control.clone();
+        let change = std::thread::spawn(move || c.set_enabled(false));
+        entered.recv_timeout(WAIT).expect("the write did not start");
+        // A submit reaches the gate and waits on the control...
+        let q2 = q.clone();
+        let submit = std::thread::spawn(move || q2.submit(Priority::Background, task("bg")));
+        std::thread::sleep(SETTLE);
+        // ...but the queue itself stays free for other callers.
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let q3 = q.clone();
+        std::thread::spawn(move || {
+            let _ = done_tx.send(q3.cancel("no-such-run"));
+        });
+        let outcome = done_rx.recv_timeout(Duration::from_secs(2));
+        release_tx.send(()).unwrap();
+        change.join().unwrap().unwrap();
+        submit.join().unwrap().unwrap();
+        assert!(outcome.is_ok(), "the queue stalled behind the control");
     }
 
     #[test]

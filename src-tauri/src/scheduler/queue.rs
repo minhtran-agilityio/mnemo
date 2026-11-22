@@ -10,10 +10,9 @@
 // run that ends at the usage limit tells the control, which holds AI work. Every change of the
 // control starts a dispatch.
 //
-// One mutex guards the two waiting lines and the map of running runs. The run log and the
-// notifier are called outside that mutex, so the queue never holds its lock across SQLite or
-// the UI. The control is asked under the mutex (lock order: queue, control, storage); its
-// `may_run` only reads memory. Each started run gets its own thread; a guard on that thread
+// One mutex guards the two waiting lines and the map of running runs. The run log, the
+// notifier and the control are called outside that mutex, so the queue never holds its lock
+// across SQLite, the UI or a control that waits on a write. Each started run gets its own thread; a guard on that thread
 // ends the row and frees the slot even when the runner panics.
 
 use std::collections::{HashMap, VecDeque};
@@ -249,10 +248,13 @@ struct Refused {
 /// background jobs wait. A background job the gate denies stays waiting, and the loop stops.
 fn dispatch(inner: &Arc<Inner>) {
     let now = inner.control.now();
+    // Asked before the queue's lock is taken: the control's lock may wait on a storage write,
+    // and the queue must not stall behind it. A change of the control after this answer starts
+    // another dispatch, which corrects a stale one.
+    let owner_gate = inner.control.may_run(Priority::Owner, now);
+    let background_gate = inner.control.may_run(Priority::Background, now);
     let (started, refused) = {
         let mut state = inner.lock();
-        let owner_gate = inner.control.may_run(Priority::Owner, now);
-        let background_gate = inner.control.may_run(Priority::Background, now);
         let mut refused: Vec<Refused> = Vec::new();
         match owner_gate {
             Decision::Deny {
