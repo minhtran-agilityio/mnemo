@@ -9,7 +9,7 @@ use crate::ai::claude::error_kind;
 use crate::ai::health::{self, AiHealth};
 use crate::ai::runner::{AiError, AiRunner};
 use crate::ai::test_prompt;
-use crate::storage::export::ExportSummary;
+use crate::storage::export::{ExportError, ExportSummary, FolderState};
 use crate::storage::files::OrphanReport;
 use crate::storage::ideas::{Idea, IdeaInput, IdeaProject};
 use crate::storage::items::{
@@ -48,13 +48,25 @@ impl AppStorage {
         AppStorage(opened.map(Mutex::new))
     }
 
+    /// A storage that a failed Reset left without a database answers every call with
+    /// `storage_unavailable`, not with a table error from an empty database.
+    fn usable(guard: MutexGuard<'_, Storage>) -> Result<MutexGuard<'_, Storage>, AppError> {
+        if guard.is_unavailable() {
+            return Err(AppError {
+                code: "storage_unavailable",
+                message: "Mnemo could not open its data file again after a reset. Quit Mnemo and start it again.".to_string(),
+            });
+        }
+        Ok(guard)
+    }
+
     /// Locks the database, or returns `storage_unavailable` when it was not opened.
     /// A lock poisoned by an earlier panic is recovered after rolling back any
     /// transaction the panicking code left open.
     pub fn get(&self) -> Result<MutexGuard<'_, Storage>, AppError> {
         match &self.0 {
             Ok(m) => match m.lock() {
-                Ok(guard) => Ok(guard),
+                Ok(guard) => Self::usable(guard),
                 Err(poisoned) => {
                     // An earlier command panicked while holding the lock. Roll back what
                     // it left open, then carry on with the last committed state.
@@ -64,7 +76,7 @@ impl AppStorage {
                         message: "Mnemo could not recover its data file after an error. Nothing was deleted. Quit Mnemo and start it again.".to_string(),
                     })?;
                     m.clear_poison();
-                    Ok(guard)
+                    Self::usable(guard)
                 }
             },
             Err(_) => Err(AppError {
@@ -259,27 +271,42 @@ pub async fn set_setting(
 }
 
 /// The error the UI sees for an export that did not finish. The reason goes to the log.
-fn export_failed(e: StorageError) -> AppError {
+/// The message says only what is true about the export folder.
+fn export_failed(e: ExportError) -> AppError {
     match e {
-        StorageError::Invalid(message) => AppError {
+        ExportError::Target(message) => AppError {
             code: "export_target_invalid",
             message,
         },
-        other => {
-            log::error!("export failed: {other}");
+        ExportError::Failed { cause, folder } => {
+            log::error!("export failed: {cause}");
+            let about_folder = match folder {
+                FolderState::NotCreated => "No export folder was made.",
+                FolderState::Removed => "The partly written export folder was removed.",
+                FolderState::Left => {
+                    "The partly written export folder could not be removed; delete it yourself."
+                }
+            };
             AppError {
                 code: "export_failed",
-                message: "Mnemo could not finish the export. Your data is unchanged; the partly written export folder was removed.".to_string(),
+                message: format!(
+                    "Mnemo could not finish the export. Your data is unchanged. {about_folder}"
+                ),
             }
         }
     }
 }
 
 fn export_item(storage: &AppStorage, folder: &str, now: &str) -> Result<ExportSummary, AppError> {
-    storage
-        .get()?
-        .export_to(std::path::Path::new(folder), now)
-        .map_err(export_failed)
+    // The storage lock is held only while the records are written. The file copy runs
+    // after the guard is dropped, so the rest of the app is not blocked by it.
+    let job = {
+        let guard = storage.get()?;
+        guard
+            .export_begin(std::path::Path::new(folder), now)
+            .map_err(export_failed)?
+    };
+    job.finish().map_err(export_failed)
 }
 
 /// Exports every live record into a new dated export folder inside `folder` (storage names it).
@@ -301,7 +328,7 @@ fn reset_item(storage: &AppStorage, confirm: &str) -> Result<(), AppError> {
             log::error!("reset failed: {other}");
             AppError {
                 code: "reset_failed",
-                message: "Mnemo could not delete everything. Some data may be left. Quit Mnemo and try again.".to_string(),
+                message: "Mnemo could not delete everything. Some data may be left, and Mnemo may need to be restarted. Quit Mnemo and start it again.".to_string(),
             }
         }
     })
@@ -1056,6 +1083,59 @@ mod tests {
         assert_eq!(err.code, "export_target_invalid");
         assert!(!err.message.contains('/'));
         assert!(!missing.exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn export_failed_messages_match_what_happened_to_the_folder() {
+        use crate::storage::export::{ExportError, FolderState};
+        let msg = |folder| {
+            export_failed(ExportError::Failed {
+                cause: StorageError::FileMissing,
+                folder,
+            })
+        };
+        let none = msg(FolderState::NotCreated);
+        assert_eq!(none.code, "export_failed");
+        assert!(none.message.contains("No export folder was made"));
+        assert!(!none.message.contains("was removed"));
+        assert!(msg(FolderState::Removed).message.contains("was removed"));
+        let left = msg(FolderState::Left);
+        assert!(left.message.contains("could not be removed"));
+        assert!(!left.message.contains("was removed"));
+        // A database error with an Invalid-looking cause is not a bad target.
+        let other = export_failed(ExportError::Failed {
+            cause: StorageError::Invalid("x".into()),
+            folder: FolderState::Removed,
+        });
+        assert_eq!(other.code, "export_failed");
+    }
+
+    #[test]
+    fn export_does_not_hold_the_storage_lock_while_finishing() {
+        let (state, dir) = app_storage();
+        let job = {
+            let g = state.get().unwrap();
+            g.export_begin(&dir, "2026-11-21T12:00:00Z").unwrap()
+        };
+        // The guard is gone: another caller can lock while the copy is still to do.
+        assert!(state.get().is_ok());
+        assert!(job.finish().is_ok());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn storage_that_lost_its_database_after_a_failed_reset_says_unavailable() {
+        let (state, dir) = app_storage();
+        {
+            let mut g = state.get().unwrap();
+            g.break_for_test();
+            let err = g.reset("RESET").unwrap_err();
+            assert!(matches!(err, StorageError::Open(_)));
+        }
+        let err = state.get().err().expect("unavailable");
+        assert_eq!(err.code, "storage_unavailable");
+        assert!(!err.message.contains("no such table"));
         let _ = std::fs::remove_dir_all(dir);
     }
 

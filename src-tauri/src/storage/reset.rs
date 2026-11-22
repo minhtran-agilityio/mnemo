@@ -37,6 +37,8 @@ impl Storage {
     /// database. With any `confirm` other than `RESET_WORD` nothing is touched. The
     /// storage lock is held by the caller for the whole call. If a delete fails, what is
     /// left is still reopened so the app keeps a connection, and the error is returned.
+    /// If the reopen fails, the error carries both causes and the storage is marked
+    /// unavailable (`is_unavailable`), so no call runs against an empty stand-in.
     pub fn reset(&mut self, confirm: &str) -> Result<(), StorageError> {
         if confirm != RESET_WORD {
             return Err(StorageError::Invalid(
@@ -59,11 +61,36 @@ impl Storage {
         } {
             failed.get_or_insert(io_failed(e));
         }
-        *self = Storage::open(&db_path)?;
-        match failed {
-            Some(e) => Err(e),
-            None => Ok(()),
+        match Storage::open(&db_path) {
+            Ok(fresh) => {
+                *self = fresh;
+                match failed {
+                    Some(e) => Err(e),
+                    None => Ok(()),
+                }
+            }
+            Err(open_err) => {
+                // No database to work with. Say so on every later call, and report both
+                // causes: the delete that failed (if any) and the reopen that failed.
+                let reason = match &failed {
+                    Some(d) => format!("{open_err} Earlier, a delete failed: {d}"),
+                    None => open_err.to_string(),
+                };
+                self.unavailable = Some(reason.clone());
+                Err(StorageError::Open(reason))
+            }
         }
+    }
+}
+
+#[cfg(test)]
+impl Storage {
+    /// Points the storage at a database path that cannot be deleted or opened, to test a
+    /// Reset that cannot reopen.
+    pub(crate) fn break_for_test(&mut self) {
+        let blocker = self.files_dir.with_file_name("blocker");
+        fs::write(&blocker, b"x").unwrap();
+        self.db_path = blocker.join("mnemo.db");
     }
 }
 
@@ -142,6 +169,22 @@ mod tests {
         assert_eq!(files_in(&d.path().join("files")), 0);
         assert!(!d.path().join("files").exists() || files_in(&d.path().join("files")) == 0);
         assert_eq!(s.journal_mode().unwrap(), "wal");
+    }
+
+    #[test]
+    fn a_reset_that_cannot_reopen_returns_both_causes_and_marks_storage_down() {
+        let (mut s, _d) = open_temp();
+        s.break_for_test();
+        let err = s.reset(RESET_WORD).unwrap_err();
+        let text = err.to_string();
+        assert!(matches!(err, StorageError::Open(_)), "{text}");
+        assert!(text.contains("Earlier, a delete failed"), "{text}");
+        assert!(s.is_unavailable());
+        // A wrong word is still refused with its own error, not a table error.
+        assert!(matches!(
+            s.reset("nope").unwrap_err(),
+            StorageError::Invalid(_)
+        ));
     }
 
     #[test]

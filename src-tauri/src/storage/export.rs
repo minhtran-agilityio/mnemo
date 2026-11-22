@@ -84,8 +84,11 @@ fn stamp(now: &str) -> Result<String, StorageError> {
 }
 
 /// Makes the new folder with `create_dir`, which fails when the name exists.
-fn make_export_dir(parent: &Path, now: &str) -> Result<PathBuf, StorageError> {
-    let base = format!("{FOLDER_PREFIX}{}", stamp(now)?);
+fn make_export_dir(parent: &Path, now: &str) -> Result<PathBuf, ExportError> {
+    let base = format!(
+        "{FOLDER_PREFIX}{}",
+        stamp(now).map_err(ExportError::target)?
+    );
     for n in 1..=MAX_NAME_TRIES {
         let name = if n == 1 {
             base.clone()
@@ -96,13 +99,94 @@ fn make_export_dir(parent: &Path, now: &str) -> Result<PathBuf, StorageError> {
         match fs::create_dir(&dir) {
             Ok(()) => return Ok(dir),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(io_failed(e)),
+            Err(e) => {
+                return Err(ExportError::Failed {
+                    cause: io_failed(e),
+                    folder: FolderState::NotCreated,
+                })
+            }
         }
     }
-    Err(StorageError::Invalid(
+    Err(ExportError::Target(
         "That folder already holds too many exports from this second.".into(),
     ))
 }
+
+/// What happened to the export folder when an export failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderState {
+    /// The folder was never made.
+    NotCreated,
+    /// The partly written folder was removed.
+    Removed,
+    /// The partly written folder could not be removed and is still there.
+    Left,
+}
+
+/// Why an export did not finish.
+#[derive(Debug)]
+pub enum ExportError {
+    /// The chosen folder or the export name was refused. Nothing was written. The text is
+    /// safe to show.
+    Target(String),
+    /// The export failed part way. `folder` says what is left on disk.
+    Failed {
+        cause: StorageError,
+        folder: FolderState,
+    },
+}
+
+impl ExportError {
+    fn target(e: StorageError) -> ExportError {
+        ExportError::Target(e.to_string())
+    }
+}
+
+/// The part of an export that is left after the records are written: copying each file
+/// into the export folder. It holds no storage handle, so it runs after the storage lock
+/// is released.
+#[derive(Debug)]
+pub struct ExportJob {
+    dir: PathBuf,
+    counts: ExportCounts,
+    /// (source in the files folder, target in the export folder).
+    copies: Vec<(PathBuf, PathBuf)>,
+    files_missing: u64,
+}
+
+impl ExportJob {
+    /// Copies the files and returns the summary. A failure removes the export folder.
+    pub fn finish(self) -> Result<ExportSummary, ExportError> {
+        match self.copy_all() {
+            Ok(()) => Ok(ExportSummary {
+                folder: self.dir.to_string_lossy().into_owned(),
+                counts: self.counts,
+                files_missing: self.files_missing,
+            }),
+            Err(cause) => Err(fail_and_clean(&self.dir, cause)),
+        }
+    }
+
+    fn copy_all(&self) -> Result<(), StorageError> {
+        let dest = self.dir.join(FILES_DIR);
+        fs::create_dir(&dest).map_err(io_failed)?;
+        for (src, target) in &self.copies {
+            fs::copy(src, target).map_err(io_failed)?;
+        }
+        Ok(())
+    }
+}
+
+fn fail_and_clean(dir: &Path, cause: StorageError) -> ExportError {
+    let folder = match fs::remove_dir_all(dir) {
+        Ok(()) => FolderState::Removed,
+        Err(_) => FolderState::Left,
+    };
+    ExportError::Failed { cause, folder }
+}
+
+/// The counts, the planned file copies and how many live file records had no file.
+type WrittenExport = (ExportCounts, Vec<(PathBuf, PathBuf)>, u64);
 
 /// Writes pages of `T` as one JSON array, never holding more than one page in memory.
 fn write_array<T: Serialize>(
@@ -157,27 +241,34 @@ impl Storage {
     /// Exports every live record into a new `mnemo-export-<timestamp>/` folder inside
     /// `parent`, which must be an existing folder. `now` is UTC ISO 8601. A folder the
     /// export made is removed again when the export fails; no other folder is touched.
-    pub fn export_to(&self, parent: &Path, now: &str) -> Result<ExportSummary, StorageError> {
+    /// This holds the storage for the whole export, files included; the app uses
+    /// `export_begin` and `ExportJob::finish` so the file copy runs without the lock.
+    #[cfg(test)]
+    pub fn export_to(&self, parent: &Path, now: &str) -> Result<ExportSummary, ExportError> {
+        self.export_begin(parent, now)?.finish()
+    }
+
+    /// Writes the records and plans the file copies. The caller drops its storage lock
+    /// before calling `finish` on the result.
+    pub fn export_begin(&self, parent: &Path, now: &str) -> Result<ExportJob, ExportError> {
         if !parent.is_dir() {
-            return Err(StorageError::Invalid(
+            return Err(ExportError::Target(
                 "Choose an existing folder to export into.".into(),
             ));
         }
         let dir = make_export_dir(parent, now)?;
         match self.write_export(&dir) {
-            Ok((counts, files_missing)) => Ok(ExportSummary {
-                folder: dir.to_string_lossy().into_owned(),
+            Ok((counts, copies, files_missing)) => Ok(ExportJob {
+                dir,
                 counts,
+                copies,
                 files_missing,
             }),
-            Err(e) => {
-                let _ = fs::remove_dir_all(&dir);
-                Err(e)
-            }
+            Err(cause) => Err(fail_and_clean(&dir, cause)),
         }
     }
 
-    fn write_export(&self, dir: &Path) -> Result<(ExportCounts, u64), StorageError> {
+    fn write_export(&self, dir: &Path) -> Result<WrittenExport, StorageError> {
         let json = |name: &str| dir.join(format!("{name}.json"));
         let mut c = ExportCounts {
             notes: self.export_notes(&dir.join("notes"))?,
@@ -205,8 +296,8 @@ impl Storage {
         })?;
         c.links = write_array(&json("links"), |a| self.page_links(&page_of(a)))?;
         c.files = write_array(&json("files"), |a| self.page_files(&page_of(a)))?;
-        let missing = self.copy_files(&dir.join(FILES_DIR))?;
-        Ok((c, missing))
+        let (copies, missing) = self.plan_file_copies(&dir.join(FILES_DIR))?;
+        Ok((c, copies, missing))
     }
 
     fn export_notes(&self, dir: &Path) -> Result<u64, StorageError> {
@@ -317,10 +408,13 @@ impl Storage {
         ))
     }
 
-    /// Copies the file of each live record to `dest/<disk name>`. Returns how many live
-    /// records had no file on disk.
-    fn copy_files(&self, dest: &Path) -> Result<u64, StorageError> {
-        fs::create_dir(dest).map_err(io_failed)?;
+    /// Lists, for each live record whose file is on disk, where to copy it from and to
+    /// (`dest/<disk name>`). Returns that list and how many live records had no file.
+    fn plan_file_copies(
+        &self,
+        dest: &Path,
+    ) -> Result<(Vec<(PathBuf, PathBuf)>, u64), StorageError> {
+        let mut copies = Vec::new();
         let mut missing = 0;
         let mut after: Option<Cursor> = None;
         loop {
@@ -332,9 +426,7 @@ impl Storage {
                     |r| r.get(0),
                 )?;
                 match self.resolve(&stored) {
-                    Ok(src) => {
-                        fs::copy(src, dest.join(&stored)).map_err(io_failed)?;
-                    }
+                    Ok(src) => copies.push((src, dest.join(&stored))),
                     Err(StorageError::FileMissing) => missing += 1,
                     Err(e) => return Err(e),
                 }
@@ -344,7 +436,7 @@ impl Storage {
                 None => break,
             }
         }
-        Ok(missing)
+        Ok((copies, missing))
     }
 }
 
@@ -604,14 +696,67 @@ pub(crate) mod tests {
         let missing = d.path().join("nope");
         assert!(matches!(
             s.export_to(&missing, NOW),
-            Err(StorageError::Invalid(_))
+            Err(ExportError::Target(_))
         ));
         assert!(!missing.exists(), "the missing folder was created");
         let file = d.path().join("a-file");
         fs::write(&file, b"x").unwrap();
         assert!(matches!(
             s.export_to(&file, NOW),
-            Err(StorageError::Invalid(_))
+            Err(ExportError::Target(_))
+        ));
+    }
+
+    #[test]
+    fn the_file_copy_runs_without_the_storage() {
+        let (s, d) = open_temp();
+        let rec = s.save_file("a.bin", &[1, 2, 3]).unwrap();
+        let out = TempDir::new();
+        let job = s.export_begin(out.path(), NOW).unwrap();
+        // The storage is gone (its lock would be free); the copy still finishes.
+        drop(s);
+        let sum = job.finish().unwrap();
+        assert_eq!(sum.counts.files, 1);
+        assert_eq!(sum.files_missing, 0);
+        let copied: Vec<_> = fs::read_dir(Path::new(&sum.folder).join("files"))
+            .unwrap()
+            .collect();
+        assert_eq!(copied.len(), 1);
+        assert!(!rec.id.is_empty());
+        drop(d);
+    }
+
+    #[test]
+    fn a_failed_copy_removes_the_folder_and_says_so() {
+        let (s, d) = open_temp();
+        s.save_file("a.bin", &[1, 2, 3]).unwrap();
+        let out = TempDir::new();
+        let job = s.export_begin(out.path(), NOW).unwrap();
+        // Remove the stored file after planning, so the copy fails.
+        fs::remove_dir_all(d.path().join("files")).unwrap();
+        let folder = job.dir.clone();
+        match job.finish() {
+            Err(ExportError::Failed { folder: state, .. }) => {
+                assert_eq!(state, FolderState::Removed)
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(!folder.exists());
+    }
+
+    #[test]
+    fn a_failed_write_that_cannot_clean_up_says_the_folder_is_left() {
+        let e = fail_and_clean(
+            Path::new("/nonexistent-mnemo-dir/x"),
+            StorageError::FileMissing,
+        );
+        // remove_dir_all of a missing path fails, so the state is Left.
+        assert!(matches!(
+            e,
+            ExportError::Failed {
+                folder: FolderState::Left,
+                ..
+            }
         ));
     }
 
