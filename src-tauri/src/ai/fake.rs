@@ -1,6 +1,8 @@
 // The fake AI runner for tests and for `MNEMO_FAKE_AI=1`. It returns fixed results set by the
 // caller, in order, and records every request. It never starts a process. One result
 // (`BlockUntilCancelled`) holds the run open until its cancel token is set, for cancel tests.
+// Usage readings can be queued too: each run hands the next one to the usage sink before it
+// gives its result, as the real runner does when `claude -p` prints a `rate_limit_event`.
 
 // The AI features of issue #19 and later call these items; until they land, only tests and the
 // mode command use them.
@@ -12,6 +14,7 @@ use std::time::Duration;
 
 use super::cancel::CancelToken;
 use super::runner::{AiError, AiOutput, AiRunner, AiTask};
+use super::usage::{UsageReading, UsageSink};
 
 /// How often a blocked fake run looks at its cancel token.
 const CANCEL_POLL: Duration = Duration::from_millis(5);
@@ -57,6 +60,10 @@ impl FakeResult {
 struct Inner {
     queue: VecDeque<FakeResult>,
     requests: Vec<AiTask>,
+    readings: VecDeque<UsageReading>,
+    sink: Option<UsageSink>,
+    /// How many runs reached the point where the real runner starts a process.
+    starts: usize,
 }
 
 /// A runner that answers from a queue of fixed results and logs the requests it got.
@@ -87,16 +94,37 @@ impl FakeRunner {
     pub fn requests(&self) -> Vec<AiTask> {
         self.lock().requests.clone()
     }
+
+    /// Where the usage readings go, as with the real runner's sink.
+    pub fn set_sink(&self, sink: UsageSink) {
+        self.lock().sink = Some(sink);
+    }
+
+    /// Queues one usage reading. The next run hands it to the sink before it gives its result.
+    pub fn push_reading(&self, reading: UsageReading) {
+        self.lock().readings.push_back(reading);
+    }
+
+    /// How many runs reached the point where the real runner starts a `claude -p` process.
+    pub fn starts(&self) -> usize {
+        self.lock().starts
+    }
 }
 
 impl AiRunner for FakeRunner {
     fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
         // The lock is let go before the result is made, so a blocked run never holds it.
-        let next = {
+        let (next, reading, sink) = {
             let mut inner = self.lock();
             inner.requests.push(task.clone());
-            inner.queue.pop_front()
+            inner.starts += 1;
+            let reading = inner.readings.pop_front();
+            (inner.queue.pop_front(), reading, inner.sink.clone())
         };
+        // Like a real run: the reading arrives while the run goes, before its result.
+        if let (Some(reading), Some(sink)) = (reading, sink) {
+            sink(reading);
+        }
         next.as_ref().unwrap_or(&self.default).to_result(cancel)
     }
 }
@@ -188,6 +216,31 @@ mod tests {
         assert_eq!(seen[0].schema, r#"{"type":"object"}"#);
         assert_eq!(seen[0].tools, vec!["WebFetch".to_string()]);
         assert_eq!(seen[0].model, "haiku");
+    }
+
+    #[test]
+    fn fake_counts_process_starts_and_gives_a_pushed_usage_reading_before_the_result() {
+        use std::sync::{Arc, Mutex};
+        let fake = FakeRunner::new(FakeResult::UsageLimit);
+        let seen: Arc<Mutex<Vec<UsageReading>>> = Arc::default();
+        let kept = seen.clone();
+        fake.set_sink(Arc::new(move |r| kept.lock().unwrap().push(r)));
+        let reading = UsageReading {
+            resets_at: Some(42),
+            ..UsageReading::default()
+        };
+        fake.push_reading(reading.clone());
+        assert_eq!(fake.starts(), 0);
+        assert_eq!(
+            fake.run_task(&task(), &CancelToken::default()),
+            Err(AiError::UsageLimit)
+        );
+        assert_eq!(fake.starts(), 1);
+        assert_eq!(*seen.lock().unwrap(), vec![reading]);
+        // The reading is used once.
+        let _ = fake.run_task(&task(), &CancelToken::default());
+        assert_eq!(fake.starts(), 2);
+        assert_eq!(seen.lock().unwrap().len(), 1);
     }
 
     #[test]

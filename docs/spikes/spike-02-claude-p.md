@@ -49,11 +49,22 @@ Limit: the control (the same calls without the flag) was not run, because it wou
 Evidence lines from `/usr/bin/time -v`: `Maximum resident set size (kbytes): 421848` and `Elapsed (wall clock) time: 0:05.51` (case `q1_q5_json_schema`); 428500 kB / 5.55 s (`q2_stream_json`); 391268 kB / 2.96 s with no connectors (`q4_strict_mcp`).
 Limit: tiny prompt, so real tasks take longer. The figure is the peak of the largest process that `time` waited for, not a sum over child processes. Mac (`/usr/bin/time -l`, bytes): 392593408 B / 4.80 s (`q1_q5_json_schema`), 412155904 B / 4.44 s (`q2_stream_json`), 373555200 B / 2.39 s (`q4_strict_mcp`), 378732544 B / 2.61 s (`q4_connector_calls`). Same limits as above. Plan about 0.4 GB per parallel run on both machines.
 
+### Usage windows (Unverified), as read by #23
+Mnemo reads every `rate_limit_event` (stream-json lines, and elements of the json output array) in `src-tauri/src/ai/usage.rs`:
+- Shape read: `rate_limit_info.unifiedWindows.five_hour` and `.seven_day`, each with `utilization`, `resetsAt` and `status`; plus `rate_limit_info.status`, `resetsAt` and `rateLimitType`. The shape is the one seen above. A field of an unexpected type is dropped on its own; the event is still read, so a `rejected` status is never lost.
+- **Unverified: the scale.** `utilization` is read as a fraction 0..1 and shown as `round(utilization * 100)` percent (0.57 shows as 57%). It may instead be a percent already (0.57 meaning 0.57%). Until it is checked, Settings > AI marks every percent "Unverified", and the warn (60%) and pause (95%) lines act on the assumed scale.
+- `resetsAt` is read as Unix seconds (seen above). A time in the past or more than 8 days ahead is dropped; Mnemo never guesses a time.
+- At the limit: the window with `status: "rejected"` (else the one at or above 100%) gives the time the limit pause lifts; the event's own `resetsAt` is used only when the event itself says `rejected`. **Unverified:** what the event looks like at the limit (see above).
+- The last reading is stored in the `settings` table as `ai_usage_last` (JSON with its read time).
+- Ubuntu prints the json output as one object, so only stream-json runs give a reading there; with no reading, Settings shows Mnemo's own run count instead.
+
+**Owner step (open):** run one prompt, compare `unifiedWindows.five_hour.utilization` with the usage page of the account on claude.ai at the same moment, then pin the scale in a unit test in `src-tauri/src/ai/usage.rs` and in this section.
+
 ## Mac (Apple Silicon)
 Run on 2026-11-18 with `bash scripts/spike-claude-p.sh` (exit 0, all 4 cases `exit=0`, the output file holds no `sk-ant`, `bearer` or `oauth` text). Question 3 was run by hand as described above. The results are in the table and in each answer.
 
 ## Status
-Both machines ran the script. Open: question 3 on Ubuntu, and the `utilization` scale (Q2). Neither blocks the design: Q1, Q2 and Q3 are Yes, so the fallbacks (`CLAUDE_CONFIG_DIR`; counting runs in #23) are not needed.
+Both machines ran the script. Open: question 3 on Ubuntu, and the `utilization` scale (Q2; see "Usage windows (Unverified)" for the owner step). Neither blocks the design: Q1, Q2 and Q3 are Yes, so the fallbacks (`CLAUDE_CONFIG_DIR`; counting runs in #23) are not needed.
 
 ## Links
 - #19 (AI runner): use `--json-schema` and read `structured_output` (Q1); no sign-in, no token.

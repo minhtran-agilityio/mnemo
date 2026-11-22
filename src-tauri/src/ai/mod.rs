@@ -12,3 +12,4 @@ pub mod runner;
 mod sample;
 pub mod stream;
 pub mod test_prompt;
+pub mod usage;
