@@ -308,17 +308,23 @@ impl ConfiguredRunner {
     pub fn new(inner: Arc<dyn AiRunner>, choices: Arc<dyn ModelChoices>) -> Self {
         ConfiguredRunner { inner, choices }
     }
+
+    /// The task with the model and effort of its row. A task without a row is returned as built.
+    /// `run_task` uses it, and so must any other way to run a task (such as stream mode, which
+    /// takes an `AiTask` directly): call this first, so the Settings choice applies there too.
+    pub fn configure(&self, task: &AiTask) -> AiTask {
+        let mut task = task.clone();
+        if let Some(row) = self.choices.row(&task.name) {
+            task.model = row.model.value().to_string();
+            task.effort = Some(row.effort.value().to_string());
+        }
+        task
+    }
 }
 
 impl AiRunner for ConfiguredRunner {
     fn run_task(&self, task: &AiTask) -> Result<AiOutput, AiError> {
-        let Some(row) = self.choices.row(&task.name) else {
-            return self.inner.run_task(task);
-        };
-        let mut task = task.clone();
-        task.model = row.model.value().to_string();
-        task.effort = Some(row.effort.value().to_string());
-        self.inner.run_task(&task)
+        self.inner.run_task(&self.configure(task))
     }
 }
 
@@ -541,6 +547,20 @@ mod tests {
         assert_eq!(seen[1].model, "sonnet");
         assert_eq!(seen[1].effort.as_deref(), Some("high"));
         assert_eq!(seen[1].prompt, "p");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn configure_gives_a_stream_task_the_chosen_model_and_effort() {
+        let (s, dir) = open();
+        let storage = Arc::new(std::sync::Mutex::new(s));
+        let fake = Arc::new(FakeRunner::new(FakeResult::Valid("{}".into())));
+        let runner = ConfiguredRunner::new(fake, Arc::new(TestChoices(storage.clone())));
+        set_row(&storage.lock().unwrap(), "save", "opus", "high").unwrap();
+        let task = runner.configure(&save_task());
+        assert_eq!(task.model, "opus");
+        assert_eq!(task.effort.as_deref(), Some("high"));
+        assert_eq!(task.prompt, "p");
         let _ = std::fs::remove_dir_all(dir);
     }
 
