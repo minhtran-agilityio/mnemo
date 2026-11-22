@@ -308,23 +308,22 @@ impl ConfiguredRunner {
     pub fn new(inner: Arc<dyn AiRunner>, choices: Arc<dyn ModelChoices>) -> Self {
         ConfiguredRunner { inner, choices }
     }
+}
+
+impl AiRunner for ConfiguredRunner {
+    fn run_task(&self, task: &AiTask) -> Result<AiOutput, AiError> {
+        self.inner.run_task(&self.configure(task))
+    }
 
     /// The task with the model and effort of its row. A task without a row is returned as built.
-    /// `run_task` uses it, and so must any other way to run a task (such as stream mode, which
-    /// takes an `AiTask` directly): call this first, so the Settings choice applies there too.
-    pub fn configure(&self, task: &AiTask) -> AiTask {
+    /// Stream mode takes an `AiTask` directly, so it calls this through the trait object.
+    fn configure(&self, task: &AiTask) -> AiTask {
         let mut task = task.clone();
         if let Some(row) = self.choices.row(&task.name) {
             task.model = row.model.value().to_string();
             task.effort = Some(row.effort.value().to_string());
         }
         task
-    }
-}
-
-impl AiRunner for ConfiguredRunner {
-    fn run_task(&self, task: &AiTask) -> Result<AiOutput, AiError> {
-        self.inner.run_task(&self.configure(task))
     }
 }
 
@@ -557,7 +556,8 @@ mod tests {
         let fake = Arc::new(FakeRunner::new(FakeResult::Valid("{}".into())));
         let runner = ConfiguredRunner::new(fake, Arc::new(TestChoices(storage.clone())));
         set_row(&storage.lock().unwrap(), "save", "opus", "high").unwrap();
-        let task = runner.configure(&save_task());
+        let dynamic: Arc<dyn AiRunner> = Arc::new(runner);
+        let task = dynamic.configure(&save_task());
         assert_eq!(task.model, "opus");
         assert_eq!(task.effort.as_deref(), Some("high"));
         assert_eq!(task.prompt, "p");
