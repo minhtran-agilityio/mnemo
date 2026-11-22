@@ -153,3 +153,35 @@ test("the error sits in a stable polite live region and updates in place", () =>
 test("setFieldError throws for an element that is not a field", () => {
   expect(() => setFieldError(document.createElement("div"), "x")).toThrow();
 });
+
+test("the same message set twice changes nothing in the DOM", async () => {
+  const { f } = build("Hint");
+  setFieldError(f, "Same");
+  const seen: MutationRecord[] = [];
+  const observer = new MutationObserver((r) => seen.push(...r));
+  observer.observe(f, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+  });
+  setFieldError(f, "Same");
+  setFieldError(f, "Same");
+  await new Promise((r) => setTimeout(r, 0));
+  seen.push(...observer.takeRecords());
+  observer.disconnect();
+  expect(seen).toHaveLength(0);
+  f.remove();
+});
+
+test("the hint stays outside the live region, so it is not announced when it returns", () => {
+  const { f } = build("Hint");
+  const note = f.querySelector("[aria-live]");
+  setFieldError(f, "Bad");
+  setFieldError(f, null);
+  const hint = f.querySelector(".hint");
+  expect(hint).not.toBeNull();
+  expect(note?.contains(hint ?? null)).toBe(false);
+  expect(note?.children).toHaveLength(0);
+  f.remove();
+});

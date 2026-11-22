@@ -26,7 +26,7 @@
   font-weight: var(--weight-semibold);
 }
 
-/* The live region is always there; when empty it takes no space (cancels the flex gap). */
+/* The live region is always there; when empty it takes no space (cancels the .field gap, --space-1). */
 .field-note {
   display: flex;
   flex-direction: column;
