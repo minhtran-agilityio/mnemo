@@ -1,7 +1,7 @@
 // Mnemo's own Claude config: the three files every `claude -p` run uses instead of the owner's
 // personal Claude Code setup.
 //
-// The files live in `config_dir` (`~/.config/mnemo`, built by `system::paths`):
+// The files live in `config_dir` (Mnemo's own config folder, built only by `system::paths`):
 // - `settings.json`: passed with `--settings`.
 // - `mcp.json`: passed with `--mcp-config` (with `--strict-mcp-config`), no connectors by default.
 // - `allowed-tools.json`: the tools each feature may use. An empty list means no tool.
