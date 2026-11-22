@@ -297,3 +297,60 @@ test("an unverified figure that drives the tone says so in the note", () => {
     "unverified",
   );
 });
+
+test("the unverified note follows the window that drives the tone", () => {
+  const verifiedDrives = buildUsageWindows({
+    windows: [
+      { label: "5h", percent: 20, unverified: true },
+      { label: "7d", percent: 80 },
+    ],
+  });
+  expect(verifiedDrives.classList.contains("meter-warn")).toBe(true);
+  expect(
+    verifiedDrives.querySelector(".meter-note")?.textContent,
+  ).not.toContain("unverified");
+  const unverifiedDrives = buildUsageWindows({
+    windows: [
+      { label: "5h", percent: 80, unverified: true },
+      { label: "7d", percent: 20 },
+    ],
+  });
+  expect(unverifiedDrives.querySelector(".meter-note")?.textContent).toContain(
+    "The figure is unverified.",
+  );
+});
+
+test("a percent that is not a number shows no reading, never NaN", () => {
+  const m = buildUsageMeter({ label: "x", percent: Number.NaN });
+  expect(m.textContent).not.toContain("NaN");
+  expect(m.querySelector(".meter-value")?.textContent).toBe("No reading");
+  expect(m.querySelector('[role="meter"]')?.hasAttribute("aria-valuenow")).toBe(
+    false,
+  );
+});
+
+test("no windows is an honest no-data note, not a healthy meter", () => {
+  const m = buildUsageWindows({ windows: [] });
+  expect(m.querySelector('[role="meter"]')).toBeNull();
+  expect(m.textContent).toContain("No usage reading yet.");
+});
+
+test("a run count rejects negative and non-numbers", () => {
+  expect(() => buildRunCount({ label: "x", count: -1 })).toThrow(RangeError);
+  expect(() =>
+    buildRunCount({ label: "x", today: Number.NaN, week: 3 }),
+  ).toThrow(RangeError);
+  expect(() => buildRunCount({ label: "x", today: 1, week: -2 })).toThrow(
+    RangeError,
+  );
+});
+
+test("note ids differ between meters", () => {
+  const a = buildUsageMeter({ label: "a", percent: 1 }).querySelector(
+    ".meter-note",
+  );
+  const b = buildUsageMeter({ label: "b", percent: 1 }).querySelector(
+    ".meter-note",
+  );
+  expect(a?.id).not.toBe(b?.id);
+});

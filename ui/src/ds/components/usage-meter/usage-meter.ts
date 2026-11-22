@@ -57,19 +57,25 @@ function clamp(percent: number): number {
   return Math.round(Math.min(100, Math.max(0, percent)));
 }
 
-function line(value: number | undefined, fallback: number): number {
+function lineValue(value: number | undefined, fallback: number): number {
   if (value === undefined || Number.isNaN(value)) return fallback;
   return Math.min(100, Math.max(0, value));
 }
 
 /** Both lines clamped to 0 to 100 (NaN falls back to the default); pause is never below warn. */
 function resolveLines(lines: UsageLines): { warnAt: number; pauseAt: number } {
-  const warnAt = line(lines.warnAt, USAGE_WARN_AT);
-  const pauseAt = Math.max(warnAt, line(lines.pauseAt, USAGE_PAUSE_AT));
+  const warnAt = lineValue(lines.warnAt, USAGE_WARN_AT);
+  const pauseAt = Math.max(warnAt, lineValue(lines.pauseAt, USAGE_PAUSE_AT));
   return { warnAt, pauseAt };
 }
 
 let noteCount = 0;
+
+/** An id that does not collide with another meter, even in another root. */
+function noteId(): string {
+  noteCount += 1;
+  return `meter-note-${noteCount}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 function note(
   tone: UsageTone,
@@ -79,8 +85,7 @@ function note(
 ): HTMLElement {
   const box = document.createElement("div");
   box.className = "meter-note";
-  noteCount += 1;
-  box.id = `meter-note-${noteCount}`;
+  box.id = noteId();
   const line = document.createElement("span");
   if (tone === "warn") {
     box.append(createIcon(TriangleAlert, "sm"));
@@ -109,8 +114,9 @@ function bar(
   lines: { warnAt: number; pauseAt: number },
   unverified: boolean,
   resetsAt?: string,
-): { top: HTMLElement; track: HTMLElement; percent: number } {
-  const percent = clamp(rawPercent);
+): { top: HTMLElement; track: HTMLElement; percent: number; known: boolean } {
+  const known = Number.isFinite(rawPercent);
+  const percent = known ? clamp(rawPercent) : 0;
   const top = document.createElement("div");
   top.className = "meter-top";
   const name = document.createElement("b");
@@ -118,9 +124,11 @@ function bar(
   name.textContent = label;
   const value = document.createElement("span");
   value.className = "meter-value";
-  value.textContent = unverified
-    ? `${percent}% (Unverified)`
-    : `${percent}% used`;
+  value.textContent = !known
+    ? "No reading"
+    : unverified
+      ? `${percent}% (Unverified)`
+      : `${percent}% used`;
   top.append(name, value);
   if (resetsAt) {
     const reset = document.createElement("span");
@@ -134,10 +142,12 @@ function bar(
   track.setAttribute("role", "meter");
   track.setAttribute("aria-valuemin", "0");
   track.setAttribute("aria-valuemax", "100");
-  track.setAttribute("aria-valuenow", String(percent));
+  if (known) track.setAttribute("aria-valuenow", String(percent));
   track.setAttribute(
     "aria-label",
-    `${label} ${percent}%${unverified ? " (Unverified)" : ""}`,
+    known
+      ? `${label} ${percent}%${unverified ? " (Unverified)" : ""}`
+      : `${label}: no reading`,
   );
   const fill = document.createElement("span");
   const own = usageTone(percent, lines.warnAt, lines.pauseAt);
@@ -151,7 +161,7 @@ function bar(
     tick.style.left = `${at}%`;
     track.append(tick);
   }
-  return { top, track, percent };
+  return { top, track, percent, known };
 }
 
 /**
@@ -186,10 +196,31 @@ export function buildUsageMeter(options: UsageMeterOptions): HTMLElement {
  */
 export function buildUsageWindows(options: UsageWindowsOptions): HTMLElement {
   const lines = resolveLines(options);
+  if (options.windows.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "meter meter-windows";
+    const none = document.createElement("div");
+    none.className = "meter-note";
+    const text = document.createElement("span");
+    text.textContent = "No usage reading yet.";
+    none.append(createIcon(ShieldAlert, "sm"), text);
+    empty.append(none);
+    return empty;
+  }
   const bars = options.windows.map((w) =>
     bar(w.label, w.percent, lines, w.unverified ?? false, w.resetsAt),
   );
-  const highest = bars.reduce((max, b) => Math.max(max, b.percent), 0);
+  const highest = bars.reduce(
+    (max, b) => (b.known ? Math.max(max, b.percent) : max),
+    0,
+  );
+  // The window that drives the tone decides the "unverified" note. On a tie, one verified
+  // window is enough to stand behind the tone.
+  const drivers = options.windows.filter(
+    (_w, i) => bars[i]?.known && bars[i]?.percent === highest,
+  );
+  const drivenUnverified =
+    drivers.length > 0 && drivers.every((w) => w.unverified);
   const tone = usageTone(highest, lines.warnAt, lines.pauseAt);
   const meter = document.createElement("div");
   meter.className =
@@ -203,12 +234,7 @@ export function buildUsageWindows(options: UsageWindowsOptions): HTMLElement {
     meter.append(group);
   }
   // Each window's reset time is in its own row; the note does not repeat it.
-  const noteBox = note(
-    tone,
-    lines,
-    undefined,
-    options.windows.some((w) => w.unverified),
-  );
+  const noteBox = note(tone, lines, undefined, drivenUnverified);
   for (const b of bars) b.track.setAttribute("aria-describedby", noteBox.id);
   meter.append(noteBox);
   if (options.readAgo) meter.append(ageLine(options.readAgo));
@@ -236,6 +262,11 @@ export type RunCountOptions =
  * owner's full Claude usage is not shown, because Mnemo cannot read it.
  */
 export function buildRunCount(options: RunCountOptions): HTMLElement {
+  for (const n of [options.count, options.today, options.week]) {
+    if (n !== undefined && !(Number.isFinite(n) && n >= 0)) {
+      throw new RangeError("A run count is a number of 0 or more.");
+    }
+  }
   const meter = document.createElement("div");
   meter.className = "meter";
   const top = document.createElement("div");

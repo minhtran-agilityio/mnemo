@@ -35,14 +35,6 @@
   background: var(--accent);
 }
 
-.meter-warn .meter-fill {
-  background: var(--warn-ink);
-}
-
-.meter-pause .meter-fill {
-  background: var(--bad);
-}
-
 .meter-tick {
   position: absolute;
   top: calc(-1 * var(--space-1));
@@ -97,18 +89,5 @@
 }
 
 .meter-fill-pause {
-  background: var(--bad);
-}
-
-/* In two windows each bar takes its own colour, not the group's. */
-.meter-windows .meter-fill {
-  background: var(--accent);
-}
-
-.meter-windows .meter-fill-warn {
-  background: var(--warn-ink);
-}
-
-.meter-windows .meter-fill-pause {
   background: var(--bad);
 }
