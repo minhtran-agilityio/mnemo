@@ -72,7 +72,7 @@ test("the limit reason shows the reset time, or none when unknown", () => {
     action: { label: "Resume", onClick: () => {} },
   });
   expect(known.querySelector("p")?.textContent).toContain(
-    "Usage limit reached. Background work is paused until 14:30, or until you resume it.",
+    "Background work is paused until 14:30, or until you resume it.",
   );
   const unknown = buildAiOffState({ reason: "limit" });
   expect(unknown.querySelector("p")?.textContent).not.toMatch(/\d:\d/);
@@ -100,9 +100,13 @@ test("the action is optional, is a real button and can be clicked", () => {
 });
 
 test("a long reset text goes in as text", () => {
-  const long = "x".repeat(300);
+  const html = "<img src=x onerror=x>";
+  const long = `${"x".repeat(300)} ${html}`;
   const box = buildAiOffState({ reason: "limit", resetAt: long });
-  expect(box.querySelector("p")?.textContent).toContain(long);
+  const p = box.querySelector("p");
+  expect(p?.textContent).toContain(long);
+  expect(p?.children.length).toBe(0);
+  expect(box.querySelector("img")).toBeNull();
 });
 
 test("the resume clause shows only when there is an action to resume with", () => {
@@ -115,18 +119,4 @@ test("the resume clause shows only when there is an action to resume with", () =
     });
     expect(withAction.querySelector("p")?.textContent).toMatch(/you resume/);
   }
-});
-
-test("the action button is a native button, so Enter and Space work and it takes focus", () => {
-  const box = buildAiOffState({
-    reason: "paused",
-    action: { label: "Resume", onClick: () => {} },
-  });
-  document.body.append(box);
-  const button = box.querySelector("button");
-  button?.focus();
-  expect(document.activeElement).toBe(button);
-  expect(button?.tagName).toBe("BUTTON");
-  expect(button?.disabled).toBe(false);
-  box.remove();
 });

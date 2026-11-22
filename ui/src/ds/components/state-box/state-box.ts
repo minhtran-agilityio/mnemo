@@ -73,8 +73,10 @@ export interface AiOffStateOptions {
   /** Why AI is not running: the owner turned it off, the usage limit was reached, or background work is paused. */
   readonly reason?: "off" | "limit" | "paused";
   /**
-   * For "limit": when the limit resets, as text (for example "14:30"). Pass a verified time only:
-   * the box shows it as fact, so an unverified time must be left out (rule 8). Leave it out when unknown.
+   * For "limit": when the limit resets, as text (for example "14:30").
+   * The caller's duty: pass a verified time only, as a full phrase with the day when the reset is
+   * not today (for example "Thursday 14:30"), because a bare clock time can be wrong. The box shows
+   * it as fact, so an unverified time must be left out (rule 8). Leave it out when unknown.
    */
   readonly resetAt?: string;
   /** One action, for example "Turn AI on" or "Resume". */
@@ -94,7 +96,7 @@ export function buildAiOffState(
     return buildStateBox({
       icon: Pause,
       title: "At usage limit",
-      body: `Usage limit reached. Background work is paused ${until}${action ? ", or until you resume it" : ""}. ${STILL_WORKS}`,
+      body: `Background work is paused ${until}${action ? ", or until you resume it" : ""}. ${STILL_WORKS}`,
       action,
     });
   }
