@@ -19,6 +19,13 @@ export interface FieldOptions {
 interface FieldState {
   readonly target: HTMLElement;
   readonly hint?: string;
+  readonly hintId: string;
+  readonly errorId: string;
+  /** The live region that holds the hint or the error. */
+  readonly note: HTMLElement;
+  /** What the caller had set on the control; put back when the field stops writing it. */
+  readonly ownDescribedBy: string | null;
+  readonly ownInvalid: string | null;
 }
 
 const fields = new WeakMap<HTMLElement, FieldState>();
@@ -47,9 +54,22 @@ export function createField(doc: Document, options: FieldOptions): HTMLElement {
   const label = doc.createElement("label");
   label.htmlFor = target.id;
   label.textContent = options.label;
-  wrap.append(label, options.control);
-  fields.set(wrap, { target, hint: options.hint });
-  setFieldError(wrap, options.error ?? null);
+  // One stable polite live region: a message put into it while the owner types is announced.
+  const note = doc.createElement("div");
+  note.className = "field-note";
+  note.setAttribute("aria-live", "polite");
+  wrap.append(label, options.control, note);
+  fields.set(wrap, {
+    target,
+    hint: options.hint,
+    hintId: `${target.id}-hint`,
+    errorId: `${target.id}-error`,
+    note,
+    ownDescribedBy: target.getAttribute("aria-describedby"),
+    ownInvalid: target.getAttribute("aria-invalid"),
+  });
+  if (options.error) setFieldError(wrap, options.error);
+  else if (options.hint) setFieldError(wrap, null);
   return wrap;
 }
 
@@ -57,34 +77,41 @@ export function createField(doc: Document, options: FieldOptions): HTMLElement {
  * Show, change or clear a field's error after it is built. The control is not touched, so focus
  * and the caret stay. A message replaces the hint and marks the target invalid; null or an empty
  * message brings the hint back (or nothing, when the field had none) and clears aria-invalid.
+ * The error text changes in place inside a polite live region, so it is announced. Only the
+ * attributes this field wrote are changed; what the caller set on the control is put back.
+ * `field` must come from createField.
  */
 export function setFieldError(
   field: HTMLElement,
   message: string | null,
 ): void {
   const state = fields.get(field);
-  if (!state) return;
-  const { target, hint } = state;
+  if (!state) throw new Error("setFieldError: not a field made by createField");
+  const { target, hint, hintId, errorId, note } = state;
   const doc = field.ownerDocument;
-  const errId = `${target.id}-error`;
-  const hintId = `${target.id}-hint`;
-  const err = field.querySelector(":scope > .err-text");
-  const shownHint = field.querySelector(":scope > .hint");
+  const err = note.querySelector(".err-text");
+  const shownHint = note.querySelector(".hint");
   if (message) {
     shownHint?.remove();
-    const next = buildError(doc, errId, message);
-    if (err) err.replaceWith(next);
-    else field.append(next);
+    if (err) {
+      const text = err.lastChild;
+      if (text) text.textContent = message;
+    } else {
+      note.append(buildError(doc, errorId, message));
+    }
     target.setAttribute("aria-invalid", "true");
-    target.setAttribute("aria-describedby", errId);
+    target.setAttribute("aria-describedby", errorId);
     return;
   }
   err?.remove();
-  target.removeAttribute("aria-invalid");
+  if (state.ownInvalid === null) target.removeAttribute("aria-invalid");
+  else target.setAttribute("aria-invalid", state.ownInvalid);
   if (hint) {
-    if (!shownHint) field.append(buildHint(doc, hintId, hint));
+    if (!shownHint) note.append(buildHint(doc, hintId, hint));
     target.setAttribute("aria-describedby", hintId);
-  } else {
+  } else if (state.ownDescribedBy === null) {
     target.removeAttribute("aria-describedby");
+  } else {
+    target.setAttribute("aria-describedby", state.ownDescribedBy);
   }
 }

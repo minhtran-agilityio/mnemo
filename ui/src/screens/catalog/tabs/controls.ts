@@ -250,20 +250,30 @@ function liveLines(ctx: TabContext) {
     control: pause,
     hint: "Between 1 and 99.",
   });
+  const range = "Enter a whole number from 1 to 99.";
+  const check = (raw: string): number | string => {
+    const text = raw.trim();
+    if (!/^\d+$/.test(text)) return range;
+    const n = Number(text);
+    return n < 1 || n > 99 ? range : n;
+  };
   const validate = () => {
-    const w = Number(warn.value);
-    const p = Number(pause.value);
-    setFieldError(
-      warnField,
-      w >= p ? "The warn line must be lower than the pause line." : null,
-    );
+    const w = check(warn.value);
+    const p = check(pause.value);
+    // The pair rule is about the warn line, so it sits on the warn field.
+    const pair =
+      typeof w === "number" && typeof p === "number" && w >= p
+        ? "The warn line must be lower than the pause line."
+        : null;
+    setFieldError(warnField, typeof w === "string" ? w : pair);
+    setFieldError(pauseField, typeof p === "string" ? p : null);
   };
   warn.addEventListener("input", validate);
   pause.addEventListener("input", validate);
   validate();
   return state(
     doc,
-    "error set and cleared in place (type to try)",
+    "error set and cleared as you type",
     [warnField, pauseField],
     { grow: true },
   );

@@ -121,3 +121,35 @@ test("an error replaces the hint, marks the input invalid and shows an icon", ()
   expect(input.getAttribute("aria-invalid")).toBe("true");
   expect(input.getAttribute("aria-describedby")).toBe(err?.id);
 });
+
+test("createField leaves what the caller set when there is no hint or error", () => {
+  const input = createTextInput(document, {});
+  input.setAttribute("aria-describedby", "own-help");
+  input.setAttribute("aria-invalid", "true");
+  const f = createField(document, { label: "L", control: input });
+  expect(input.getAttribute("aria-describedby")).toBe("own-help");
+  expect(input.getAttribute("aria-invalid")).toBe("true");
+  setFieldError(f, "Bad");
+  setFieldError(f, null);
+  expect(input.getAttribute("aria-describedby")).toBe("own-help");
+  expect(input.getAttribute("aria-invalid")).toBe("true");
+});
+
+test("the error sits in a stable polite live region and updates in place", () => {
+  const { f } = build("Hint");
+  const note = f.querySelector("[aria-live]");
+  expect(note?.getAttribute("aria-live")).toBe("polite");
+  setFieldError(f, "First");
+  const err = f.querySelector(".err-text");
+  expect(note?.contains(err ?? null)).toBe(true);
+  setFieldError(f, "Second");
+  expect(f.querySelector(".err-text")).toBe(err);
+  expect(err?.textContent).toBe("Second");
+  expect(err?.querySelector("svg")).not.toBeNull();
+  expect(f.querySelector("[aria-live]")).toBe(note);
+  f.remove();
+});
+
+test("setFieldError throws for an element that is not a field", () => {
+  expect(() => setFieldError(document.createElement("div"), "x")).toThrow();
+});

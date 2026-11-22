@@ -33,7 +33,7 @@ export const CONTROLS = [
       "with field label",
       "with hint",
       "with error",
-      "error set and cleared in place",
+      "error set and cleared as you type",
     ],
     states: ["empty", "hover", "focus", "error", "disabled"],
     source: "ds",
