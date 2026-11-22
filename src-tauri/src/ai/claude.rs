@@ -785,11 +785,19 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "the real AI runner was used in a test")]
     fn the_usage_claude_runner_panics_in_a_test() {
         let sink: UsageSink = std::sync::Arc::new(|_| {});
-        let _ = UsageClaudeRunner::new(Some(std::env::temp_dir()), sink)
-            .run_task(&task(), &CancelToken::default());
+        let runner = UsageClaudeRunner::new(Some(std::env::temp_dir()), sink);
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runner.run_task(&task(), &CancelToken::default())
+        }));
+        let payload = caught.expect_err("the real runner must refuse to run in a test");
+        let text = payload
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_default();
+        assert_eq!(text, "the real AI runner was used in a test");
     }
 
     #[test]
