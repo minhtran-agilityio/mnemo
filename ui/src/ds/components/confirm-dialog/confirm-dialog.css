@@ -5,3 +5,18 @@
   color: var(--ink2);
   font-size: var(--text-md);
 }
+
+.confirm-typed {
+  min-width: 0;
+}
+
+.confirm-typed .input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.confirm-typed .hint,
+.dlg .lose li,
+.dlg-static .lose li {
+  overflow-wrap: anywhere;
+}

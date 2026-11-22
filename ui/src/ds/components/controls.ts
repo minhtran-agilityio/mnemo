@@ -4,6 +4,7 @@ export * from "./button/button";
 export * from "./check/check";
 export * from "./chip/chip";
 export * from "./choice-list/choice-list";
+export * from "./copy-line/copy-line";
 export * from "./field/field";
 export * from "./input/input";
 export * from "./kbd/kbd";

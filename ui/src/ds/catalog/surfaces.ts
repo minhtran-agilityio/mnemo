@@ -93,11 +93,11 @@ export const SURFACES = [
     name: "confirm dialog",
     tab: "Surfaces",
     className: "lose",
-    variants: ["default"],
-    states: ["open", "closed"],
+    variants: ["default", "type to confirm"],
+    states: ["open", "closed", "confirm disabled", "confirm enabled"],
     source: "ds",
     notes:
-      "Names what will be lost. The safe button has the focus when it opens.",
+      "Names what will be lost. The safe button has the focus when it opens. Type to confirm: the danger button stays disabled, and says why in words, until the typed word matches exactly (case and spaces).",
   },
   {
     name: "approval sheet",

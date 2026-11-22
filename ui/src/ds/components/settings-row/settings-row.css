@@ -1,0 +1,70 @@
+/* Settings row: text on the left, the caller's controls on the right. Tokens only. */
+.setting-rows {
+  max-width: 100%;
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  color: var(--ink);
+}
+
+.setting-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.setting-row + .setting-row {
+  border-top: var(--border-1) solid var(--line);
+}
+
+/* The text takes the room it can; under the basis the controls wrap below it. */
+.setting-row-text {
+  display: flex;
+  flex: 1 1 var(--size-basis-setting);
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.setting-row-label {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  overflow-wrap: anywhere;
+}
+
+.setting-row-sub {
+  color: var(--muted);
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+
+.setting-row-controls {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* The live region stays in the row. With no error (even a blank note), it takes no height: the negative margin cancels the
+   row gap above it. */
+.setting-row-note {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+.setting-row-note-empty {
+  margin-block-start: calc(-1 * var(--space-2));
+}
+
+.setting-row-error {
+  display: block;
+  color: var(--bad);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}

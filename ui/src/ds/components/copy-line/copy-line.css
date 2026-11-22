@@ -1,0 +1,79 @@
+/* Copy line. A label, selectable monospace text and a Copy button. Tokens only. */
+.copy-line {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.copy-line-label {
+  color: var(--ink2);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.copy-line-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.copy-line-text {
+  flex: 1 1 var(--size-copy-line-min);
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--head);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  line-height: var(--leading-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.copy-line-text:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--border-2);
+}
+
+.copy-line-button {
+  flex: none;
+}
+
+.copy-line.is-copied .copy-line-button {
+  border-color: var(--good);
+}
+
+.copy-line-status {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+
+/* Stays rendered while empty so a screen reader announces the text that arrives; it just takes no room. */
+.copy-line-status:empty {
+  position: absolute;
+  width: var(--border-1);
+  height: var(--border-1);
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.copy-line.is-copied .copy-line-status {
+  padding-left: var(--space-2);
+  border-left: var(--border-2) solid var(--good);
+}
+
+.copy-line.is-failed .copy-line-status {
+  padding-left: var(--space-2);
+  border-left: var(--border-2) solid var(--bad);
+}

@@ -13,3 +13,14 @@
   width: 100%;
   min-height: calc(var(--size-row-menu) * 11);
 }
+
+/* The settings row examples: a card that fills the column. */
+.ui-catalog .lst-settings {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* The narrow settings row example: a column too narrow for text and controls side by side. */
+.ui-catalog .lst-settings-narrow {
+  max-width: calc(var(--size-basis-setting) * 2);
+}
