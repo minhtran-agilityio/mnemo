@@ -149,23 +149,22 @@ impl UsageReading {
     /// event itself says "rejected". Never a guessed time.
     pub fn limit_reset(&self, now: i64) -> Option<i64> {
         let windows: Vec<&UsageWindow> = self.windows().collect();
-        let rejected = windows
+        let rejected: Vec<&UsageWindow> = windows
             .iter()
             .copied()
-            .find(|w| w.status.as_deref() == Some("rejected"));
-        let full = || {
+            .filter(|w| w.status.as_deref() == Some("rejected"))
+            .collect();
+        let hit = if rejected.is_empty() {
             windows
                 .iter()
                 .copied()
                 .filter(|w| w.utilization.is_some_and(|u| u >= 1.0))
-                .max_by(|a, b| {
-                    a.utilization
-                        .partial_cmp(&b.utilization)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
+                .collect()
+        } else {
+            rejected
         };
-        let hit = rejected.or_else(full);
-        let from_window = hit.and_then(|w| w.resets_at);
+        // Every window at the limit must reset before work can run again: the latest time.
+        let from_window = hit.iter().filter_map(|w| w.resets_at).max();
         let from_event = (self.status.as_deref() == Some("rejected"))
             .then_some(self.resets_at)
             .flatten();
@@ -316,6 +315,24 @@ mod tests {
                 json!({})
             ),
             Some(NOW + 100)
+        );
+        // Both windows rejected (the weekly limit hit too): the later reset decides.
+        assert_eq!(
+            at(
+                json!({"utilization": 1.0, "resetsAt": NOW + 100, "status": "rejected"}),
+                json!({"utilization": 1.0, "resetsAt": NOW + 900, "status": "rejected"}),
+                json!({})
+            ),
+            Some(NOW + 900)
+        );
+        // Both at 100% with no status: the later reset decides.
+        assert_eq!(
+            at(
+                json!({"utilization": 1.0, "resetsAt": NOW + 100}),
+                json!({"utilization": 1.0, "resetsAt": NOW + 900}),
+                json!({})
+            ),
+            Some(NOW + 900)
         );
         // No window hit the limit, but the event says rejected: its own resetsAt.
         assert_eq!(
