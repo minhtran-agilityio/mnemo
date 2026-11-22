@@ -203,8 +203,22 @@ fn cancel_run_with(queue: &RunQueue, id: &str) -> Result<(), AppError> {
 /// Cancels a waiting or running AI run. A waiting run leaves the queue; a running run's
 /// process is stopped. The run's row ends as cancelled.
 #[tauri::command]
-pub fn cancel_run(queue: tauri::State<'_, RunQueue>, id: String) -> Result<(), AppError> {
-    cancel_run_with(&queue, &id)
+pub async fn cancel_run(app: tauri::AppHandle, id: String) -> Result<(), AppError> {
+    let queue = app.state::<RunQueue>().inner().clone();
+    cancel_run_blocking(queue, id).await
+}
+
+/// Cancelling a waiting run writes its row, so it runs on a blocking thread.
+async fn cancel_run_blocking(queue: RunQueue, id: String) -> Result<(), AppError> {
+    tauri::async_runtime::spawn_blocking(move || cancel_run_with(&queue, &id))
+        .await
+        .unwrap_or_else(|e| {
+            log::error!("the cancel did not finish: {e}");
+            Err(AppError {
+                code: "task_failed",
+                message: "The cancel did not finish.".to_string(),
+            })
+        })
 }
 
 fn run_log_failed(e: StorageError) -> RunLogError {
@@ -1353,6 +1367,15 @@ mod tests {
             cancel_run_with(&queue, "no-such-run").unwrap_err().code,
             "run_not_active"
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cancel_run_blocking_runs_the_cancel_on_a_blocking_thread() {
+        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None));
+        let err = tauri::async_runtime::block_on(cancel_run_blocking(queue, "no-such-run".into()))
+            .unwrap_err();
+        assert_eq!(err.code, "run_not_active");
         let _ = std::fs::remove_dir_all(dir);
     }
 
