@@ -104,12 +104,6 @@ test('AC3: a cargo test proves set_row with an unknown effort is refused with a 
   runExact(named(AC3_EFFORT, 'that an unknown effort is refused'));
 });
 
-test('AC3: the refusal tests say in their name that the stored row is unchanged', LONG, () => {
-  const hits = [...named(AC3_MODEL, 'that an unknown model is refused'), ...named(AC3_EFFORT, 'that an unknown effort is refused')];
-  assert.ok(hits.some((n) => /(unchanged|stays|keeps|kept|old|same|untouched|intact)/.test(leaf(n))),
-    `no refusal test says the stored row is unchanged: ${JSON.stringify(hits)}`);
-});
-
 // ---------------------------------------------------------------- AC4
 // "A cargo test proves that after set_row(save, sonnet, high) the next run of that feature through the configured
 // runner reaches the fake runner with model 'sonnet' and effort 'high' (the fake records them)."

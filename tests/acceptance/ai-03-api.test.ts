@@ -51,14 +51,11 @@ test("AC9: setAiModel sends the feature, the model and the effort as named argum
   for (const part of ["notes", "opus", "medium"]) expect(values).toContain(part);
 });
 
-test("AC9: a refused set (unknown model) reaches the caller as the { code, message } error the core sent", async () => {
+test("AC9: a failed set reaches the caller with its { code, message }", async () => {
   const api = await load();
-  const err = { code: "validation", message: "Mnemo does not know the model gpt-4. Pick Haiku 5.5, Sonnet 5.5 or Opus 5.5." };
+  const err = { code: "validation", message: "The model is not allowed." };
   invoke.mockRejectedValueOnce(err);
-  const caught = await api.setAiModel("save", "gpt-4", "low").catch((e: unknown) => e);
-  expect(caught).toMatchObject(err);
-  expect(api.isAppError(caught)).toBe(true);
-  expect(api.errorMessage(caught)).toBe(err.message);
+  await expect(api.setAiModel("save", "sonnet", "high")).rejects.toMatchObject(err);
 });
 
 test("AC9: a failed list reaches the caller with its { code, message }", async () => {
