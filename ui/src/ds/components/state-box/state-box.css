@@ -11,6 +11,7 @@
   background: var(--paper);
   width: 100%;
   max-width: var(--size-state-max);
+  overflow-wrap: anywhere;
 }
 
 .state-box > svg {

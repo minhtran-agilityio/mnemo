@@ -64,3 +64,59 @@ test("the AI-off state says links still save, for both reasons", () => {
   expect(limit.querySelector("b")?.textContent).toBe("At usage limit");
   expect(limit.querySelector("p")?.textContent).toContain("Links still save");
 });
+
+test("the limit reason shows the reset time, or none when unknown", () => {
+  const known = buildAiOffState({
+    reason: "limit",
+    resetAt: "14:30",
+    action: { label: "Resume", onClick: () => {} },
+  });
+  expect(known.querySelector("p")?.textContent).toContain(
+    "Background work is paused until 14:30, or until you resume it.",
+  );
+  const unknown = buildAiOffState({ reason: "limit" });
+  expect(unknown.querySelector("p")?.textContent).not.toMatch(/\d:\d/);
+  expect(unknown.querySelector("p")?.textContent).toContain("Links still save");
+});
+
+test("the paused reason has its own title and keeps the promise", () => {
+  const box = buildAiOffState({ reason: "paused" });
+  expect(box.querySelector("b")?.textContent).toBe("Background work is paused");
+  expect(box.querySelector("p")?.textContent).toContain("search still works");
+  expect(box.querySelector("button")).toBeNull();
+});
+
+test("the action is optional, is a real button and can be clicked", () => {
+  const onClick = vi.fn();
+  const box = buildAiOffState({
+    reason: "paused",
+    action: { label: "Resume", onClick },
+  });
+  const button = box.querySelector("button");
+  expect(button?.type).toBe("button");
+  expect(button?.textContent).toBe("Resume");
+  button?.click();
+  expect(onClick).toHaveBeenCalledOnce();
+});
+
+test("a long reset text goes in as text", () => {
+  const html = "<img src=x onerror=x>";
+  const long = `${"x".repeat(300)} ${html}`;
+  const box = buildAiOffState({ reason: "limit", resetAt: long });
+  const p = box.querySelector("p");
+  expect(p?.textContent).toContain(long);
+  expect(p?.children.length).toBe(0);
+  expect(box.querySelector("img")).toBeNull();
+});
+
+test("the resume clause shows only when there is an action to resume with", () => {
+  for (const reason of ["limit", "paused"] as const) {
+    const without = buildAiOffState({ reason });
+    expect(without.querySelector("p")?.textContent).not.toMatch(/you resume/);
+    const withAction = buildAiOffState({
+      reason,
+      action: { label: "Resume", onClick: () => {} },
+    });
+    expect(withAction.querySelector("p")?.textContent).toMatch(/you resume/);
+  }
+});

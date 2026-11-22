@@ -106,3 +106,66 @@ These are suggestions from this round, not decisions.
 9. Ask the designer to make a part report events only and leave data to the screen, unless the request
    needs the part to own the data.
 10. Keeper: batch UI-ASK messages by part into one issue each, as done here; keep that.
+
+## Round 2 (2026-11-22): usage meter (#145), AI-off state (#146), field error (#147), typed-word confirm (#152), copy line (#153), settings row (#154), inline select (#155)
+
+Seven design-system pull requests (#149, #150, #151, #156, #157, #158, #159) from three feature sessions. All
+merged by the keeper under the owner's standing order "auto merge when it passes review"; each merge pinned
+the reviewed commit and waited for green CI on that commit.
+
+### What went wrong
+
+- **The same bug in each branch, found one round at a time.** A part that has a "disabled" or "error" state
+  was fixed for one branch and failed for the next. `setSettingsRowDisabled` took three review rounds:
+  re-enabling turned on controls the caller had disabled; then enabling with no earlier disable did the same.
+  `setFieldError` and the copy line each hit the "live region is hidden while empty, so nothing is announced"
+  trap, and `setFieldError` also re-wrote an unchanged message (announced again on every key) and used
+  `isConnected` to mean "is inside the region".
+- **Unverified facts stated as fact.** Round 1 of the usage meter let an unverified window drive the pause
+  note; later the "figure is unverified" note was attached to any window, not the one driving the tone. The AI-off
+  state printed a bare clock time as a reset time.
+- **Honest failure at the edges.** NaN percent showed "NaN%" or a healthy tone with an empty note; an empty
+  window list showed a meter that looked fine; a bad run count threw and would blank the screen.
+- **Global CSS inside a feature part.** The typed-word confirm changed `overflow-wrap` for every `.lose` list.
+- **A catalog example broke the layout rule.** #151's note text had one long unbreakable word; at 200% zoom the
+  Controls tab was 17 px too wide. Only CI caught it (ds-09-limits, Ubuntu).
+
+### What failed in the process
+
+- **Designers skipped the node acceptance tests.** The first three designers ran biome, tsc and vitest only. The
+  horizontal-scroll failure on #151 reached CI. After that the brief required the `ds-*.test.mjs` run before the
+  pull request, and the later four passed it.
+- **No designer saw a clean `npm run check`.** Every report says "ran the parts separately". Cause: the machine was
+  loaded by several designers at once, and `ds-03-catalog-screen` has a 5 s per-test limit that times out under
+  load (Unverified whether it also times out on a quiet main). Reports said "flake" each time without proof.
+- **The reviewer read the diff only.** `code-review` ran on a checkout of main, so it said several times that it
+  could not check a name or a file. A few findings were wrong or unverifiable (for example `ref(146)`); the
+  designer had to confirm each one. Findings stated as "important" were real in most cases.
+- **Review did not converge.** #149 needed four rounds, #151 four, #159 four. Each round found one more important
+  item, mostly in a branch the last fix did not touch. Cap and delta-only review were already candidates in round 1
+  (items 2 and 8); they were not applied.
+- **Stopped agents.** Restarts and the owner's stop left three designers half done twice; one could not be resumed
+  and a new designer had to be started in the old worktree. A message sent to a stopped agent was refused.
+- **The keeper reported a wrong fact.** After merge day the keeper told the owner that the lessons pull request
+  (#136) was still open. It had been merged on 2026-11-21. The keeper had stopped checking its state.
+- **Stale peer address.** One feature session's socket path went stale; sending by name worked.
+- **Shared scratchpad.** Two designers wrote screenshot scripts to the same scratchpad path and overwrote each
+  other.
+
+### Candidate changes to look at in the review pass
+
+These are suggestions from this round, not decisions.
+
+11. Add to the ui-designer "known traps": every state setter (disabled, error, busy) needs a test for enable-without-
+    disable, same-value-twice, detached node, foreign element, and a control the caller had already disabled; a live
+    region stays rendered while empty; text inside a catalog note can contain one long unbreakable word.
+12. Make the node acceptance run (`MNEMO_NESTED=1 node --test --test-isolation=none tests/acceptance/ds-*.test.mjs`)
+    a hard step in the ui-designer brief before "ready", with the result in the PR body.
+13. Run the code review on a checkout of the PR head (a worktree), not main, so the reviewer can open the files.
+14. Give the ds-03 vitest suite a longer per-test timeout, or measure whether it is slow on a quiet machine.
+15. Limit the number of designers in parallel by machine load (three at once was too many for the full test runs).
+16. Give each designer its own scratch folder (`scratchpad/p<issue>/`) in the brief.
+17. Rule in the brief: no change to global selectors in a feature PR; scope new CSS to the part's own class.
+18. Keeper: check the state of any PR with `gh pr view` before saying it is open or merged.
+19. Keeper: when a designer is stopped, start a new one in the existing worktree with the full brief, only after the
+    owner agrees.

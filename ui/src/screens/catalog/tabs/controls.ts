@@ -10,6 +10,7 @@ import {
   createCheckbox,
   createChip,
   createChoiceList,
+  createCopyLine,
   createDialog,
   createDialogButton,
   createField,
@@ -32,6 +33,7 @@ import {
   createTooltip,
   type LabelPickerNode,
   setButtonBusy,
+  setFieldError,
 } from "../../../ds/index";
 import {
   button,
@@ -230,7 +232,52 @@ function inputRow(ctx: TabContext) {
       },
     ),
     make("disabled", { value: LINK, disabled: true }),
+    liveLines(ctx),
   ];
+}
+
+// Two linked fields that validate on input: the error is set and cleared in place.
+function liveLines(ctx: TabContext) {
+  const doc = ctx.doc;
+  const warn = createTextInput(doc, { value: "97" });
+  const pause = createTextInput(doc, { value: "95" });
+  const warnField = createField(doc, {
+    label: "Warn at (%)",
+    control: warn,
+    hint: "Between 1 and 99.",
+  });
+  const pauseField = createField(doc, {
+    label: "Pause background work at (%)",
+    control: pause,
+    hint: "Between 1 and 99.",
+  });
+  const range = "Enter a whole number from 1 to 99.";
+  const check = (raw: string): number | string => {
+    const text = raw.trim();
+    if (!/^\d+$/.test(text)) return range;
+    const n = Number(text);
+    return n < 1 || n > 99 ? range : n;
+  };
+  const validate = () => {
+    const w = check(warn.value);
+    const p = check(pause.value);
+    // The pair rule is about the warn line, so it sits on the warn field.
+    const pair =
+      typeof w === "number" && typeof p === "number" && w >= p
+        ? "The warn line must be lower than the pause line."
+        : null;
+    setFieldError(warnField, typeof w === "string" ? w : pair);
+    setFieldError(pauseField, typeof p === "string" ? p : null);
+  };
+  warn.addEventListener("input", validate);
+  pause.addEventListener("input", validate);
+  validate();
+  return state(
+    doc,
+    "error set and cleared as you type",
+    [warnField, pauseField],
+    { grow: true },
+  );
 }
 
 export const renderControls: TabRenderer = (panel, ctx) => {
@@ -372,6 +419,39 @@ export const renderControls: TabRenderer = (panel, ctx) => {
         const trigger = many.anchor.querySelector("button");
         manyLabel.id = "cat-many-label";
         trigger?.setAttribute("aria-describedby", manyLabel.id);
+        const inlineSelect = (
+          name: string,
+          opts: readonly string[],
+          extra: { disabled?: boolean } = {},
+        ) => {
+          const s = createSelect(doc, {
+            options: opts,
+            inline: true,
+            ...extra,
+          });
+          s.select.setAttribute("aria-label", `${name} for Save a link`);
+          return s;
+        };
+        const models = ["Haiku 5.5", "Sonnet 5.5", "Opus 5.5"];
+        const efforts = ["Low effort", "Medium effort", "High effort"];
+        const pair = el(doc, "div", "cat-hstack");
+        pair.append(
+          inlineSelect("Model", models).wrap,
+          inlineSelect("Effort", efforts).wrap,
+        );
+        const off = el(doc, "div", "cat-hstack");
+        off.append(inlineSelect("Model", models, { disabled: true }).wrap);
+        const refused = inlineSelect("Effort", efforts);
+        refused.select.value = "Medium effort";
+        const refusedField = createField(doc, {
+          label: "Effort",
+          control: refused.wrap,
+          target: refused.select,
+          error: "Could not save. Medium effort is kept.",
+        });
+        const longOne = inlineSelect("Model", [
+          "Sonnet 5.5 with a very long option name that must be cut and not widen the row or scroll",
+        ]);
         return [
           state(
             doc,
@@ -383,6 +463,10 @@ export const renderControls: TabRenderer = (panel, ctx) => {
             }),
             { grow: true },
           ),
+          state(doc, "inline, two side by side (Model, Effort)", pair),
+          state(doc, "inline, disabled (save pending)", off),
+          state(doc, "inline, error (value refused)", refusedField),
+          state(doc, "inline, overflow (long option)", longOne.wrap),
           state(doc, "pick many (live)", [manyLabel, many.anchor]),
         ];
       },
@@ -684,6 +768,58 @@ export const renderControls: TabRenderer = (panel, ctx) => {
           state(doc, "disabled", off.element),
           state(doc, "overflow, deep and long Vietnamese paths", long.element),
           state(doc, "in a dialog (Escape cancels, focus trapped)", open),
+        ];
+      },
+      "copy line": () => {
+        const ubuntu =
+          'cp -a "/home/owner/.local/share/io.mnemo.desktop" ~/mnemo-backup-$(date +%Y-%m-%d)';
+        const mac =
+          'cp -a "$HOME/Library/Application Support/io.mnemo.desktop" ~/mnemo-backup-$(date +%Y-%m-%d)';
+        const spaced =
+          "/home/nguyễn/Tài liệu/Dữ liệu Mnemo/ghi chú và đường dẫn rất dài/phiên bản sao lưu";
+        const rejects = () => Promise.reject(new Error("clipboard refused"));
+        return [
+          state(
+            doc,
+            "live: Copy, then Copied, back to idle",
+            createCopyLine(doc, { label: "Ubuntu", text: ubuntu }),
+            { grow: true },
+          ),
+          state(
+            doc,
+            "copied",
+            createCopyLine(doc, { label: "macOS", text: mac, state: "copied" }),
+            { grow: true },
+          ),
+          state(
+            doc,
+            "live: copy fails (clipboard refuses)",
+            createCopyLine(doc, {
+              label: "Ubuntu",
+              text: ubuntu,
+              copy: rejects,
+            }),
+            { grow: true },
+          ),
+          state(
+            doc,
+            "copy failed",
+            createCopyLine(doc, {
+              label: "Data folder",
+              text: spaced,
+              state: "failed",
+            }),
+            { grow: true },
+          ),
+          state(
+            doc,
+            "long content wraps",
+            createCopyLine(doc, {
+              label: "Data folder",
+              text: `/home/owner/${"một-thư-mục-rất-dài-".repeat(12)}`,
+            }),
+            { grow: true },
+          ),
         ];
       },
       "shortcut hint": () => {
