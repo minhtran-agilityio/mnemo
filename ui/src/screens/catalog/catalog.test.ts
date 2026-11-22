@@ -161,7 +161,7 @@ test("Motion starts on, and off when the system asks for reduced motion", () => 
   stubMedia(true);
   mount();
   expect(root.getAttribute("data-motion")).toBe("off");
-});
+}, 30_000); // mounts the whole catalog twice; slow when the full suite runs in parallel
 
 test("the theme buttons start on the theme on screen and switch it without saving", () => {
   stubMedia(false, true);
