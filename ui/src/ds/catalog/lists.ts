@@ -74,4 +74,20 @@ export const LISTS = [
     className: "section-list",
     notes: `Rows of a name and its current value; one row is current. A long value is cut with an ellipsis and its full text is the title. Narrow windows put the rows side by side (${ref(111)}).`,
   },
+  {
+    name: "settings row",
+    tab: "Lists",
+    variants: ["label and sub-line with controls", "rows in a card"],
+    states: [
+      "default",
+      "focus-visible (controls only)",
+      "disabled",
+      "error",
+      "overflow",
+      "narrow",
+    ],
+    source: "ds",
+    className: "setting-row",
+    notes: `A bold label, a muted sub-line and the controls the caller gives (${ref(154)}). The row is not focusable and has no hover: Tab goes to its controls. A long label or sub-line wraps; under a narrow width the controls drop under the text. A one-line error sits under the row. The caller gives each control its name; disabled turns the controls off while a save is pending. Empty, loading and AI off do not apply: the screen shows its own state box, skeleton rows or banner.`,
+  },
 ] as const satisfies readonly CatalogEntry[];

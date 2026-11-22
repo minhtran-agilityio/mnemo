@@ -4,5 +4,6 @@ export * from "./kanban-column/kanban-column";
 export * from "./list/list";
 export * from "./list-row/list-row";
 export * from "./section-list/section-list";
+export * from "./settings-row/settings-row";
 export * from "./table/table";
 export * from "./tree/tree";
