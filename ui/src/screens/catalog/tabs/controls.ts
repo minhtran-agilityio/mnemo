@@ -32,6 +32,7 @@ import {
   createTooltip,
   type LabelPickerNode,
   setButtonBusy,
+  setFieldError,
 } from "../../../ds/index";
 import {
   button,
@@ -230,7 +231,42 @@ function inputRow(ctx: TabContext) {
       },
     ),
     make("disabled", { value: LINK, disabled: true }),
+    liveLines(ctx),
   ];
+}
+
+// Two linked fields that validate on input: the error is set and cleared in place.
+function liveLines(ctx: TabContext) {
+  const doc = ctx.doc;
+  const warn = createTextInput(doc, { value: "97" });
+  const pause = createTextInput(doc, { value: "95" });
+  const warnField = createField(doc, {
+    label: "Warn at (%)",
+    control: warn,
+    hint: "Between 1 and 99.",
+  });
+  const pauseField = createField(doc, {
+    label: "Pause background work at (%)",
+    control: pause,
+    hint: "Between 1 and 99.",
+  });
+  const validate = () => {
+    const w = Number(warn.value);
+    const p = Number(pause.value);
+    setFieldError(
+      warnField,
+      w >= p ? "The warn line must be lower than the pause line." : null,
+    );
+  };
+  warn.addEventListener("input", validate);
+  pause.addEventListener("input", validate);
+  validate();
+  return state(
+    doc,
+    "error set and cleared in place (type to try)",
+    [warnField, pauseField],
+    { grow: true },
+  );
 }
 
 export const renderControls: TabRenderer = (panel, ctx) => {

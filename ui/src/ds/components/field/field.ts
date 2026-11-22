@@ -16,6 +16,29 @@ export interface FieldOptions {
   readonly error?: string;
 }
 
+interface FieldState {
+  readonly target: HTMLElement;
+  readonly hint?: string;
+}
+
+const fields = new WeakMap<HTMLElement, FieldState>();
+
+function buildError(doc: Document, id: string, message: string): HTMLElement {
+  const err = doc.createElement("span");
+  err.className = "err-text";
+  err.id = id;
+  err.append(createIcon(CircleAlert), doc.createTextNode(message));
+  return err;
+}
+
+function buildHint(doc: Document, id: string, text: string): HTMLElement {
+  const hint = doc.createElement("span");
+  hint.className = "hint";
+  hint.id = id;
+  hint.textContent = text;
+  return hint;
+}
+
 export function createField(doc: Document, options: FieldOptions): HTMLElement {
   const target = options.target ?? options.control;
   if (!target.id) target.id = nextControlId("control");
@@ -25,21 +48,43 @@ export function createField(doc: Document, options: FieldOptions): HTMLElement {
   label.htmlFor = target.id;
   label.textContent = options.label;
   wrap.append(label, options.control);
-  if (options.error) {
-    const err = doc.createElement("span");
-    err.className = "err-text";
-    err.id = `${target.id}-error`;
-    err.append(createIcon(CircleAlert), doc.createTextNode(options.error));
-    target.setAttribute("aria-invalid", "true");
-    target.setAttribute("aria-describedby", err.id);
-    wrap.append(err);
-  } else if (options.hint) {
-    const hint = doc.createElement("span");
-    hint.className = "hint";
-    hint.id = `${target.id}-hint`;
-    hint.textContent = options.hint;
-    target.setAttribute("aria-describedby", hint.id);
-    wrap.append(hint);
-  }
+  fields.set(wrap, { target, hint: options.hint });
+  setFieldError(wrap, options.error ?? null);
   return wrap;
+}
+
+/**
+ * Show, change or clear a field's error after it is built. The control is not touched, so focus
+ * and the caret stay. A message replaces the hint and marks the target invalid; null or an empty
+ * message brings the hint back (or nothing, when the field had none) and clears aria-invalid.
+ */
+export function setFieldError(
+  field: HTMLElement,
+  message: string | null,
+): void {
+  const state = fields.get(field);
+  if (!state) return;
+  const { target, hint } = state;
+  const doc = field.ownerDocument;
+  const errId = `${target.id}-error`;
+  const hintId = `${target.id}-hint`;
+  const err = field.querySelector(":scope > .err-text");
+  const shownHint = field.querySelector(":scope > .hint");
+  if (message) {
+    shownHint?.remove();
+    const next = buildError(doc, errId, message);
+    if (err) err.replaceWith(next);
+    else field.append(next);
+    target.setAttribute("aria-invalid", "true");
+    target.setAttribute("aria-describedby", errId);
+    return;
+  }
+  err?.remove();
+  target.removeAttribute("aria-invalid");
+  if (hint) {
+    if (!shownHint) field.append(buildHint(doc, hintId, hint));
+    target.setAttribute("aria-describedby", hintId);
+  } else {
+    target.removeAttribute("aria-describedby");
+  }
 }

@@ -29,11 +29,15 @@ export const CONTROLS = [
     className: "input",
     tab: "Controls",
     label: "Text input",
-    variants: ["with field label", "with hint", "with error"],
+    variants: [
+      "with field label",
+      "with hint",
+      "with error",
+      "error set and cleared in place",
+    ],
     states: ["empty", "hover", "focus", "error", "disabled"],
     source: "ds",
-    notes:
-      "Label above, hint below, error replaces hint. No placeholder as the label. Invalid uses aria-invalid.",
+    notes: `Label above, hint below, error replaces hint. No placeholder as the label. Invalid uses aria-invalid. setFieldError(field, message | null) shows, changes or clears the error after the field is built (${ref(147)}): focus and the caret stay in the input, aria-invalid and aria-describedby follow, and the hint comes back when it is cleared. Type in the live example.`,
   },
   {
     name: "textarea",
