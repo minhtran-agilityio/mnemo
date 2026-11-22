@@ -72,7 +72,10 @@ export function buildErrorState(options: StateTextOptions): HTMLDivElement {
 export interface AiOffStateOptions {
   /** Why AI is not running: the owner turned it off, the usage limit was reached, or background work is paused. */
   readonly reason?: "off" | "limit" | "paused";
-  /** For "limit": when the limit resets, as text (for example "14:30"). Leave it out when unknown. */
+  /**
+   * For "limit": when the limit resets, as text (for example "14:30"). Pass a verified time only:
+   * the box shows it as fact, so an unverified time must be left out (rule 8). Leave it out when unknown.
+   */
   readonly resetAt?: string;
   /** One action, for example "Turn AI on" or "Resume". */
   readonly action?: StateAction;
@@ -91,7 +94,7 @@ export function buildAiOffState(
     return buildStateBox({
       icon: Pause,
       title: "At usage limit",
-      body: `Usage limit reached. Background work is paused ${until}, or until you resume it. ${STILL_WORKS}`,
+      body: `Usage limit reached. Background work is paused ${until}${action ? ", or until you resume it" : ""}. ${STILL_WORKS}`,
       action,
     });
   }
@@ -99,7 +102,7 @@ export function buildAiOffState(
     return buildStateBox({
       icon: Pause,
       title: "Background work is paused",
-      body: `Summaries and suggestions wait until you resume it. ${STILL_WORKS}`,
+      body: `Summaries and suggestions wait until ${action ? "you resume background work" : "background work is resumed"}. ${STILL_WORKS}`,
       action,
     });
   return buildStateBox({

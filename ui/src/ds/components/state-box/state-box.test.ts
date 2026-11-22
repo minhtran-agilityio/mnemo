@@ -66,7 +66,11 @@ test("the AI-off state says links still save, for both reasons", () => {
 });
 
 test("the limit reason shows the reset time, or none when unknown", () => {
-  const known = buildAiOffState({ reason: "limit", resetAt: "14:30" });
+  const known = buildAiOffState({
+    reason: "limit",
+    resetAt: "14:30",
+    action: { label: "Resume", onClick: () => {} },
+  });
   expect(known.querySelector("p")?.textContent).toContain(
     "Usage limit reached. Background work is paused until 14:30, or until you resume it.",
   );
@@ -82,7 +86,7 @@ test("the paused reason has its own title and keeps the promise", () => {
   expect(box.querySelector("button")).toBeNull();
 });
 
-test("the action is optional, is a real button and works by keyboard click", () => {
+test("the action is optional, is a real button and can be clicked", () => {
   const onClick = vi.fn();
   const box = buildAiOffState({
     reason: "paused",
@@ -99,4 +103,30 @@ test("a long reset text goes in as text", () => {
   const long = "x".repeat(300);
   const box = buildAiOffState({ reason: "limit", resetAt: long });
   expect(box.querySelector("p")?.textContent).toContain(long);
+});
+
+test("the resume clause shows only when there is an action to resume with", () => {
+  for (const reason of ["limit", "paused"] as const) {
+    const without = buildAiOffState({ reason });
+    expect(without.querySelector("p")?.textContent).not.toMatch(/you resume/);
+    const withAction = buildAiOffState({
+      reason,
+      action: { label: "Resume", onClick: () => {} },
+    });
+    expect(withAction.querySelector("p")?.textContent).toMatch(/you resume/);
+  }
+});
+
+test("the action button is a native button, so Enter and Space work and it takes focus", () => {
+  const box = buildAiOffState({
+    reason: "paused",
+    action: { label: "Resume", onClick: () => {} },
+  });
+  document.body.append(box);
+  const button = box.querySelector("button");
+  button?.focus();
+  expect(document.activeElement).toBe(button);
+  expect(button?.tagName).toBe("BUTTON");
+  expect(button?.disabled).toBe(false);
+  box.remove();
 });
