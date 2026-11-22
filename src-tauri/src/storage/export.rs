@@ -620,7 +620,7 @@ pub(crate) mod tests {
         let (mut s, _d) = open_temp();
         let label = s.create_label(None, "Work").unwrap();
         let n = s
-            .save_labelled_note(None, "# Plan\n\nText", &[label.base.id.clone()])
+            .save_labelled_note(None, "# Plan\n\nText", std::slice::from_ref(&label.base.id))
             .unwrap();
         let out = TempDir::new();
         let sum = s.export_to(out.path(), NOW).unwrap();

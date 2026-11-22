@@ -35,6 +35,15 @@ pub fn db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(DB_FILE_NAME)
 }
 
+/// Opens `dir` in the system file manager. The opener plugin is used from Rust only; the UI
+/// has no opener permission, so it cannot open any other path.
+pub fn open_folder(app: &AppHandle, dir: &Path) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 /// The one-line backup commands the Data section shows, one per system.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackupCommands {

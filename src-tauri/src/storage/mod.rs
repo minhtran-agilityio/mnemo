@@ -20,13 +20,10 @@ use std::time::Duration;
 use rusqlite::Connection;
 
 pub use error::StorageError;
-pub use export::ExportSummary;
 pub use files::FileRecord;
 pub use items::Item;
 pub use links::ItemRef;
 pub use record::PageRequest;
-#[allow(unused_imports)] // The command layer uses it from the reset command.
-pub use reset::RESET_WORD;
 
 /// How long a writer waits for another writer before giving up.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);

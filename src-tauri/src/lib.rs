@@ -64,6 +64,8 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             system::window::show_main(app);
         }))
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         // Keep size and position (not visibility, so a hidden window never starts hidden).
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -179,6 +181,10 @@ pub fn run() {
             commands::ping,
             commands::get_setting,
             commands::set_setting,
+            commands::export_data,
+            commands::reset_data,
+            commands::data_folder_info,
+            commands::open_data_folder,
             commands::get_ai_health,
             commands::check_ai_health,
             commands::get_ai_mode,

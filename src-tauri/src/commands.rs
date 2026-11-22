@@ -9,6 +9,7 @@ use crate::ai::claude::error_kind;
 use crate::ai::health::{self, AiHealth};
 use crate::ai::runner::{AiError, AiRunner};
 use crate::ai::test_prompt;
+use crate::storage::export::ExportSummary;
 use crate::storage::files::OrphanReport;
 use crate::storage::ideas::{Idea, IdeaInput, IdeaProject};
 use crate::storage::items::{
@@ -255,6 +256,108 @@ pub async fn set_setting(
     value: String,
 ) -> Result<(), AppError> {
     off_main_thread(app, move |storage| write_setting(storage, &key, &value)).await
+}
+
+/// The error the UI sees for an export that did not finish. The reason goes to the log.
+fn export_failed(e: StorageError) -> AppError {
+    match e {
+        StorageError::Invalid(message) => AppError {
+            code: "export_target_invalid",
+            message,
+        },
+        other => {
+            log::error!("export failed: {other}");
+            AppError {
+                code: "export_failed",
+                message: "Mnemo could not finish the export. Your data is unchanged; the partly written export folder was removed.".to_string(),
+            }
+        }
+    }
+}
+
+fn export_item(storage: &AppStorage, folder: &str, now: &str) -> Result<ExportSummary, AppError> {
+    storage
+        .get()?
+        .export_to(std::path::Path::new(folder), now)
+        .map_err(export_failed)
+}
+
+/// Exports every live record into a new `mnemo-export-<time>` folder inside `folder`.
+#[tauri::command]
+pub async fn export_data(app: tauri::AppHandle, folder: String) -> Result<ExportSummary, AppError> {
+    off_main_thread(app, move |storage| {
+        export_item(storage, &folder, &crate::storage::record::now_iso())
+    })
+    .await
+}
+
+fn reset_item(storage: &AppStorage, confirm: &str) -> Result<(), AppError> {
+    storage.get()?.reset(confirm).map_err(|e| match e {
+        StorageError::Invalid(message) => AppError {
+            code: "reset_not_confirmed",
+            message,
+        },
+        other => {
+            log::error!("reset failed: {other}");
+            AppError {
+                code: "reset_failed",
+                message: "Mnemo could not delete everything. Some data may be left. Quit Mnemo and try again.".to_string(),
+            }
+        }
+    })
+}
+
+/// Deletes all data and the files folder when `confirm` is exactly `RESET`.
+#[tauri::command]
+pub async fn reset_data(app: tauri::AppHandle, confirm: String) -> Result<(), AppError> {
+    off_main_thread(app, move |storage| reset_item(storage, &confirm)).await
+}
+
+/// Where the data lives and the one-line copy commands that back it up.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataFolderInfo {
+    pub path: String,
+    pub macos_command: String,
+    pub ubuntu_command: String,
+}
+
+fn path_unknown() -> AppError {
+    AppError {
+        code: "open_folder_failed",
+        message: "Mnemo could not find its data folder.".to_string(),
+    }
+}
+
+#[tauri::command]
+pub fn data_folder_info(app: tauri::AppHandle) -> Result<DataFolderInfo, AppError> {
+    let paths = crate::system::paths::app_paths(&app).map_err(|e| {
+        log::error!("data folder path: {e}");
+        path_unknown()
+    })?;
+    let c = crate::system::paths::backup_commands(&paths.data_dir);
+    Ok(DataFolderInfo {
+        path: paths.data_dir.to_string_lossy().into_owned(),
+        macos_command: c.macos,
+        ubuntu_command: c.ubuntu,
+    })
+}
+
+/// Opens the data folder in the system file manager.
+#[tauri::command]
+pub async fn open_data_folder(app: tauri::AppHandle) -> Result<(), AppError> {
+    let paths = crate::system::paths::app_paths(&app).map_err(|e| {
+        log::error!("data folder path: {e}");
+        path_unknown()
+    })?;
+    crate::system::paths::open_folder(&app, &paths.data_dir).map_err(|e| {
+        log::error!("could not open the data folder: {e}");
+        AppError {
+            code: "open_folder_failed",
+            message: "Mnemo could not open the data folder. Open it from your file manager."
+                .to_string(),
+        }
+    })
 }
 
 /// The latest Claude Code check, kept in memory only. `None` until the first check ends.
@@ -899,6 +1002,69 @@ mod tests {
     fn app_storage() -> (AppStorage, std::path::PathBuf) {
         let (s, dir) = temp_storage();
         (AppStorage::new(Ok(s)), dir)
+    }
+
+    #[test]
+    fn reset_with_a_wrong_word_gives_reset_not_confirmed_and_keeps_data() {
+        let (state, dir) = app_storage();
+        state
+            .get()
+            .unwrap()
+            .add::<Note>(&NoteInput {
+                body: "keep".into(),
+            })
+            .unwrap();
+        for word in ["", "reset", "RESET "] {
+            let err = reset_item(&state, word).unwrap_err();
+            assert_eq!(err.code, "reset_not_confirmed");
+            assert!(!err.message.contains('/'));
+        }
+        let page = state
+            .get()
+            .unwrap()
+            .list::<Note>(
+                &PageRequest {
+                    limit: 10,
+                    after: None,
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(page.items.len(), 1);
+        reset_item(&state, "RESET").unwrap();
+        let page = state
+            .get()
+            .unwrap()
+            .list::<Note>(
+                &PageRequest {
+                    limit: 10,
+                    after: None,
+                },
+                false,
+            )
+            .unwrap();
+        assert!(page.items.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn export_with_a_missing_folder_gives_export_target_invalid() {
+        let (state, dir) = app_storage();
+        let missing = dir.join("nope");
+        let err =
+            export_item(&state, &missing.to_string_lossy(), "2026-11-21T12:00:00Z").unwrap_err();
+        assert_eq!(err.code, "export_target_invalid");
+        assert!(!err.message.contains('/'));
+        assert!(!missing.exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn export_through_the_command_layer_makes_the_folder() {
+        let (state, dir) = app_storage();
+        let sum = export_item(&state, &dir.to_string_lossy(), "2026-11-21T12:00:00Z").unwrap();
+        assert!(std::path::Path::new(&sum.folder).join("notes").is_dir());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
