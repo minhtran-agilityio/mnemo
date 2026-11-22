@@ -10,6 +10,7 @@ pub mod labels;
 pub mod links;
 mod migrate;
 pub mod record;
+mod reset;
 mod settings;
 
 use std::fs;
@@ -24,6 +25,8 @@ pub use files::FileRecord;
 pub use items::Item;
 pub use links::ItemRef;
 pub use record::PageRequest;
+#[allow(unused_imports)] // The command layer uses it from the reset command.
+pub use reset::RESET_WORD;
 
 /// How long a writer waits for another writer before giving up.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -33,6 +36,8 @@ pub struct Storage {
     conn: Connection,
     /// The folder for images and attachments, beside the database. Made on the first save.
     files_dir: PathBuf,
+    /// The database file, kept so Reset can delete it and open a new one.
+    db_path: PathBuf,
 }
 
 #[allow(dead_code)] // Status readers; callers arrive with later tickets.
@@ -71,7 +76,11 @@ impl Storage {
             .parent()
             .unwrap_or_else(|| Path::new(""))
             .join(files::FILES_DIR);
-        Ok(Storage { conn, files_dir })
+        Ok(Storage {
+            conn,
+            files_dir,
+            db_path: path.to_path_buf(),
+        })
     }
 
     /// The journal mode in use. Expected to be "wal".

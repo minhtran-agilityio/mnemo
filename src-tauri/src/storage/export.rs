@@ -349,7 +349,7 @@ impl Storage {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::HashSet;
 
     use super::super::ideas::IdeaInput;
@@ -497,7 +497,7 @@ mod tests {
         v.as_array().unwrap().len() as u64
     }
 
-    fn all_text(dir: &Path, out: &mut String) {
+    pub(crate) fn all_text(dir: &Path, out: &mut String) {
         for e in fs::read_dir(dir).unwrap() {
             let p = e.unwrap().path();
             if p.is_dir() {
