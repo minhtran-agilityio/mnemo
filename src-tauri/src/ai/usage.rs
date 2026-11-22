@@ -36,6 +36,7 @@ pub struct UsageWindow {
 
 impl UsageWindow {
     /// The used share as a whole percent: `round(utilization * 100)`. **Unverified** scale.
+    #[cfg(test)]
     pub fn percent(&self) -> Option<i64> {
         self.utilization.map(percent_of)
     }

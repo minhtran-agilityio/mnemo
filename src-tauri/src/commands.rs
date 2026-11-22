@@ -10,7 +10,8 @@ use crate::ai::health::{self, AiHealth};
 use crate::ai::runner::AiError;
 use crate::ai::test_prompt;
 use crate::scheduler::ai_control::{
-    AiControl, ControlStore, ControlStoreError, Decision, DenyReason,
+    AiControl, ControlError, ControlStore, ControlStoreError, Decision, DenyReason, WindowNow,
+    THRESHOLDS_MESSAGE,
 };
 use crate::scheduler::queue::{CancelOutcome, Priority, RunLog, RunLogError, RunQueue};
 use crate::storage::ai_control::{StoredAiControl, StoredPause, StoredReading};
@@ -24,7 +25,7 @@ use crate::storage::labels::{
     ChangePage, ChangePageRequest, DeleteLabelOutcome, Label, LabelledNote,
 };
 use crate::storage::links::Link;
-use crate::storage::record::{now_iso, Cursor, Page};
+use crate::storage::record::{format_utc, now_iso, Cursor, Page};
 use crate::storage::runs::RunEnd;
 use crate::storage::{FileRecord, Item, ItemRef, PageRequest, Storage, StorageError};
 
@@ -401,8 +402,18 @@ fn read_setting(storage: &AppStorage, key: &str) -> Result<Option<String>, AppEr
     storage.get()?.get_setting(key).map_err(storage_failed)
 }
 
+/// The AI control keys (`ai_*`) belong to the AI control: it caches them, so a write from the
+/// generic command would not reach it. They are changed through the AI control commands only.
+/// Reading them stays allowed.
+const AI_CONTROL_KEY_PREFIX: &str = "ai_";
+
 fn write_setting(storage: &AppStorage, key: &str, value: &str) -> Result<(), AppError> {
     check_setting_key(key)?;
+    if key.starts_with(AI_CONTROL_KEY_PREFIX) {
+        return Err(invalid_setting(
+            "AI settings are changed in Settings > AI, not with this command.",
+        ));
+    }
     if value.len() > MAX_VALUE_LEN {
         return Err(invalid_setting("The setting value is too long."));
     }
@@ -454,6 +465,209 @@ pub async fn set_setting(
     value: String,
 ) -> Result<(), AppError> {
     off_main_thread(app, move |storage| write_setting(storage, &key, &value)).await
+}
+
+/// The usage the AI control screen shows: the last usage reading, or, when there is none,
+/// Mnemo's own run count.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UsageView {
+    /// The last reading: when it was read and both windows (a window that has reset has no
+    /// percent). The percent is **Unverified** (see `ai::usage`).
+    Reading {
+        #[serde(rename = "readAt")]
+        read_at: i64,
+        #[serde(rename = "fiveHour")]
+        five_hour: Option<WindowNow>,
+        #[serde(rename = "sevenDay")]
+        seven_day: Option<WindowNow>,
+    },
+    /// No reading yet: how many Mnemo runs started today and this week.
+    Runs { today: i64, week: i64 },
+}
+
+/// What Settings > AI shows, read from the core after every change.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiControlView {
+    pub enabled: bool,
+    pub warn_at: i64,
+    pub pause_at: i64,
+    /// The pause in force: `{ reason: "limit" | "owner", until }`, or null.
+    pub pause: Option<StoredPause>,
+    /// What the gate answers a background task now.
+    pub background_gate: Decision,
+    /// True when usage is at or above the warn line.
+    pub warn: bool,
+    pub usage: UsageView,
+}
+
+/// The longest a week can be from its first day to today, with an hour of slack for a clock
+/// change.
+const MAX_WEEK_SPAN_SECS: i64 = 7 * 24 * 60 * 60 + 60 * 60;
+
+/// Local midnight today and local Monday 00:00, as Unix seconds, sent by the UI (display logic
+/// belongs there). The core checks `0 <= week_start <= today_start <= now`.
+fn check_day_bounds(today_start: i64, week_start: i64, now: i64) -> Result<(), AppError> {
+    let ok = week_start >= 0
+        && week_start <= today_start
+        && today_start <= now
+        && today_start - week_start <= MAX_WEEK_SPAN_SECS;
+    if ok {
+        Ok(())
+    } else {
+        Err(AppError {
+            code: "invalid_input",
+            message: "The start of today and of this week must be times in the past, today within this week.".to_string(),
+        })
+    }
+}
+
+/// The error the UI sees when the AI control could not change. Nothing changed.
+fn control_failed(error: ControlError) -> AppError {
+    match error {
+        ControlError::InvalidThresholds => AppError {
+            code: "invalid_input",
+            message: THRESHOLDS_MESSAGE.to_string(),
+        },
+        ControlError::Storage(e) => {
+            log::error!("the AI control could not be saved: {e}");
+            AppError {
+                code: "storage_error",
+                message: "Mnemo could not save the AI setting. Nothing changed.".to_string(),
+            }
+        }
+        ControlError::Unavailable => control_unavailable(),
+    }
+}
+
+fn control_unavailable() -> AppError {
+    AppError {
+        code: "storage_unavailable",
+        message: "Mnemo could not read its AI settings when it started, so AI stays off. Nothing was deleted. Quit Mnemo and start it again.".to_string(),
+    }
+}
+
+/// The screen's view. The control is read first and let go before storage is locked (lock
+/// order: control, then storage).
+fn ai_control_view(
+    control: &AiControl,
+    storage: &AppStorage,
+    today_start: i64,
+    week_start: i64,
+) -> Result<AiControlView, AppError> {
+    let now = control.now();
+    check_day_bounds(today_start, week_start, now)?;
+    let snap = control.snapshot(now);
+    if !snap.available {
+        return Err(control_unavailable());
+    }
+    let usage = match snap.read_at {
+        Some(read_at) => UsageView::Reading {
+            read_at,
+            five_hour: snap.five_hour,
+            seven_day: snap.seven_day,
+        },
+        None => {
+            // Both bounds are checked to be 0 or more above.
+            let iso = |secs: i64| format_utc(u64::try_from(secs).unwrap_or(0));
+            let counts = storage
+                .get()?
+                .count_started_runs_since(&iso(today_start), &iso(week_start))
+                .map_err(storage_failed)?;
+            UsageView::Runs {
+                today: counts.today,
+                week: counts.week,
+            }
+        }
+    };
+    Ok(AiControlView {
+        enabled: snap.enabled,
+        warn_at: snap.warn_at,
+        pause_at: snap.pause_at,
+        pause: snap.pause,
+        background_gate: snap.background_gate,
+        warn: snap.warn,
+        usage,
+    })
+}
+
+/// Makes one change to the AI control, then reads the new view. Runs on a blocking thread: a
+/// change writes to storage, and switching AI off ends the waiting runs.
+async fn change_ai_control<F>(
+    app: tauri::AppHandle,
+    today_start: i64,
+    week_start: i64,
+    change: F,
+) -> Result<AiControlView, AppError>
+where
+    F: FnOnce(&AiControl) -> Result<(), ControlError> + Send + 'static,
+{
+    let control = app.state::<RunQueue>().control();
+    off_main_thread(app, move |storage| {
+        check_day_bounds(today_start, week_start, control.now())?;
+        change(&control).map_err(control_failed)?;
+        ai_control_view(&control, storage, today_start, week_start)
+    })
+    .await
+}
+
+/// The AI control for Settings > AI: the switch, the lines, the pause and the usage (the last
+/// reading, or Mnemo's run count today and this week).
+#[tauri::command]
+pub async fn get_ai_control(
+    app: tauri::AppHandle,
+    today_start: i64,
+    week_start: i64,
+) -> Result<AiControlView, AppError> {
+    change_ai_control(app, today_start, week_start, |_| Ok(())).await
+}
+
+/// The master switch. Off: nothing new starts, waiting runs end as cancelled, and running runs
+/// finish.
+#[tauri::command]
+pub async fn set_ai_enabled(
+    app: tauri::AppHandle,
+    on: bool,
+    today_start: i64,
+    week_start: i64,
+) -> Result<AiControlView, AppError> {
+    change_ai_control(app, today_start, week_start, move |c| c.set_enabled(on)).await
+}
+
+/// Sets the warn and pause lines: whole numbers 1 to 100, warn lower than pause.
+#[tauri::command]
+pub async fn set_ai_thresholds(
+    app: tauri::AppHandle,
+    warn: i64,
+    pause: i64,
+    today_start: i64,
+    week_start: i64,
+) -> Result<AiControlView, AppError> {
+    change_ai_control(app, today_start, week_start, move |c| {
+        c.set_thresholds(warn, pause)
+    })
+    .await
+}
+
+/// Pauses background AI work. The owner's own tasks still run.
+#[tauri::command]
+pub async fn pause_background(
+    app: tauri::AppHandle,
+    today_start: i64,
+    week_start: i64,
+) -> Result<AiControlView, AppError> {
+    change_ai_control(app, today_start, week_start, |c| c.pause()).await
+}
+
+/// Lifts any pause at once, the usage limit pause included.
+#[tauri::command]
+pub async fn resume_ai(
+    app: tauri::AppHandle,
+    today_start: i64,
+    week_start: i64,
+) -> Result<AiControlView, AppError> {
+    change_ai_control(app, today_start, week_start, |c| c.resume()).await
 }
 
 /// The latest Claude Code check, kept in memory only. `None` until the first check ends.
@@ -1329,6 +1543,157 @@ mod tests {
         );
         assert_eq!(read_setting(&state, "k").unwrap(), None);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    const NOW: i64 = 1_794_990_000;
+    const DAY: i64 = 24 * 60 * 60;
+
+    fn clock_at(t: i64) -> crate::scheduler::ai_control::Clock {
+        Arc::new(move || t)
+    }
+
+    #[test]
+    fn set_setting_refuses_ai_control_keys_and_still_reads_them() {
+        let (state, dir) = app_storage();
+        for key in ["ai_enabled", "ai_pause_reason", "ai_usage_last"] {
+            let err = write_setting(&state, key, "false").unwrap_err();
+            assert_eq!(err.code, "invalid_setting");
+            assert!(err.message.contains("Settings > AI"));
+        }
+        state.get().unwrap().set_ai_enabled(false).unwrap();
+        assert_eq!(
+            read_setting(&state, "ai_enabled").unwrap().as_deref(),
+            Some("false")
+        );
+        // Other keys are not touched by the rule.
+        write_setting(&state, "air_quality", "1").unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ai_control_view_counts_mnemo_runs_today_and_this_week_with_no_reading() {
+        let (state, dir) = app_storage();
+        let control = crate::scheduler::ai_control::testing::open_control_at(clock_at(NOW));
+        let today = NOW - 3600;
+        let week = today - 2 * DAY;
+        {
+            let s = state.get().unwrap();
+            for at in [today + 60, today - DAY, week - 60] {
+                let iso = format_utc(at as u64);
+                let id = s.enqueue_run("summary", &iso).unwrap().base.id;
+                s.start_run(&id, &iso).unwrap();
+            }
+        }
+        let view = ai_control_view(&control, &state, today, week).unwrap();
+        assert_eq!(view.usage, UsageView::Runs { today: 1, week: 2 });
+        let json = serde_json::to_value(&view).unwrap();
+        assert_eq!(
+            json["usage"],
+            serde_json::json!({"kind": "runs", "today": 1, "week": 2})
+        );
+        assert_eq!(json["enabled"], true);
+        assert_eq!(
+            (json["warnAt"].clone(), json["pauseAt"].clone()),
+            (60.into(), 95.into())
+        );
+        assert!(json["pause"].is_null());
+        assert_eq!(json["backgroundGate"], serde_json::json!({"kind": "allow"}));
+        assert_eq!(json["warn"], false);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ai_control_view_gives_the_reading_and_no_percent_for_a_window_that_reset() {
+        let (state, dir) = app_storage();
+        let control = crate::scheduler::ai_control::testing::open_control_at(clock_at(NOW));
+        let window = |u: f64, resets_at: i64| crate::ai::usage::UsageWindow {
+            utilization: Some(u),
+            resets_at: Some(resets_at),
+            status: Some("allowed".into()),
+        };
+        // Read an hour ago: the 5-hour window reset since, the 7-day one did not.
+        control.on_usage_reading(
+            crate::ai::usage::UsageReading {
+                five_hour: Some(window(0.97, NOW - 60)),
+                seven_day: Some(window(0.64, NOW + 3 * DAY)),
+                ..Default::default()
+            },
+            NOW - 3600,
+        );
+        let view = ai_control_view(&control, &state, NOW - 600, NOW - DAY).unwrap();
+        let json = serde_json::to_value(&view).unwrap();
+        assert_eq!(json["usage"]["kind"], "reading");
+        assert_eq!(json["usage"]["readAt"], NOW - 3600);
+        assert!(json["usage"]["fiveHour"]["percent"].is_null());
+        assert_eq!(json["usage"]["sevenDay"]["percent"], 64);
+        assert_eq!(json["usage"]["sevenDay"]["resetsAt"], NOW + 3 * DAY);
+        assert_eq!(json["warn"], true);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ai_control_view_shows_the_limit_pause_and_the_gate_reason() {
+        let (state, dir) = app_storage();
+        let control = crate::scheduler::ai_control::testing::open_control_at(clock_at(NOW));
+        control.on_limit_error(control.reading_seq(), NOW);
+        let json =
+            serde_json::to_value(ai_control_view(&control, &state, NOW - 60, NOW - 60).unwrap())
+                .unwrap();
+        assert_eq!(
+            json["pause"],
+            serde_json::json!({"reason": "limit", "until": null})
+        );
+        assert_eq!(
+            json["backgroundGate"],
+            serde_json::json!({"kind": "deny", "reason": "limit"})
+        );
+        control.resume().unwrap();
+        control.pause().unwrap();
+        let json =
+            serde_json::to_value(ai_control_view(&control, &state, NOW - 60, NOW - 60).unwrap())
+                .unwrap();
+        assert_eq!(json["pause"]["reason"], "owner");
+        assert_eq!(json["backgroundGate"]["reason"], "owner_pause");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ai_control_view_rejects_bad_day_boundaries() {
+        let (state, dir) = app_storage();
+        let control = crate::scheduler::ai_control::testing::open_control_at(clock_at(NOW));
+        for (today, week) in [
+            (NOW + DAY, NOW),
+            (NOW - DAY, NOW - 60),
+            (NOW - 60, -5),
+            (NOW - 60, NOW - 9 * DAY),
+        ] {
+            assert_eq!(
+                ai_control_view(&control, &state, today, week)
+                    .unwrap_err()
+                    .code,
+                "invalid_input",
+                "{today} {week}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ai_control_errors_have_stable_codes_and_the_plain_threshold_message() {
+        let control = crate::scheduler::ai_control::testing::open_control_at(clock_at(NOW));
+        let err = control_failed(control.set_thresholds(95, 60).unwrap_err());
+        assert_eq!(err.code, "invalid_input");
+        assert_eq!(
+            err.message,
+            "Warn and pause must be whole numbers from 1 to 100, and warn must be lower than pause."
+        );
+        let err = control_failed(ControlError::Storage("disk /home/x full".into()));
+        assert_eq!(err.code, "storage_error");
+        assert!(!err.message.contains('/'));
+        assert_eq!(
+            control_failed(ControlError::Unavailable).code,
+            "storage_unavailable"
+        );
     }
 
     #[test]

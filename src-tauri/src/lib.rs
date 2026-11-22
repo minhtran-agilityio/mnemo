@@ -21,6 +21,11 @@ use storage::StorageError;
 /// id, the task name and the state, nothing else.
 const RUN_STATE_EVENT: &str = "run-state";
 
+/// The event the UI gets after every change of the AI control (switch, lines, pause, a usage
+/// reading, a limit pause and its lift). It has no payload: an open Settings screen reads the
+/// view again.
+const AI_CONTROL_EVENT: &str = "ai-control";
+
 /// The stable code for a storage error. Only this code reaches the UI; the full
 /// reason, which can name file paths, goes to the terminal.
 fn startup_code(e: &StorageError) -> &'static str {
@@ -118,6 +123,12 @@ pub fn run() {
                 Arc::new(AppControlStore(app.handle().clone())),
                 scheduler::ai_control::system_clock(),
             );
+            let handle = app.handle().clone();
+            control.subscribe(Arc::new(move || {
+                if let Err(e) = handle.emit(AI_CONTROL_EVENT, ()) {
+                    log::error!("could not send the ai-control event: {e}");
+                }
+            }));
             let runs_dir = paths
                 .as_ref()
                 .ok()
@@ -224,6 +235,11 @@ pub fn run() {
             commands::get_ai_mode,
             commands::run_test_prompt,
             commands::cancel_run,
+            commands::get_ai_control,
+            commands::set_ai_enabled,
+            commands::set_ai_thresholds,
+            commands::pause_background,
+            commands::resume_ai,
             commands::add_bookmark,
             commands::get_bookmark,
             commands::list_bookmarks,

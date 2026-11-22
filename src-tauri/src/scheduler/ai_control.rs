@@ -373,7 +373,8 @@ impl AiControl {
         self.lock().decide(priority, now)
     }
 
-    /// True when usage is at or above the warn line (for the screen's banner only).
+    /// True when usage is at or above the warn line (the screen reads it from `snapshot`).
+    #[cfg(test)]
     pub fn warn(&self, now: i64) -> bool {
         let st = self.lock();
         st.level(now).is_some_and(|l| l >= st.warn_at)
@@ -697,6 +698,11 @@ pub(crate) mod testing {
 
     /// A control with nothing stored (AI on, default lines) and the wall clock.
     pub fn open_control() -> Arc<AiControl> {
+        open_control_at(system_clock())
+    }
+
+    /// A control with nothing stored and the given clock.
+    pub fn open_control_at(clock: Clock) -> Arc<AiControl> {
         let store = MemoryStore(Mutex::new(StoredAiControl {
             enabled: true,
             warn_at: None,
@@ -704,7 +710,7 @@ pub(crate) mod testing {
             pause: None,
             usage_last: None,
         }));
-        AiControl::new(Arc::new(store), system_clock())
+        AiControl::new(Arc::new(store), clock)
     }
 }
 
