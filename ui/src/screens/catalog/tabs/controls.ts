@@ -10,6 +10,7 @@ import {
   createCheckbox,
   createChip,
   createChoiceList,
+  createCopyLine,
   createDialog,
   createDialogButton,
   createField,
@@ -730,6 +731,58 @@ export const renderControls: TabRenderer = (panel, ctx) => {
           state(doc, "disabled", off.element),
           state(doc, "overflow, deep and long Vietnamese paths", long.element),
           state(doc, "in a dialog (Escape cancels, focus trapped)", open),
+        ];
+      },
+      "copy line": () => {
+        const ubuntu =
+          'cp -a "/home/owner/.local/share/io.mnemo.desktop" ~/mnemo-backup-$(date +%Y-%m-%d)';
+        const mac =
+          'cp -a "$HOME/Library/Application Support/io.mnemo.desktop" ~/mnemo-backup-$(date +%Y-%m-%d)';
+        const spaced =
+          "/home/nguyễn/Tài liệu/Dữ liệu Mnemo/ghi chú và đường dẫn rất dài/phiên bản sao lưu";
+        const rejects = () => Promise.reject(new Error("clipboard refused"));
+        return [
+          state(
+            doc,
+            "live: Copy, then Copied, back to idle",
+            createCopyLine(doc, { label: "Ubuntu", text: ubuntu }),
+            { grow: true },
+          ),
+          state(
+            doc,
+            "copied",
+            createCopyLine(doc, { label: "macOS", text: mac, state: "copied" }),
+            { grow: true },
+          ),
+          state(
+            doc,
+            "live: copy fails (clipboard refuses)",
+            createCopyLine(doc, {
+              label: "Ubuntu",
+              text: ubuntu,
+              copy: rejects,
+            }),
+            { grow: true },
+          ),
+          state(
+            doc,
+            "copy failed",
+            createCopyLine(doc, {
+              label: "Data folder",
+              text: spaced,
+              state: "failed",
+            }),
+            { grow: true },
+          ),
+          state(
+            doc,
+            "long content wraps",
+            createCopyLine(doc, {
+              label: "Data folder",
+              text: `/home/owner/${"một-thư-mục-rất-dài-".repeat(12)}`,
+            }),
+            { grow: true },
+          ),
         ];
       },
       "shortcut hint": () => {
