@@ -86,6 +86,48 @@ export function runTestPrompt(): Promise<TestPromptResult> {
   return invoke<TestPromptResult>("run_test_prompt");
 }
 
+// The model and effort of each AI feature (the Rust core owns the list, the defaults and the
+// allowed values).
+export type AiModel = "haiku" | "sonnet" | "opus";
+export type AiEffort = "low" | "medium" | "high";
+
+export interface AiModelRow {
+  feature: string;
+  label: string;
+  model: AiModel;
+  effort: AiEffort;
+}
+
+export interface AiChoice<T extends string> {
+  value: T;
+  label: string;
+}
+
+export interface AiModelTable {
+  rows: AiModelRow[];
+  models: AiChoice<AiModel>[];
+  efforts: AiChoice<AiEffort>[];
+}
+
+/** Every feature's model and effort, with the allowed values. */
+export function listAiModels(): Promise<AiModelTable> {
+  return invoke<AiModelTable>("list_ai_models");
+}
+
+/** Saves one feature's choice. An unknown value rejects with `invalid_ai_model` and changes nothing. */
+export function setAiModel(
+  feature: string,
+  model: AiModel,
+  effort: AiEffort,
+): Promise<AiModelTable> {
+  return invoke<AiModelTable>("set_ai_model", { feature, model, effort });
+}
+
+/** Puts every feature back to its default model and effort. */
+export function resetAiModels(): Promise<AiModelTable> {
+  return invoke<AiModelTable>("reset_ai_models");
+}
+
 // ---- Items and links (#14) ----
 // Types mirror the Rust records (camelCase). Times are UTC ISO 8601 set by the core;
 // null means unknown. Every list is paged: at most 100 records, newest first.
