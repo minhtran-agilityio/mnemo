@@ -246,6 +246,7 @@ fn start(inner: &Arc<Inner>, job: Job, token: CancelToken) {
         task_type: task.name.clone(),
         reply: Some(reply),
         started: Instant::now(),
+        freed: false,
     };
     let runner = inner.runner.clone();
     let name = format!("mnemo-run-{}", slot.task_type);
@@ -274,9 +275,19 @@ struct Slot {
     /// Taken when the run ends normally.
     reply: Option<mpsc::Sender<Result<AiOutput, AiError>>>,
     started: Instant,
+    /// True once the run left the running map.
+    freed: bool,
 }
 
 impl Slot {
+    /// Takes the run out of the running map, so a cancel after this point finds no run.
+    fn free(&mut self) {
+        if !self.freed {
+            self.freed = true;
+            self.inner.lock().running.remove(&self.id);
+        }
+    }
+
     fn duration_ms(&self) -> Option<i64> {
         Some(i64::try_from(self.started.elapsed().as_millis()).unwrap_or(i64::MAX))
     }
@@ -294,6 +305,9 @@ impl Slot {
         };
         self.inner
             .record_end(&self.id, &self.task_type, &end, self.duration_ms());
+        // Out of the running map before the caller hears the result, so a cancel sent after
+        // the result says the run is no longer active. The next job starts on drop.
+        self.free();
         // The caller may have stopped waiting; the row is written either way.
         let _ = reply.send(result);
     }
@@ -311,7 +325,7 @@ impl Drop for Slot {
             self.inner
                 .record_end(&self.id, &self.task_type, &end, self.duration_ms());
         }
-        self.inner.lock().running.remove(&self.id);
+        self.free();
         dispatch(&self.inner);
     }
 }
