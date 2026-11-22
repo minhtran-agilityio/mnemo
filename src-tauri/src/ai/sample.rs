@@ -8,6 +8,7 @@
 
 use serde::Deserialize;
 
+use super::cancel::CancelToken;
 use super::fake::{FakeResult, FakeRunner};
 use super::runner::{AiRunner, AiTask};
 
@@ -29,7 +30,7 @@ fn suggest_title(runner: &dyn AiRunner, text: &str) -> Option<String> {
         effort: None,
         timeout: std::time::Duration::from_secs(60),
     };
-    let output = runner.run_task(&task).ok()?;
+    let output = runner.run_task(&task, &CancelToken::default()).ok()?;
     let answer: TitleAnswer = serde_json::from_str(&output.structured_output).ok()?;
     Some(answer.title).filter(|t| !t.trim().is_empty())
 }

@@ -14,6 +14,7 @@ use std::time::Instant;
 
 use serde::Deserialize;
 
+use super::cancel::CancelToken;
 use super::claude::{
     self, build_command, failure, limit_from_raw, limits_for, outcome_line, process_error, Event,
     ExitInfo, OutputMode,
@@ -112,6 +113,7 @@ pub fn run_stream(
     program: &Path,
     task: &AiTask,
     runs_dir: &Path,
+    cancel: &CancelToken,
     on_text: &mut dyn FnMut(&str),
 ) -> Result<AiOutput, AiError> {
     let started = Instant::now();
@@ -122,6 +124,7 @@ pub fn run_stream(
         command,
         limits_for(task),
         Some(task.prompt.as_bytes()),
+        cancel,
         &mut |chunk| reader.push(chunk),
     );
     let result = match ran {
@@ -279,9 +282,13 @@ mod tests {
     fn a_stand_in_claude_that_prints_a_stream_works_end_to_end() {
         let program = stand_in(&format!("cat <<'EOF'\n{STREAM}EOF"));
         let mut pieces: Vec<String> = Vec::new();
-        let got = run_stream(&program, &task(), &runs(), &mut |t| {
-            pieces.push(t.to_string())
-        });
+        let got = run_stream(
+            &program,
+            &task(),
+            &runs(),
+            &CancelToken::default(),
+            &mut |t| pieces.push(t.to_string()),
+        );
         assert_eq!(pieces, vec!["Hel", "lo", " there"]);
         assert_eq!(
             got.unwrap().structured_output,
@@ -292,7 +299,13 @@ mod tests {
     #[test]
     fn a_failed_stream_with_a_plain_limit_line_on_stdout_is_the_usage_limit() {
         let program = stand_in("echo 'Claude AI usage limit reached'; exit 1");
-        let got = run_stream(&program, &task(), &runs(), &mut |_| {});
+        let got = run_stream(
+            &program,
+            &task(),
+            &runs(),
+            &CancelToken::default(),
+            &mut |_| {},
+        );
         assert_eq!(got, Err(AiError::UsageLimit));
     }
 
@@ -302,7 +315,7 @@ mod tests {
         let mut t = task();
         t.timeout = Duration::from_secs(1);
         let started = Instant::now();
-        let got = run_stream(&program, &t, &runs(), &mut |_| {});
+        let got = run_stream(&program, &t, &runs(), &CancelToken::default(), &mut |_| {});
         assert_eq!(got, Err(AiError::Timeout));
         assert!(started.elapsed() < Duration::from_secs(5));
     }

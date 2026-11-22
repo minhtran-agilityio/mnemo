@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use super::runner::{AiError, AiRunner, AiTask};
+use super::cancel::CancelToken;
+use super::runner::{AiError, AiOutput, AiRunner, AiTask};
 
 /// The answer shape of the test prompt.
 #[derive(Debug, Deserialize)]
@@ -30,9 +31,14 @@ pub fn task() -> AiTask {
     }
 }
 
-/// Runs the test prompt and gives the answer text. An empty answer is a schema mismatch.
+/// Runs the test prompt directly (not through the queue) and gives the answer text.
 pub fn run(runner: &dyn AiRunner) -> Result<String, AiError> {
-    let output = runner.run_task(&task())?;
+    let output = runner.run_task(&task(), &CancelToken::default())?;
+    answer(&output)
+}
+
+/// The answer text of a finished test prompt run. An empty answer is a schema mismatch.
+pub fn answer(output: &AiOutput) -> Result<String, AiError> {
     let parsed: TestAnswer =
         serde_json::from_str(&output.structured_output).map_err(|_| AiError::SchemaMismatch)?;
     let answer = parsed.answer.trim().to_string();

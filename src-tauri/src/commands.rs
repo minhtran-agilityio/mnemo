@@ -123,6 +123,7 @@ fn ai_failed(error: &AiError) -> AppError {
         AiError::SchemaMismatch => "Claude answered, but not in the shape Mnemo asked for.",
         AiError::ExitError { .. } => "Claude Code stopped with an error.",
         AiError::Unavailable => "Claude Code could not be started.",
+        AiError::Cancelled => "The run was cancelled.",
     };
     AppError {
         code: error_kind(error),
@@ -1152,6 +1153,7 @@ mod tests {
             AiError::ExitError { code: Some(1) },
             AiError::ExitError { code: None },
             AiError::Unavailable,
+            AiError::Cancelled,
         ];
         let mut codes = Vec::new();
         for e in &errors {
@@ -1169,7 +1171,8 @@ mod tests {
         );
         codes.sort_unstable();
         codes.dedup();
-        assert_eq!(codes.len(), 5);
+        assert_eq!(codes.len(), 6);
+        assert_eq!(ai_failed(&AiError::Cancelled).code, "cancelled");
     }
 
     #[test]
