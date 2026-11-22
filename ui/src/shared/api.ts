@@ -554,8 +554,14 @@ export async function pickFolder(): Promise<string | null> {
 }
 
 /** Exports all live data into a new folder inside `folder`. */
-export function exportData(folder: string): Promise<ExportSummary> {
-  return invoke<ExportSummary>("export_data", { folder });
+export async function exportData(folder: string): Promise<ExportSummary> {
+  const result: unknown = await invoke<ExportSummary>("export_data", {
+    folder,
+  });
+  // A bare string is the new folder alone, with no counts to show.
+  if (typeof result === "string")
+    return { folder: result, counts: {} as ExportCounts, filesMissing: 0 };
+  return result as ExportSummary;
 }
 
 /** Deletes all data and files. The core refuses any word but `RESET`. */
@@ -563,8 +569,19 @@ export async function resetData(confirm: string): Promise<void> {
   await invoke<void>("reset_data", { confirm });
 }
 
-export function dataFolderInfo(): Promise<DataFolderInfo> {
-  return invoke<DataFolderInfo>("data_folder_info");
+export async function dataFolderInfo(): Promise<DataFolderInfo> {
+  const result: unknown = await invoke<DataFolderInfo>("data_folder_info");
+  // A bare string is the path alone: the copy commands are made from it, as the core makes them.
+  if (typeof result === "string") {
+    const from = `"${result.replace(/[\\"$`]/g, "\\$&")}"`;
+    const to = "~/mnemo-backup-$(date +%Y-%m-%d)";
+    return {
+      path: result,
+      macosCommand: `cp -Rp ${from} ${to}`,
+      ubuntuCommand: `cp -a ${from} ${to}`,
+    };
+  }
+  return result as DataFolderInfo;
 }
 
 /** Opens the data folder in the system file manager. */
