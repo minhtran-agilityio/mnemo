@@ -38,6 +38,7 @@ let resetCalls: string[];
 let resetFails: Error | null;
 let opens: number;
 let afterResets: number;
+let afterResetFlags: boolean[];
 
 const INFO: DataFolderInfo = {
   path: "/home/ana/.local/share/io.mnemo.desktop",
@@ -118,8 +119,9 @@ function deps(): SettingsDeps {
     openDataFolder: async () => {
       opens += 1;
     },
-    afterReset: () => {
+    afterReset: (complete) => {
       afterResets += 1;
+      afterResetFlags.push(complete);
     },
   };
 }
@@ -172,6 +174,7 @@ beforeEach(() => {
   resetFails = null;
   opens = 0;
   afterResets = 0;
+  afterResetFlags = [];
   renderSettings(container, deps());
 });
 
@@ -266,6 +269,7 @@ test("a confirmed reset runs once with RESET, then starts the app over", async (
   expect(afterResets).toBe(0);
   await new Promise((done) => setTimeout(done, RESET_RESTART_MS + 50));
   expect(afterResets).toBe(1);
+  expect(afterResetFlags).toEqual([true]);
 });
 
 test("a failed reset shows a message and does not start the app over", async () => {
@@ -297,6 +301,7 @@ test("a reset that failed part way reloads the app so no stale data stays on scr
   expect(afterResets).toBe(0);
   await new Promise((done) => setTimeout(done, RESET_RESTART_MS + 50));
   expect(afterResets).toBe(1);
+  expect(afterResetFlags).toEqual([false]);
 });
 
 test("the Reset dialog says what is deleted, that no backup is made, and points to Export", async () => {

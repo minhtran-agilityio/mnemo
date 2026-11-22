@@ -67,8 +67,11 @@ export interface SettingsDeps {
   dataFolderInfo(): Promise<DataFolderInfo>;
   /** Opens the data folder in the file manager. Rejects with an AppError. */
   openDataFolder(): Promise<void>;
-  /** Runs after a reset worked, or failed part way: forget the cached theme and start the app over. */
-  afterReset(): void;
+  /**
+   * Runs after a reset worked (`complete`), or failed part way: start the app over.
+   * Only a complete reset forgets the cached theme; a partial one may have kept it.
+   */
+  afterReset(complete: boolean): void;
 }
 
 type SectionId = "appearance" | "ai" | "data";
@@ -502,10 +505,10 @@ export function renderSettings(
       const partial = isAppError(error) && error.code === "reset_failed";
       resetView = {
         kind: "failed",
-        text: `Mnemo could not reset your data. ${errorMessage(error)}${partial ? " Mnemo is reloading to show what is left." : ""}`,
+        text: `Mnemo could not reset your data. ${errorMessage(error)}`,
       };
       redrawData();
-      if (partial) setTimeout(() => deps.afterReset(), RESET_RESTART_MS);
+      if (partial) setTimeout(() => deps.afterReset(false), RESET_RESTART_MS);
       return;
     }
     // The core is empty now. Say so for a moment, then start the app over like a first start.
@@ -514,7 +517,7 @@ export function renderSettings(
       text: "All data was deleted. Mnemo is starting over.",
     };
     redrawData();
-    setTimeout(() => deps.afterReset(), RESET_RESTART_MS);
+    setTimeout(() => deps.afterReset(true), RESET_RESTART_MS);
   }
 
   deps

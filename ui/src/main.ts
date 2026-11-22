@@ -268,12 +268,15 @@ async function start(): Promise<void> {
         resetData,
         dataFolderInfo,
         openDataFolder,
-        afterReset: () => {
-          // The theme was deleted with the data, so its cached copy goes too.
-          try {
-            localStorage.removeItem(THEME_CACHE_KEY);
-          } catch {
-            // Blocked storage has nothing cached to forget.
+        afterReset: (complete) => {
+          // A complete reset deleted the theme with the data, so its cached copy goes too.
+          // After a partial one the setting may have survived, so the cache stays.
+          if (complete) {
+            try {
+              localStorage.removeItem(THEME_CACHE_KEY);
+            } catch {
+              // Blocked storage has nothing cached to forget.
+            }
           }
           location.reload();
         },
