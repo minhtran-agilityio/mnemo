@@ -2,7 +2,7 @@
 // Feedback agent owns it with ds/catalog/feedback.ts, ds/catalog/feedback.css and
 // ds/components/feedback.ts.
 
-import { Check, Trash2 } from "lucide";
+import { Check, Pause, Trash2 } from "lucide";
 import "../../../ds/catalog/feedback.css";
 import {
   buildAiLight,
@@ -19,6 +19,7 @@ import {
   buildRunCount,
   buildSkeleton,
   buildSpinner,
+  buildStateBox,
   buildText,
   buildToast,
   buildTrustLabel,
@@ -304,7 +305,51 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
             action: { label: "Open AI settings", onClick: noop },
           }),
         ),
-        state(doc, "at limit", buildAiOffState({ reason: "limit" })),
+        state(
+          doc,
+          "at limit",
+          buildAiOffState({
+            reason: "limit",
+            resetAt: "14:30",
+            action: { label: "Resume", onClick: noop },
+          }),
+        ),
+        state(
+          doc,
+          "at limit, reset unknown",
+          buildAiOffState({ reason: "limit" }),
+        ),
+        state(
+          doc,
+          "paused",
+          buildAiOffState({
+            reason: "paused",
+            action: { label: "Resume", onClick: noop },
+          }),
+        ),
+        state(
+          doc,
+          "long content",
+          buildAiOffState({
+            reason: "limit",
+            resetAt:
+              "Thursday 27 November 2026 at 14:30 Pacific Standard Time (UTC-8)",
+          }),
+        ),
+        state(
+          doc,
+          "long title and action",
+          buildStateBox({
+            icon: Pause,
+            title:
+              "Background work is paused because the usage limit was reached for this billing period",
+            body: "Links still save and search still works.",
+            action: {
+              label: "Resume background work now and keep summaries running",
+              onClick: noop,
+            },
+          }),
+        ),
       ],
       text: () => {
         const word = el(doc, "strong", undefined, "zebra");
