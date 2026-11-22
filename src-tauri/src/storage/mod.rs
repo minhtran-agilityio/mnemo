@@ -2,6 +2,7 @@
 #[cfg(test)]
 mod concurrency;
 mod error;
+pub mod export;
 pub mod files;
 pub mod ideas;
 pub mod items;
@@ -18,6 +19,7 @@ use std::time::Duration;
 use rusqlite::Connection;
 
 pub use error::StorageError;
+pub use export::ExportSummary;
 pub use files::FileRecord;
 pub use items::Item;
 pub use links::ItemRef;
