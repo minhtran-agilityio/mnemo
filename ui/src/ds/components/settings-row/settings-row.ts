@@ -26,6 +26,8 @@ export interface SettingsRowsOptions {
 let counter = 0;
 
 const DISABLE = "button, input, select, textarea";
+// Controls that can be marked invalid: native fields and custom ones with a role.
+const INVALIDATE = "input, select, textarea, [role]";
 
 interface RowState {
   readonly note: HTMLElement;
@@ -34,6 +36,10 @@ interface RowState {
   readonly errorId: string;
   err: HTMLElement | null;
   errText: Text | null;
+  /** Controls the caller had disabled before the row was disabled; they stay disabled. */
+  keptDisabled: Set<Element> | null;
+  /** aria-invalid as the caller had it, per control, while an error is shown. */
+  invalidBefore: Map<Element, string | null> | null;
 }
 
 const rows = new WeakMap<HTMLElement, RowState>();
@@ -47,10 +53,21 @@ export function setSettingsRowDisabled(
   row: HTMLElement,
   disabled: boolean,
 ): void {
-  for (const control of row.querySelectorAll<HTMLElement>(DISABLE)) {
-    (control as HTMLButtonElement).disabled = disabled;
+  const state = rows.get(row);
+  const found = row.querySelectorAll<HTMLElement>(DISABLE);
+  if (disabled) {
+    if (state && !state.keptDisabled) {
+      state.keptDisabled = new Set(
+        [...found].filter((c) => (c as HTMLButtonElement).disabled),
+      );
+    }
+    for (const c of found) (c as HTMLButtonElement).disabled = true;
+  } else {
+    const kept = state?.keptDisabled;
+    for (const c of found) (c as HTMLButtonElement).disabled = !!kept?.has(c);
+    if (state) state.keptDisabled = null;
   }
-  const box = rows.get(row)?.controls;
+  const box = state?.controls;
   if (!box) return;
   if (disabled) box.setAttribute("inert", "");
   else box.removeAttribute("inert");
@@ -90,9 +107,28 @@ export function setSettingsRowError(
   } else {
     state.err?.remove();
   }
+  state.note.classList.toggle("setting-row-note-empty", !text);
+  markInvalid(state, !!text);
   const described = ids.filter(Boolean).join(" ");
   if (described) row.setAttribute("aria-describedby", described);
   else row.removeAttribute("aria-describedby");
+}
+
+function markInvalid(state: RowState, invalid: boolean): void {
+  if (invalid) {
+    const before = state.invalidBefore ?? new Map<Element, string | null>();
+    state.invalidBefore = before;
+    for (const c of state.controls.querySelectorAll(INVALIDATE)) {
+      if (!before.has(c)) before.set(c, c.getAttribute("aria-invalid"));
+      c.setAttribute("aria-invalid", "true");
+    }
+  } else if (state.invalidBefore) {
+    for (const [c, was] of state.invalidBefore) {
+      if (was === null) c.removeAttribute("aria-invalid");
+      else c.setAttribute("aria-invalid", was);
+    }
+    state.invalidBefore = null;
+  }
 }
 
 export function createSettingsRow(
@@ -135,6 +171,8 @@ export function createSettingsRow(
     errorId: `${id}-error`,
     err: null,
     errText: null,
+    keptDisabled: null,
+    invalidBefore: null,
   });
   setSettingsRowError(row, options.error ?? null);
   if (options.disabled) setSettingsRowDisabled(row, true);

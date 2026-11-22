@@ -50,14 +50,14 @@
   max-width: 100%;
 }
 
-/* The live region stays in the row. Empty, it takes no height: the negative margin cancels the
+/* The live region stays in the row. With no error (even a blank note), it takes no height: the negative margin cancels the
    row gap above it. */
 .setting-row-note {
   flex: 1 1 100%;
   min-width: 0;
 }
 
-.setting-row-note:empty {
+.setting-row-note-empty {
   margin-block-start: calc(-1 * var(--space-2));
 }
 

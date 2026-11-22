@@ -22,5 +22,5 @@
 
 /* The narrow settings row example: a column too narrow for text and controls side by side. */
 .ui-catalog .lst-settings-narrow {
-  max-width: var(--size-basis-decisions);
+  max-width: calc(var(--size-basis-setting) * 2);
 }

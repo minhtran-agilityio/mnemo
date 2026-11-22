@@ -175,3 +175,65 @@ test("it refuses an element that is not a settings row", () => {
     setSettingsRowError(document.createElement("div"), "x"),
   ).toThrow();
 });
+
+test("a control the caller disabled stays disabled after disable then enable", () => {
+  const reset = document.createElement("button");
+  reset.textContent = "Reset";
+  reset.disabled = true;
+  const save = document.createElement("button");
+  save.textContent = "Save";
+  const row = createSettingsRow(document, {
+    label: "A",
+    controls: [reset, save],
+  });
+  setSettingsRowDisabled(row, true);
+  expect(reset.disabled).toBe(true);
+  expect(save.disabled).toBe(true);
+  setSettingsRowDisabled(row, true);
+  setSettingsRowDisabled(row, false);
+  expect(reset.disabled).toBe(true);
+  expect(save.disabled).toBe(false);
+});
+
+test("a non-native control is inert while the row is disabled", () => {
+  const custom = document.createElement("div");
+  custom.tabIndex = 0;
+  const row = createSettingsRow(document, {
+    label: "A",
+    controls: [custom],
+    disabled: true,
+  });
+  const box = row.querySelector(".setting-row-controls") as HTMLElement;
+  expect(box.hasAttribute("inert")).toBe(true);
+  setSettingsRowDisabled(row, false);
+  expect(box.hasAttribute("inert")).toBe(false);
+});
+
+test("an error marks the controls invalid and restores what the caller had", () => {
+  const a = document.createElement("input");
+  const b = document.createElement("select");
+  b.setAttribute("aria-invalid", "false");
+  const row = createSettingsRow(document, { label: "A", controls: [a, b] });
+  setSettingsRowError(row, "Could not save.");
+  expect(a.getAttribute("aria-invalid")).toBe("true");
+  expect(b.getAttribute("aria-invalid")).toBe("true");
+  setSettingsRowError(row, "Again.");
+  setSettingsRowError(row, null);
+  expect(a.hasAttribute("aria-invalid")).toBe(false);
+  expect(b.getAttribute("aria-invalid")).toBe("false");
+});
+
+test("a blank note is marked empty so it leaves no gap", () => {
+  const row = createSettingsRow(document, { label: "A", controls: [] });
+  const note = row.querySelector(".setting-row-note") as HTMLElement;
+  expect(note.classList.contains("setting-row-note-empty")).toBe(true);
+  setSettingsRowError(row, "Oops");
+  expect(note.classList.contains("setting-row-note-empty")).toBe(false);
+  setSettingsRowError(row, "   ");
+  expect(note.classList.contains("setting-row-note-empty")).toBe(true);
+  expect(
+    cssRule(import.meta.dirname, "settings-row.css", ".setting-row-note-empty")[
+      "margin-block-start"
+    ],
+  ).toBeTruthy();
+});
