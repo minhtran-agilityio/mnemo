@@ -16,6 +16,28 @@ export interface FieldOptions {
   readonly error?: string;
 }
 
+interface FieldState {
+  readonly target: HTMLElement;
+  /** The hint, built once; it sits outside the live region so it is not announced when it returns. */
+  readonly hintEl: HTMLElement | null;
+  /** The polite live region. Only the error goes inside it. */
+  readonly note: HTMLElement;
+  readonly errorId: string;
+  /** Built on the first error and kept; its message text node is updated in place. */
+  err: HTMLElement | null;
+  errText: Text | null;
+  /** What the caller had set on the control; put back when the field stops writing it. */
+  readonly ownDescribedBy: string | null;
+  readonly ownInvalid: string | null;
+}
+
+/** Writes an attribute only when the value differs, so a repeat call changes nothing. */
+function setAttr(el: HTMLElement, name: string, value: string): void {
+  if (el.getAttribute(name) !== value) el.setAttribute(name, value);
+}
+
+const fields = new WeakMap<HTMLElement, FieldState>();
+
 export function createField(doc: Document, options: FieldOptions): HTMLElement {
   const target = options.target ?? options.control;
   if (!target.id) target.id = nextControlId("control");
@@ -24,22 +46,80 @@ export function createField(doc: Document, options: FieldOptions): HTMLElement {
   const label = doc.createElement("label");
   label.htmlFor = target.id;
   label.textContent = options.label;
-  wrap.append(label, options.control);
-  if (options.error) {
-    const err = doc.createElement("span");
-    err.className = "err-text";
-    err.id = `${target.id}-error`;
-    err.append(createIcon(CircleAlert), doc.createTextNode(options.error));
-    target.setAttribute("aria-invalid", "true");
-    target.setAttribute("aria-describedby", err.id);
-    wrap.append(err);
-  } else if (options.hint) {
-    const hint = doc.createElement("span");
-    hint.className = "hint";
-    hint.id = `${target.id}-hint`;
-    hint.textContent = options.hint;
-    target.setAttribute("aria-describedby", hint.id);
-    wrap.append(hint);
+  // The live region exists before any message, so a message put into it while the owner types
+  // is announced.
+  const note = doc.createElement("div");
+  note.className = "field-note";
+  note.setAttribute("aria-live", "polite");
+  let hintEl: HTMLElement | null = null;
+  if (options.hint) {
+    hintEl = doc.createElement("span");
+    hintEl.className = "hint";
+    hintEl.id = `${target.id}-hint`;
+    hintEl.textContent = options.hint;
   }
+  wrap.append(label, options.control, note);
+  fields.set(wrap, {
+    target,
+    hintEl,
+    note,
+    errorId: `${target.id}-error`,
+    err: null,
+    errText: null,
+    ownDescribedBy: target.getAttribute("aria-describedby"),
+    ownInvalid: target.getAttribute("aria-invalid"),
+  });
+  setFieldError(wrap, options.error ?? null);
   return wrap;
+}
+
+/**
+ * Show, change or clear a field's error after it is built. The control is not touched, so focus
+ * and the caret stay. A message replaces the hint and marks the target invalid; null or an empty
+ * message brings the hint back (or nothing, when the field had none) and clears aria-invalid.
+ * The error sits in a polite live region and its text changes in place; the same message set
+ * again writes nothing, so it is not announced twice. Only the attributes this field wrote are
+ * changed; what the caller set on the control is put back. `field` must come from createField.
+ * The control's own aria-describedby is read once, at createField: do not change it afterwards.
+ */
+export function setFieldError(
+  field: HTMLElement,
+  message: string | null,
+): void {
+  const state = fields.get(field);
+  if (!state) throw new Error("setFieldError: not a field made by createField");
+  const { target, hintEl, note, errorId } = state;
+  // A message of only spaces is empty.
+  const text = message?.trim() ?? "";
+  if (text) {
+    hintEl?.remove();
+    if (state.err && state.errText) {
+      if (state.errText.data !== text) state.errText.data = text;
+      if (state.err.parentNode !== note) note.append(state.err);
+    } else {
+      const err = field.ownerDocument.createElement("span");
+      err.className = "err-text";
+      err.id = errorId;
+      const node = field.ownerDocument.createTextNode(text);
+      err.append(createIcon(CircleAlert), node);
+      state.err = err;
+      state.errText = node;
+      note.append(err);
+    }
+    setAttr(target, "aria-invalid", "true");
+    setAttr(target, "aria-describedby", errorId);
+    return;
+  }
+  state.err?.remove();
+  if (state.ownInvalid === null) target.removeAttribute("aria-invalid");
+  else target.setAttribute("aria-invalid", state.ownInvalid);
+  if (hintEl) {
+    // The hint goes before the live region, outside it.
+    if (hintEl.parentNode !== field) field.insertBefore(hintEl, note);
+    target.setAttribute("aria-describedby", hintEl.id);
+  } else if (state.ownDescribedBy === null) {
+    target.removeAttribute("aria-describedby");
+  } else {
+    target.setAttribute("aria-describedby", state.ownDescribedBy);
+  }
 }
