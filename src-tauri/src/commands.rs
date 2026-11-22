@@ -14,7 +14,7 @@ use crate::storage::files::OrphanReport;
 use crate::storage::ideas::{Idea, IdeaInput, IdeaProject};
 use crate::storage::items::{
     Bookmark, BookmarkInput, Event, EventInput, Memory, MemoryInput, Note, NoteInput, Project,
-    ProjectInput, Run, RunInput, Task, TaskInput,
+    ProjectInput, Run, Task, TaskInput,
 };
 use crate::storage::labels::{
     ChangePage, ChangePageRequest, DeleteLabelOutcome, Label, LabelledNote,
@@ -791,7 +791,20 @@ item_commands!(
     update_event,
     delete_event
 );
-item_commands!(Run, RunInput, add_run, get_run, list_runs, update_run, delete_run);
+// Run rows belong to the run queue (it adds them, moves them through their states and ends
+// them), so the UI can only read them. Cancelling goes through `cancel_run`.
+
+/// The live run with this id.
+#[tauri::command]
+pub async fn get_run(app: tauri::AppHandle, id: String) -> Result<Run, AppError> {
+    off_main_thread(app, move |s| get_item::<Run>(s, &id)).await
+}
+
+/// One page of runs, newest first.
+#[tauri::command]
+pub async fn list_runs(app: tauri::AppHandle, args: ListArgs) -> Result<Page<Run>, AppError> {
+    off_main_thread(app, move |s| list_items::<Run>(s, &args)).await
+}
 item_commands!(
     Memory,
     MemoryInput,

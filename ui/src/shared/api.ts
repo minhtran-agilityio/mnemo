@@ -347,12 +347,10 @@ export const listEvents = events.list;
 export const updateEvent = events.update;
 export const deleteEvent = events.remove;
 
+// Run rows belong to the run queue: the UI reads them and cancels through `cancel_run`.
 const runs = itemClient<Run, RunInput>("run", "runs");
-export const addRun = runs.add;
 export const getRun = runs.get;
 export const listRuns = runs.list;
-export const updateRun = runs.update;
-export const deleteRun = runs.remove;
 
 const memories = itemClient<Memory, MemoryInput>("memory", "memories");
 export const addMemory = memories.add;
