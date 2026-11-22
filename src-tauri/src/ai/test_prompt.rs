@@ -6,8 +6,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use super::cancel::CancelToken;
-use super::runner::{AiError, AiOutput, AiRunner, AiTask};
+use super::runner::{AiError, AiOutput, AiTask};
 
 /// The answer shape of the test prompt.
 #[derive(Debug, Deserialize)]
@@ -31,9 +30,11 @@ pub fn task() -> AiTask {
     }
 }
 
-/// Runs the test prompt directly (not through the queue) and gives the answer text.
-pub fn run(runner: &dyn AiRunner) -> Result<String, AiError> {
-    let output = runner.run_task(&task(), &CancelToken::default())?;
+/// Runs the test prompt directly (not through the queue) and gives the answer text. The app
+/// runs it through the queue (`commands::run_test_prompt`); this is for tests.
+#[cfg(test)]
+pub fn run(runner: &dyn super::runner::AiRunner) -> Result<String, AiError> {
+    let output = runner.run_task(&task(), &super::cancel::CancelToken::default())?;
     answer(&output)
 }
 
