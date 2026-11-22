@@ -68,8 +68,8 @@ fn shell_quoted(path: &Path) -> String {
 pub fn backup_commands(data_dir: &Path) -> BackupCommands {
     let from = shell_quoted(data_dir);
     BackupCommands {
-        macos: format!("cp -Rp {from} ~/mnemo-backup-$(date +%Y-%m-%d)"),
-        ubuntu: format!("cp -a {from} ~/mnemo-backup-$(date +%Y-%m-%d)"),
+        macos: format!("cp -Rp {from} ~/mnemo-backup-$(date +%Y-%m-%d-%H%M%S)"),
+        ubuntu: format!("cp -a {from} ~/mnemo-backup-$(date +%Y-%m-%d-%H%M%S)"),
     }
 }
 
@@ -106,11 +106,11 @@ mod tests {
         let c = backup_commands(Path::new("/home/ana/.local/share/io.mnemo.desktop"));
         assert_eq!(
             c.ubuntu,
-            "cp -a \"/home/ana/.local/share/io.mnemo.desktop\" ~/mnemo-backup-$(date +%Y-%m-%d)"
+            "cp -a \"/home/ana/.local/share/io.mnemo.desktop\" ~/mnemo-backup-$(date +%Y-%m-%d-%H%M%S)"
         );
         assert_eq!(
             c.macos,
-            "cp -Rp \"/home/ana/.local/share/io.mnemo.desktop\" ~/mnemo-backup-$(date +%Y-%m-%d)"
+            "cp -Rp \"/home/ana/.local/share/io.mnemo.desktop\" ~/mnemo-backup-$(date +%Y-%m-%d-%H%M%S)"
         );
     }
 
@@ -119,7 +119,7 @@ mod tests {
         let c = backup_commands(Path::new("/Users/Ana B/Library/Application Support/x$y"));
         assert_eq!(
             c.macos,
-            "cp -Rp \"/Users/Ana B/Library/Application Support/x\\$y\" ~/mnemo-backup-$(date +%Y-%m-%d)"
+            "cp -Rp \"/Users/Ana B/Library/Application Support/x\\$y\" ~/mnemo-backup-$(date +%Y-%m-%d-%H%M%S)"
         );
         assert!(c.ubuntu.starts_with("cp -a \"/Users/Ana B/"));
     }

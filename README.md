@@ -93,13 +93,13 @@ There is no "Back up now" button. A backup is a copy of the whole data folder (t
 2. Copy the folder. On Ubuntu 22.04:
 
    ```
-   cp -a "$HOME/.local/share/io.mnemo.desktop" ~/mnemo-backup-$(date +%Y-%m-%d)
+   cp -a "$HOME/.local/share/io.mnemo.desktop" ~/mnemo-backup-$(date +%Y-%m-%d-%H%M%S)
    ```
 
    On macOS (Apple Silicon):
 
    ```
-   cp -Rp "$HOME/Library/Application Support/io.mnemo.desktop" ~/mnemo-backup-$(date +%Y-%m-%d)
+   cp -Rp "$HOME/Library/Application Support/io.mnemo.desktop" ~/mnemo-backup-$(date +%Y-%m-%d-%H%M%S)
    ```
 
 3. Start Mnemo again.
@@ -108,7 +108,7 @@ There is no "Back up now" button. A backup is a copy of the whole data folder (t
 
 1. Quit Mnemo from the tray icon.
 2. Move the current data folder aside (do not delete it yet), for example `mv "<data folder>" "<data folder>.old"`.
-3. Copy the backup folder to the data folder path. On Ubuntu 22.04: `cp -a ~/mnemo-backup-YYYY-MM-DD "$HOME/.local/share/io.mnemo.desktop"`. On macOS: `cp -Rp ~/mnemo-backup-YYYY-MM-DD "$HOME/Library/Application Support/io.mnemo.desktop"`.
+3. Copy the backup folder to the data folder path. On Ubuntu 22.04: `cp -a ~/mnemo-backup-YYYY-MM-DD-HHMMSS "$HOME/.local/share/io.mnemo.desktop"`. On macOS: `cp -Rp ~/mnemo-backup-YYYY-MM-DD-HHMMSS "$HOME/Library/Application Support/io.mnemo.desktop"`.
 4. Start Mnemo. It opens with all the data of the backup. Delete the `.old` folder when you are sure.
 
 ### Export

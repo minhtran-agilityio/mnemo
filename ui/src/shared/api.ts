@@ -574,7 +574,7 @@ export async function dataFolderInfo(): Promise<DataFolderInfo> {
   // A bare string is the path alone: the copy commands are made from it, as the core makes them.
   if (typeof result === "string") {
     const from = `"${result.replace(/[\\"$`]/g, "\\$&")}"`;
-    const to = "~/mnemo-backup-$(date +%Y-%m-%d)";
+    const to = "~/mnemo-backup-$(date +%Y-%m-%d-%H%M%S)";
     return {
       path: result,
       macosCommand: `cp -Rp ${from} ${to}`,
