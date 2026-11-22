@@ -372,6 +372,40 @@ export const renderControls: TabRenderer = (panel, ctx) => {
         const trigger = many.anchor.querySelector("button");
         manyLabel.id = "cat-many-label";
         trigger?.setAttribute("aria-describedby", manyLabel.id);
+        const inlineSelect = (
+          name: string,
+          opts: readonly string[],
+          extra: { disabled?: boolean } = {},
+        ) => {
+          const s = createSelect(doc, {
+            options: opts,
+            inline: true,
+            ...extra,
+          });
+          s.select.setAttribute("aria-label", `${name} for Save a link`);
+          return s;
+        };
+        const models = ["Haiku 5.5", "Sonnet 5.5", "Opus 5.5"];
+        const efforts = ["Low effort", "Medium effort", "High effort"];
+        const pair = el(doc, "div", "cat-hstack");
+        pair.append(
+          inlineSelect("Model", models).wrap,
+          inlineSelect("Effort", efforts).wrap,
+        );
+        const off = el(doc, "div", "cat-hstack");
+        off.append(inlineSelect("Model", models, { disabled: true }).wrap);
+        const refused = inlineSelect("Effort", efforts);
+        refused.select.value = "Medium effort";
+        const refusedField = createField(doc, {
+          label: "Effort",
+          control: refused.wrap,
+          target: refused.select,
+          error: "Could not save. Medium effort is kept.",
+        });
+        const longOne = inlineSelect("Model", [
+          "Sonnet 5.5 with a very long option name that must be cut and not widen the row or scroll",
+        ]);
+        longOne.wrap.style.maxWidth = "100%";
         return [
           state(
             doc,
@@ -383,6 +417,10 @@ export const renderControls: TabRenderer = (panel, ctx) => {
             }),
             { grow: true },
           ),
+          state(doc, "inline, two side by side (Model, Effort)", pair),
+          state(doc, "inline, disabled (save pending)", off),
+          state(doc, "inline, error (value refused)", refusedField),
+          state(doc, "inline, overflow (long option)", longOne.wrap),
           state(doc, "pick many (live)", [manyLabel, many.anchor]),
         ];
       },
