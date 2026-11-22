@@ -74,6 +74,11 @@ export function createCopyLine(
   const code = doc.createElement("code");
   code.className = "copy-line-text";
   code.tabIndex = 0;
+  // A read-only box with a name, so the focusable text is announced with its label.
+  code.setAttribute("role", "textbox");
+  code.setAttribute("aria-readonly", "true");
+  code.setAttribute("aria-multiline", "true");
+  code.setAttribute("aria-labelledby", `${id}-label`);
   code.textContent = options.text;
 
   const status = doc.createElement("p");
@@ -104,6 +109,8 @@ export function createCopyLine(
   button.addEventListener("click", () => {
     run += 1;
     const mine = run;
+    // Clear first so a repeated result is a change the live region announces again.
+    status.textContent = "";
     if (timer !== undefined) {
       clearTimeout(timer);
       timer = undefined;

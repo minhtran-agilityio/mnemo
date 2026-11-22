@@ -6,12 +6,16 @@ import {
   createCopyLine,
   FAILED_TEXT,
 } from "./copy-line";
+import css from "./copy-line.css?raw";
 
 beforeEach(() => {
   vi.useFakeTimers();
 });
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
+  Reflect.deleteProperty(window.navigator, "clipboard");
+  window.getSelection()?.removeAllRanges();
 });
 
 const flush = async () => {
@@ -40,7 +44,6 @@ test("idle shows the label, the text and a Copy button, with no status", () => {
 test("the group and the button have accessible names", () => {
   const line = createCopyLine(document, { label: "macOS", text: "x" });
   const labelId = line.getAttribute("aria-labelledby") ?? "";
-  expect(document.createElement("div").id).toBe("");
   expect(line.querySelector(`#${labelId}`)?.textContent).toBe("macOS");
   expect(parts(line).button.getAttribute("aria-label")).toBe("Copy macOS");
 });
@@ -100,6 +103,7 @@ test("a rejected clipboard shows the visible fallback line and selects the text"
   await flush();
   expect(line.dataset.state).toBe("failed");
   expect(parts(line).status.textContent).toBe(FAILED_TEXT);
+  expect(window.getSelection()?.toString()).toBe("abc");
   expect(parts(line).button.textContent).toBe("Copy");
   vi.advanceTimersByTime(COPY_RESET_MS * 3);
   expect(line.dataset.state).toBe("failed");
@@ -118,12 +122,15 @@ test("a writer that throws, or a missing clipboard, also fails visibly", async (
   await flush();
   expect(throwing.dataset.state).toBe("failed");
 
-  vi.stubGlobal("navigator", {});
+  Object.defineProperty(window.navigator, "clipboard", {
+    value: undefined,
+    configurable: true,
+  });
   const missing = createCopyLine(document, { label: "a", text: "b" });
   parts(missing).button.click();
   await flush();
   expect(missing.dataset.state).toBe("failed");
-  vi.unstubAllGlobals();
+  expect(parts(missing).status.textContent).toBe(FAILED_TEXT);
 });
 
 test("the default writer uses navigator.clipboard when present", async () => {
@@ -173,4 +180,43 @@ test("very long content stays in the text element, which wraps", () => {
   const line = createCopyLine(document, { label: "Path", text: long });
   expect(parts(line).text.textContent).toBe(long);
   expect(line.querySelectorAll("code")).toHaveLength(1);
+});
+
+test("the text box is named by the label", () => {
+  const line = createCopyLine(document, { label: "Ubuntu", text: "x" });
+  const labelId = line.querySelector(".copy-line-label")?.id;
+  expect(parts(line).text.getAttribute("aria-labelledby")).toBe(labelId);
+  expect(parts(line).text.getAttribute("role")).toBe("textbox");
+  expect(parts(line).text.getAttribute("aria-readonly")).toBe("true");
+});
+
+test("the status line is a live region that exists while empty and is never hidden", () => {
+  const line = createCopyLine(document, { label: "a", text: "b" });
+  const { status } = parts(line);
+  expect(status.getAttribute("role")).toBe("status");
+  expect(status.textContent).toBe("");
+  expect(status.hidden).toBe(false);
+  expect(css).not.toMatch(/display:\s*none/);
+});
+
+test("a second failure clears the line first so it is announced again", async () => {
+  let reject: (e: Error) => void = () => {};
+  const copy = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("no"))
+    .mockImplementationOnce(
+      () =>
+        new Promise<void>((_, r) => {
+          reject = r;
+        }),
+    );
+  const line = createCopyLine(document, { label: "a", text: "b", copy });
+  parts(line).button.click();
+  await flush();
+  expect(parts(line).status.textContent).toBe(FAILED_TEXT);
+  parts(line).button.click();
+  expect(parts(line).status.textContent).toBe("");
+  reject(new Error("again"));
+  await flush();
+  expect(parts(line).status.textContent).toBe(FAILED_TEXT);
 });

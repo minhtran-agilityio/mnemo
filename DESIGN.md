@@ -93,6 +93,7 @@ The UI Catalog tabs need fixed lengths that no token covered (prototype v3 uses 
 | `--size-row-compact` | 28px |
 | `--size-tag-input` | 30px |
 | `--size-field-max` | 320px |
+| `--size-copy-line-min` | 12rem |
 | `--size-textarea-min` | 88px |
 | `--size-tags-max` | 360px |
 | `--size-tag-input-min` | 80px |
@@ -110,7 +111,6 @@ The UI Catalog tabs need fixed lengths that no token covered (prototype v3 uses 
 | `--size-dot` | 8px |
 | `--size-dot-sm` | 6px |
 | `--size-meter-max` | 320px |
-| `--size-copy-line-min` | 12rem |
 | `--size-meter-height` | 10px |
 | `--size-meter-tick-overhang` | 3px |
 | `--size-progress-max` | 280px |
