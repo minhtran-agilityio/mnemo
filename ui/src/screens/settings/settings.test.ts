@@ -1,7 +1,12 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Theme } from "../../frame/theme";
-import type { AiHealth, AiMode, TestPromptResult } from "../../shared/api";
+import type {
+  AiHealth,
+  AiMode,
+  AiModelTable,
+  TestPromptResult,
+} from "../../shared/api";
 import {
   renderSettings,
   resetTestPromptForTests,
@@ -28,6 +33,14 @@ const READY: AiHealth = { state: "ready", message: "Claude Code is ready." };
 const SIGNED_OUT: AiHealth = {
   state: "not_signed_in",
   message: "Open a terminal and run `claude`.",
+};
+
+const MODEL_TABLE: AiModelTable = {
+  rows: [
+    { feature: "save", label: "Save a link", model: "haiku", effort: "low" },
+  ],
+  models: [{ value: "haiku", label: "Haiku 5.5" }],
+  efforts: [{ value: "low", label: "Low effort" }],
 };
 
 function deps(): SettingsDeps {
@@ -63,6 +76,9 @@ function deps(): SettingsDeps {
         prompts.push(done as (r: unknown) => void);
         promptRejects.push(fail);
       }),
+    listAiModels: async () => MODEL_TABLE,
+    setAiModel: async () => MODEL_TABLE,
+    resetAiModels: async () => MODEL_TABLE,
   };
 }
 
@@ -173,8 +189,12 @@ test("the AI section shows the state, the fix message and a Check again button",
   openSection("AI");
   expect(aiBody()).toContain("Not signed in");
   expect(aiBody()).toContain("Open a terminal and run `claude`.");
-  expect(container.querySelectorAll(".settings-body .pill").length).toBe(1);
-  expect(container.querySelectorAll(".settings-body button").length).toBe(1);
+  expect(
+    container.querySelectorAll(".settings-body > :first-child .pill").length,
+  ).toBe(1);
+  expect(
+    container.querySelectorAll(".settings-body > :first-child button").length,
+  ).toBe(1);
   expect(checkAgainButton().type).toBe("button");
 });
 

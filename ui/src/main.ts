@@ -37,6 +37,7 @@ import {
   getAiHealth,
   getAiMode,
   getSetting,
+  listAiModels,
   listBookmarks,
   listIdeas,
   listLabelledNotes,
@@ -45,8 +46,10 @@ import {
   moveLabel,
   ping,
   renameLabel,
+  resetAiModels,
   runTestPrompt,
   saveLabelledNote,
+  setAiModel,
   setSetting,
   turnIdeaIntoProject,
   updateIdea,
@@ -257,6 +260,9 @@ async function start(): Promise<void> {
         getAiMode,
         checkAiHealth,
         runTestPrompt,
+        listAiModels,
+        setAiModel,
+        resetAiModels,
       });
     } else if (item.id === IDEAS_ID) {
       leaveScreen = renderIdeas(screen, {
