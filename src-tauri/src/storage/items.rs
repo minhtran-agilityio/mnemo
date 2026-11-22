@@ -121,7 +121,7 @@ pub enum RunOutcome {
 }
 
 impl RunOutcome {
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             RunOutcome::Ok => "ok",
             RunOutcome::Failed => "failed",
@@ -136,6 +136,63 @@ impl FromSql for RunOutcome {
             "ok" => Ok(RunOutcome::Ok),
             "failed" => Ok(RunOutcome::Failed),
             "cancelled" => Ok(RunOutcome::Cancelled),
+            _ => Err(FromSqlError::InvalidType),
+        }
+    }
+}
+
+/// Where an AI run is: waiting in the queue, running, or one of the three end states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RunState {
+    Waiting,
+    Running,
+    Done,
+    Failed,
+    Cancelled,
+}
+
+impl RunState {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            RunState::Waiting => "waiting",
+            RunState::Running => "running",
+            RunState::Done => "done",
+            RunState::Failed => "failed",
+            RunState::Cancelled => "cancelled",
+        }
+    }
+
+    /// The outcome that goes with this state: none while the run waits or runs.
+    pub fn outcome(self) -> Option<RunOutcome> {
+        match self {
+            RunState::Waiting | RunState::Running => None,
+            RunState::Done => Some(RunOutcome::Ok),
+            RunState::Failed => Some(RunOutcome::Failed),
+            RunState::Cancelled => Some(RunOutcome::Cancelled),
+        }
+    }
+
+    /// True for done, failed and cancelled.
+    pub fn is_end(self) -> bool {
+        self.outcome().is_some()
+    }
+}
+
+impl ToSql for RunState {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(self.as_str()))
+    }
+}
+
+impl FromSql for RunState {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        match value.as_str()? {
+            "waiting" => Ok(RunState::Waiting),
+            "running" => Ok(RunState::Running),
+            "done" => Ok(RunState::Done),
+            "failed" => Ok(RunState::Failed),
+            "cancelled" => Ok(RunState::Cancelled),
             _ => Err(FromSqlError::InvalidType),
         }
     }
@@ -685,16 +742,20 @@ impl Item for Event {
     }
 }
 
-/// One AI run. No token counts are ever stored.
+/// One AI run. No token counts are ever stored. `created_at` is the time it was queued.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Run {
     #[serde(flatten)]
     pub base: RecordBase,
     pub task_type: String,
-    pub started_at: String,
+    pub state: RunState,
+    /// Null while the run waits, and for a run cancelled before it started.
+    pub started_at: Option<String>,
+    /// Set when the run reached an end state (done, failed or cancelled).
+    pub ended_at: Option<String>,
     pub duration_ms: Option<i64>,
-    /// Null while the run is going.
+    /// Null while the run waits or runs; otherwise it matches `state` (done is ok).
     pub outcome: Option<RunOutcome>,
     /// The error the run reported, never invented text.
     pub error: Option<String>,
@@ -704,7 +765,11 @@ pub struct Run {
 #[serde(rename_all = "camelCase")]
 pub struct RunInput {
     pub task_type: String,
-    pub started_at: String,
+    pub state: RunState,
+    #[serde(deserialize_with = "nullable")]
+    pub started_at: Option<String>,
+    #[serde(deserialize_with = "nullable")]
+    pub ended_at: Option<String>,
     #[serde(deserialize_with = "nullable")]
     pub duration_ms: Option<i64>,
     #[serde(deserialize_with = "nullable")]
@@ -719,14 +784,42 @@ impl Item for Run {
     const KIND: ItemKind = ItemKind::Run;
     item_sql!(
         table: "run",
-        columns: "task_type, started_at, duration_ms, outcome, error",
-        insert: "?3, ?4, ?5, ?6, ?7",
-        set: "task_type = ?3, started_at = ?4, duration_ms = ?5, outcome = ?6, error = ?7"
+        columns: "task_type, state, started_at, ended_at, duration_ms, outcome, error",
+        insert: "?3, ?4, ?5, ?6, ?7, ?8, ?9",
+        set: "task_type = ?3, state = ?4, started_at = ?5, ended_at = ?6, duration_ms = ?7, outcome = ?8, error = ?9"
     );
 
     fn validate(i: &RunInput) -> Result<(), StorageError> {
         required_chars("task type", &i.task_type, MAX_CODE_CHARS)?;
-        utc_time("start time", &i.started_at)?;
+        if let Some(t) = &i.started_at {
+            utc_time("start time", t)?;
+        }
+        if let Some(t) = &i.ended_at {
+            utc_time("end time", t)?;
+        }
+        if i.state == RunState::Waiting && i.started_at.is_some() {
+            return Err(invalid("A waiting run has no start time yet.".to_string()));
+        }
+        if i.state == RunState::Running && i.started_at.is_none() {
+            return Err(invalid("A running run needs its start time.".to_string()));
+        }
+        if i.state.is_end() != i.ended_at.is_some() {
+            return Err(invalid(
+                "A run has an end time only when it is done, failed or cancelled.".to_string(),
+            ));
+        }
+        // Valid because both are in the one fixed UTC shape checked above.
+        if let (Some(start), Some(end)) = (&i.started_at, &i.ended_at) {
+            if end < start {
+                return Err(invalid("A run cannot end before it starts.".to_string()));
+            }
+        }
+        if i.outcome != i.state.outcome() {
+            return Err(invalid(
+                "The run outcome must match its state: ok for done, failed for failed, cancelled for cancelled, none while waiting or running."
+                    .to_string(),
+            ));
+        }
         if i.duration_ms.is_some_and(|d| d < 0) {
             return Err(invalid("The duration cannot be negative.".to_string()));
         }
@@ -736,7 +829,9 @@ impl Item for Run {
     fn values(i: &RunInput) -> Vec<Value> {
         vec![
             text(&i.task_type),
-            text(&i.started_at),
+            text(i.state.as_str()),
+            opt_text(&i.started_at),
+            opt_text(&i.ended_at),
             i.duration_ms.map_or(Value::Null, Value::Integer),
             i.outcome.map_or(Value::Null, |o| text(o.as_str())),
             opt_text(&i.error),
@@ -747,10 +842,12 @@ impl Item for Run {
         Ok(Run {
             base: base_from(r)?,
             task_type: r.get(4)?,
-            started_at: r.get(5)?,
-            duration_ms: r.get(6)?,
-            outcome: r.get(7)?,
-            error: r.get(8)?,
+            state: r.get(5)?,
+            started_at: r.get(6)?,
+            ended_at: r.get(7)?,
+            duration_ms: r.get(8)?,
+            outcome: r.get(9)?,
+            error: r.get(10)?,
         })
     }
 
@@ -1151,22 +1248,31 @@ pub(crate) mod tests {
         add_get_list_update_delete::<Run>(
             RunInput {
                 task_type: "summary".into(),
-                started_at: T1.into(),
+                state: RunState::Running,
+                started_at: Some(T1.into()),
+                ended_at: None,
                 duration_ms: None,
                 outcome: None,
                 error: None,
             },
             RunInput {
                 task_type: "summary".into(),
-                started_at: T1.into(),
+                state: RunState::Failed,
+                started_at: Some(T1.into()),
+                ended_at: Some(T1.into()),
                 duration_ms: Some(1200),
                 outcome: Some(RunOutcome::Failed),
                 error: Some("claude exited with code 1".into()),
             },
-            |r| assert_eq!((r.duration_ms, r.outcome), (None, None)),
+            |r| {
+                assert_eq!((r.duration_ms, r.outcome), (None, None));
+                assert_eq!((r.state, r.ended_at.as_deref()), (RunState::Running, None));
+            },
             |r| {
                 assert_eq!(r.duration_ms, Some(1200));
                 assert_eq!(r.outcome, Some(RunOutcome::Failed));
+                assert_eq!(r.state, RunState::Failed);
+                assert_eq!(r.ended_at.as_deref(), Some(T1));
             },
         );
     }
@@ -1334,20 +1440,62 @@ pub(crate) mod tests {
 
     #[test]
     fn run_add_refuses_a_negative_duration_and_an_unknown_outcome() {
-        refused::<Run>(RunInput {
+        let good = RunInput {
             task_type: "summary".into(),
-            started_at: T1.into(),
-            duration_ms: Some(-1),
-            outcome: None,
-            error: None,
-        });
-        refused::<Run>(RunInput {
-            task_type: "".into(),
-            started_at: T1.into(),
+            state: RunState::Running,
+            started_at: Some(T1.into()),
+            ended_at: None,
             duration_ms: None,
             outcome: None,
             error: None,
+        };
+        refused::<Run>(RunInput {
+            duration_ms: Some(-1),
+            ..good.clone()
         });
+        refused::<Run>(RunInput {
+            task_type: "".into(),
+            ..good.clone()
+        });
+        // The outcome must match the state, and the end time goes with an end state only.
+        refused::<Run>(RunInput {
+            outcome: Some(RunOutcome::Ok),
+            ..good.clone()
+        });
+        refused::<Run>(RunInput {
+            state: RunState::Done,
+            ended_at: Some(T1.into()),
+            outcome: Some(RunOutcome::Failed),
+            ..good.clone()
+        });
+        refused::<Run>(RunInput {
+            state: RunState::Done,
+            outcome: Some(RunOutcome::Ok),
+            ..good.clone()
+        });
+        refused::<Run>(RunInput {
+            ended_at: Some(T1.into()),
+            ..good.clone()
+        });
+        // A waiting run has no start; a running run has one; no run ends before it starts.
+        refused::<Run>(RunInput {
+            state: RunState::Waiting,
+            ..good.clone()
+        });
+        refused::<Run>(RunInput {
+            started_at: None,
+            ..good.clone()
+        });
+        refused::<Run>(RunInput {
+            state: RunState::Cancelled,
+            started_at: Some("2026-01-02T00:00:00Z".into()),
+            ended_at: Some("2026-01-01T00:00:00Z".into()),
+            outcome: Some(RunOutcome::Cancelled),
+            ..good.clone()
+        });
+        let d: serde::de::value::StrDeserializer<'_, serde::de::value::Error> =
+            "paused".into_deserializer();
+        assert!(RunState::deserialize(d).is_err());
         // An unknown outcome cannot even be built: serde refuses it before any SQL.
         let d: serde::de::value::StrDeserializer<'_, serde::de::value::Error> =
             "weird".into_deserializer();

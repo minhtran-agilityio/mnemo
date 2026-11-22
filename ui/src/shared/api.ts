@@ -223,20 +223,35 @@ export interface CalendarEvent extends RecordBase {
 }
 
 export type RunOutcome = "ok" | "failed" | "cancelled";
+/** Where an AI run is: in the queue, running, or one of the three end states. */
+export type RunState = "waiting" | "running" | "done" | "failed" | "cancelled";
 export interface RunInput {
   taskType: string;
-  startedAt: string;
+  state: RunState;
+  /** Null while the run waits, and for a run cancelled before it started. */
+  startedAt: string | null;
+  /** Set only in an end state (done, failed, cancelled). */
+  endedAt: string | null;
   durationMs: number | null;
-  /** Null while the run is going. */
+  /** Null while the run waits or runs; otherwise it matches the state (done is ok). */
   outcome: RunOutcome | null;
   error: string | null;
 }
 export interface Run extends RecordBase {
   taskType: string;
-  startedAt: string;
+  state: RunState;
+  startedAt: string | null;
+  endedAt: string | null;
   durationMs: number | null;
   outcome: RunOutcome | null;
   error: string | null;
+}
+/** The payload of the `run-state` event the core sends on every run state change. It holds no
+ * prompt, path or error output. */
+export interface RunStateEvent {
+  id: string;
+  taskType: string;
+  state: RunState;
 }
 
 export interface MemoryInput {
