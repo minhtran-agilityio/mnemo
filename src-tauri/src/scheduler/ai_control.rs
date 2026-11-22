@@ -177,6 +177,10 @@ struct State {
     last_reading: Option<(u64, UsageReading)>,
     /// Bumped on every pause change, so an older resume timer does nothing.
     timer_gen: u64,
+    /// Bumped when the usage-window timer changes, so an older one does nothing.
+    usage_gen: u64,
+    /// The time the usage-window timer waits for (the held background work may start then).
+    usage_armed: Option<i64>,
 }
 
 /// The gate. Shared as `Arc<AiControl>` by the queue, the commands and the usage sink.
@@ -227,6 +231,27 @@ impl State {
     /// the timer saves that.
     fn pause_now(&self, now: i64) -> Option<StoredPause> {
         self.pause.filter(|p| !limit_lifted(p, now))
+    }
+
+    /// When the pause line stops holding background work because the windows at or above it
+    /// reset (or grow too old): the latest end among them. `None` when the line holds nothing.
+    fn threshold_lift(&self, now: i64) -> Option<i64> {
+        if !self.available || !self.enabled {
+            return None;
+        }
+        let reading = self.reading.as_ref()?;
+        let end = |w: &Option<StoredWindow>, length: i64| -> Option<i64> {
+            let w = w.as_ref()?;
+            let percent = live_percent(w, reading.read_at, length, now)?;
+            (percent >= self.pause_at).then(|| {
+                w.resets_at
+                    .unwrap_or_else(|| w.read_at.unwrap_or(reading.read_at).saturating_add(length))
+            })
+        };
+        end(&reading.five_hour, FIVE_HOUR_SECS)
+            .into_iter()
+            .chain(end(&reading.seven_day, SEVEN_DAY_SECS))
+            .max()
     }
 
     fn decide(&self, priority: Priority, now: i64) -> Decision {
@@ -312,6 +337,8 @@ impl AiControl {
                     reading_seq: 0,
                     last_reading: None,
                     timer_gen: 0,
+                    usage_gen: 0,
+                    usage_armed: None,
                 }
             }
             Err(e) => {
@@ -329,6 +356,8 @@ impl AiControl {
                     reading_seq: 0,
                     last_reading: None,
                     timer_gen: 0,
+                    usage_gen: 0,
+                    usage_armed: None,
                 }
             }
         };
@@ -353,6 +382,13 @@ impl AiControl {
         };
         if let Some((generation, until)) = timer {
             control.arm_timer(generation, until);
+        }
+        let usage = {
+            let mut st = control.lock();
+            control.rearm_usage(&mut st, now)
+        };
+        if let Some((generation, until)) = usage {
+            control.arm_usage_timer(generation, until);
         }
         control
     }
@@ -437,13 +473,30 @@ impl AiControl {
                 return Err(ControlError::Unavailable);
             }
             self.settle(&mut st, now);
-            change(&mut st, self.store.as_ref())?.map(|until| (st.timer_gen, until))
+            let timer = change(&mut st, self.store.as_ref())?.map(|until| (st.timer_gen, until));
+            (timer, self.rearm_usage(&mut st, now))
         };
+        let (timer, usage) = timer;
         if let Some((generation, until)) = timer {
             self.arm_timer(generation, until);
         }
+        if let Some((generation, until)) = usage {
+            self.arm_usage_timer(generation, until);
+        }
         self.notify();
         Ok(())
+    }
+
+    /// Notes the time the pause line stops holding background work. Returns a new timer to
+    /// start when that time changed; an older timer then does nothing.
+    fn rearm_usage(&self, st: &mut State, now: i64) -> Option<(u64, i64)> {
+        let lift = st.threshold_lift(now);
+        if lift == st.usage_armed {
+            return None;
+        }
+        st.usage_armed = lift;
+        st.usage_gen += 1;
+        lift.map(|until| (st.usage_gen, until))
     }
 
     fn save_pause(
@@ -604,6 +657,16 @@ impl AiControl {
     /// One thread waits for the reset time, looking at the wall clock at least every
     /// `timer_step`, then lifts the pause. A newer pause change makes it stop doing anything.
     fn arm_timer(&self, generation: u64, until: i64) {
+        self.arm(generation, until, |st| st.timer_gen);
+    }
+
+    /// The same wait for the time a usage window at the pause line resets: the listeners then
+    /// start the background work the line held.
+    fn arm_usage_timer(&self, generation: u64, until: i64) {
+        self.arm(generation, until, |st| st.usage_gen);
+    }
+
+    fn arm(&self, generation: u64, until: i64, current: fn(&State) -> u64) {
         let me = self.me.clone();
         let step = self.timer_step;
         let spawned = std::thread::Builder::new()
@@ -612,7 +675,7 @@ impl AiControl {
                 let Some(control) = me.upgrade() else {
                     return;
                 };
-                if control.lock().timer_gen != generation {
+                if current(&control.lock()) != generation {
                     return;
                 }
                 let now = control.now();
@@ -1448,6 +1511,24 @@ mod tests {
         control.on_usage_reading(reading(Some((40.0, Some(NOW + HOUR))), None), NOW);
         assert!(done(&background).is_ok());
         assert_eq!(fake.starts(), 3);
+    }
+
+    #[test]
+    fn ai_control_queue_a_background_task_held_at_the_pause_line_starts_when_the_window_resets() {
+        let fake = Arc::new(FakeRunner::new(valid()));
+        let (q, control, _log, at) = gated(fake.clone());
+        let sink_control = control.clone();
+        fake.set_sink(Arc::new(move |r| {
+            sink_control.on_usage_reading(r, NOW);
+        }));
+        fake.push_reading(reading(Some((96.0, Some(NOW + HOUR))), None));
+        assert!(done(&q.submit(Priority::Owner, task("first")).unwrap()).is_ok());
+        let background = q.submit(Priority::Background, task("bg")).unwrap();
+        still_waiting(&background);
+        // The window resets: nothing else happens, and the held task starts by itself.
+        at.store(NOW + HOUR, Ordering::SeqCst);
+        assert!(done(&background).is_ok());
+        assert_eq!(fake.starts(), 2);
     }
 
     #[test]
