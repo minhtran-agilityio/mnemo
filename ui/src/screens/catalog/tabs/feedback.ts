@@ -24,6 +24,7 @@ import {
   buildToast,
   buildTrustLabel,
   buildUsageMeter,
+  buildUsageWindows,
   createIcon,
   createToastRegion,
   type PillTint,
@@ -126,6 +127,86 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
         meter("normal", 32),
         meter("warning ≥ 60%", 62),
         meter("paused ≥ 95%", 96),
+        state(
+          doc,
+          "owner lines 70 and 90",
+          buildUsageMeter({
+            label: "Usage now",
+            percent: 72,
+            warnAt: 70,
+            pauseAt: 90,
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "edge lines 1 and 100",
+          buildUsageMeter({
+            label: "Usage now",
+            percent: 50,
+            warnAt: 1,
+            pauseAt: 100,
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "unverified",
+          buildUsageMeter({
+            label: "5-hour window",
+            percent: 72,
+            unverified: true,
+            resetsAt: "14:30",
+            warnAt: 70,
+            pauseAt: 90,
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "stored percent with age",
+          buildUsageMeter({
+            label: "Usage at last read",
+            percent: 41,
+            readAgo: "2 h ago",
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "two windows, the higher drives the tone",
+          buildUsageWindows({
+            windows: [
+              {
+                label: "5-hour window",
+                percent: 72,
+                unverified: true,
+                resetsAt: "14:30",
+              },
+              { label: "7-day window", percent: 41 },
+            ],
+            warnAt: 70,
+            pauseAt: 90,
+            readAgo: "2 h ago",
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "long label",
+          buildUsageMeter({
+            label:
+              "Usage of the shared team plan across every workspace and project",
+            percent: 30,
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "run count today and this week",
+          buildRunCount({ label: "Mnemo runs", today: 4, week: 19 }),
+          { grow: true },
+        ),
         state(
           doc,
           "only own runs known",
