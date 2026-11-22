@@ -177,6 +177,9 @@ struct State {
     last_reading: Option<(u64, UsageReading)>,
     /// Bumped on every pause change, so an older resume timer does nothing.
     timer_gen: u64,
+    /// True when the owner's pause was in force when a limit pause replaced it: the owner's
+    /// pause comes back when the limit lifts. Kept in memory only.
+    owner_held: bool,
     /// Bumped when the usage-window timer changes, so an older one does nothing.
     usage_gen: u64,
     /// The time the usage-window timer waits for (the held background work may start then).
@@ -230,7 +233,10 @@ impl State {
     /// The pause in force at `now`. A limit pause whose time has passed is lifted, even before
     /// the timer saves that.
     fn pause_now(&self, now: i64) -> Option<StoredPause> {
-        self.pause.filter(|p| !limit_lifted(p, now))
+        match self.pause {
+            Some(p) if limit_lifted(&p, now) => self.owner_held.then_some(OWNER_PAUSE),
+            other => other,
+        }
     }
 
     /// When the pause line stops holding background work because the windows at or above it
@@ -271,6 +277,12 @@ impl State {
         Decision::Allow
     }
 }
+
+/// The owner's pause: background work waits, owner tasks run.
+const OWNER_PAUSE: StoredPause = StoredPause {
+    reason: StoredPauseReason::Owner,
+    until: None,
+};
 
 /// True for a limit pause whose stored time has come.
 fn limit_lifted(pause: &StoredPause, now: i64) -> bool {
@@ -337,6 +349,7 @@ impl AiControl {
                     reading_seq: 0,
                     last_reading: None,
                     timer_gen: 0,
+                    owner_held: false,
                     usage_gen: 0,
                     usage_armed: None,
                 }
@@ -356,6 +369,7 @@ impl AiControl {
                     reading_seq: 0,
                     last_reading: None,
                     timer_gen: 0,
+                    owner_held: false,
                     usage_gen: 0,
                     usage_armed: None,
                 }
@@ -444,10 +458,12 @@ impl AiControl {
     /// still counts as lifted (see `State::pause_now`) and the next change tries again.
     fn settle(&self, st: &mut State, now: i64) {
         if let Some(pause) = st.pause.filter(|p| limit_lifted(p, now)) {
-            match self.store.save_pause(None) {
+            let after = st.owner_held.then_some(OWNER_PAUSE);
+            match self.store.save_pause(after.as_ref()) {
                 Ok(()) => {
                     log::info!("the usage limit pause lifted at its reset time");
-                    st.pause = None;
+                    st.pause = after;
+                    st.owner_held = false;
                     st.timer_gen += 1;
                 }
                 Err(e) => log::error!(
@@ -547,11 +563,7 @@ impl AiControl {
             if st.pause_now(now).is_some() {
                 return Ok(None);
             }
-            let owner = StoredPause {
-                reason: StoredPauseReason::Owner,
-                until: None,
-            };
-            Self::save_pause(st, store, Some(owner))?;
+            Self::save_pause(st, store, Some(OWNER_PAUSE))?;
             Ok(None)
         })
     }
@@ -560,6 +572,7 @@ impl AiControl {
     pub fn resume(&self) -> Result<(), ControlError> {
         self.change(self.now(), |st, store| {
             Self::save_pause(st, store, None)?;
+            st.owner_held = false;
             Ok(None)
         })
     }
@@ -621,6 +634,11 @@ impl AiControl {
                 .filter(|p| p.reason == StoredPauseReason::Limit)
                 .and_then(|p| p.until);
             let until = found.or(kept);
+            // The owner's pause under the limit comes back when the limit lifts.
+            st.owner_held = st.owner_held
+                || st
+                    .pause_now(now)
+                    .is_some_and(|p| p.reason == StoredPauseReason::Owner);
             let limit = StoredPause {
                 reason: StoredPauseReason::Limit,
                 until,
@@ -1165,6 +1183,35 @@ mod tests {
         c.resume().unwrap();
         assert_eq!(c.may_run(OWNER, NOW), ALLOW);
         assert_eq!(store.storage().ai_control_settings().unwrap().pause, None);
+    }
+
+    #[test]
+    fn ai_control_the_owner_pause_comes_back_when_a_limit_pause_over_it_lifts() {
+        let (c, store, at) = control();
+        c.pause().unwrap();
+        let seq = c.reading_seq();
+        let mut r = reading(Some((100.0, Some(NOW + HOUR))), None);
+        r.five_hour.as_mut().unwrap().status = Some("rejected".into());
+        c.on_usage_reading(r, NOW);
+        c.on_limit_error(seq, NOW);
+        assert_eq!(c.may_run(BACKGROUND, NOW), deny(DenyReason::Limit));
+        at.store(NOW + HOUR, Ordering::SeqCst);
+        // The limit lifts, and the owner's own pause is still in force.
+        assert_eq!(c.may_run(OWNER, NOW + HOUR), ALLOW);
+        assert_eq!(
+            c.may_run(BACKGROUND, NOW + HOUR),
+            deny(DenyReason::OwnerPause)
+        );
+        c.tick();
+        assert_eq!(
+            c.may_run(BACKGROUND, NOW + HOUR),
+            deny(DenyReason::OwnerPause)
+        );
+        let stored = store.storage().ai_control_settings().unwrap().pause;
+        assert_eq!(stored.map(|p| p.reason), Some(StoredPauseReason::Owner));
+        // Resume lifts it for good.
+        c.resume().unwrap();
+        assert_eq!(c.may_run(BACKGROUND, NOW + HOUR), ALLOW);
     }
 
     #[test]
