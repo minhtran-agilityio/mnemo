@@ -134,6 +134,11 @@ main.cat-screen {
   min-width: 0;
 }
 
+/* A long code word in a note wraps inside the narrow label column instead of widening the page. */
+.cat-meta p {
+  overflow-wrap: anywhere;
+}
+
 .cat-ex {
   align-items: flex-start;
   gap: var(--space-4) var(--space-5);
