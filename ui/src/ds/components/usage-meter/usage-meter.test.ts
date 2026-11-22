@@ -335,14 +335,57 @@ test("no windows is an honest no-data note, not a healthy meter", () => {
   expect(m.textContent).toContain("No usage reading yet.");
 });
 
-test("a run count rejects negative and non-numbers", () => {
-  expect(() => buildRunCount({ label: "x", count: -1 })).toThrow(RangeError);
-  expect(() =>
-    buildRunCount({ label: "x", today: Number.NaN, week: 3 }),
-  ).toThrow(RangeError);
-  expect(() => buildRunCount({ label: "x", today: 1, week: -2 })).toThrow(
-    RangeError,
+test("a run count with a bad number says No reading and does not throw", () => {
+  const one = buildRunCount({ label: "x", count: -1 });
+  expect(one.querySelector(".meter-value")?.textContent).toBe("No reading");
+  const two = buildRunCount({ label: "x", today: Number.NaN, week: 3 });
+  expect(two.querySelector(".meter-value")?.textContent).toBe(
+    "No reading today, 3 this week",
   );
+});
+
+test("with no finite percent the note says so, in one meter and in windows", () => {
+  const one = buildUsageMeter({ label: "x", percent: Number.NaN });
+  expect(one.className).toBe("meter");
+  expect(one.querySelector(".meter-note")?.textContent).toBe(
+    "No usage reading yet.",
+  );
+  const two = buildUsageWindows({
+    windows: [
+      { label: "a", percent: Number.NaN },
+      { label: "b", percent: Number.NaN },
+    ],
+  });
+  expect(two.querySelector(".meter-note")?.textContent).toBe(
+    "No usage reading yet.",
+  );
+  expect(two.className).toBe("meter meter-windows");
+});
+
+test("aria-describedby is set only when the note has text", () => {
+  const empty = buildUsageMeter({ label: "x", percent: 10 });
+  expect(
+    empty.querySelector('[role="meter"]')?.hasAttribute("aria-describedby"),
+  ).toBe(false);
+  const text = buildUsageMeter({ label: "x", percent: 10, resetsAt: "14:00" });
+  expect(
+    text.querySelector('[role="meter"]')?.getAttribute("aria-describedby"),
+  ).toBe(text.querySelector(".meter-note")?.id);
+});
+
+test("lines are rounded to whole numbers so ticks and tone agree", () => {
+  const m = buildUsageMeter({
+    label: "x",
+    percent: 70,
+    warnAt: 69.6,
+    pauseAt: 90.2,
+  });
+  expect(
+    [...m.querySelectorAll<HTMLElement>(".meter-tick")].map(
+      (t) => t.style.left,
+    ),
+  ).toEqual(["70%", "90%"]);
+  expect(m.classList.contains("meter-warn")).toBe(true);
 });
 
 test("note ids differ between meters", () => {

@@ -59,10 +59,13 @@ function clamp(percent: number): number {
 
 function lineValue(value: number | undefined, fallback: number): number {
   if (value === undefined || Number.isNaN(value)) return fallback;
-  return Math.min(100, Math.max(0, value));
+  return Math.round(Math.min(100, Math.max(0, value)));
 }
 
-/** Both lines clamped to 0 to 100 (NaN falls back to the default); pause is never below warn. */
+/**
+ * Both lines are rounded to whole numbers and clamped to 0 to 100 (NaN falls back to the
+ * default), so ticks and tone agree. A pauseAt below warnAt is raised to warnAt.
+ */
 function resolveLines(lines: UsageLines): { warnAt: number; pauseAt: number } {
   const warnAt = lineValue(lines.warnAt, USAGE_WARN_AT);
   const pauseAt = Math.max(warnAt, lineValue(lines.pauseAt, USAGE_PAUSE_AT));
@@ -75,6 +78,17 @@ let noteCount = 0;
 function noteId(): string {
   noteCount += 1;
   return `meter-note-${noteCount}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** The note when there is no finite percent: no healthy tone, no guess. */
+function noReadingNote(): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "meter-note";
+  box.id = noteId();
+  const text = document.createElement("span");
+  text.textContent = "No usage reading yet.";
+  box.append(createIcon(ShieldAlert, "sm"), text);
+  return box;
 }
 
 function note(
@@ -170,7 +184,7 @@ function bar(
  */
 export function buildUsageMeter(options: UsageMeterOptions): HTMLElement {
   const lines = resolveLines(options);
-  const { top, track, percent } = bar(
+  const { top, track, percent, known } = bar(
     options.label,
     options.percent,
     lines,
@@ -183,8 +197,10 @@ export function buildUsageMeter(options: UsageMeterOptions): HTMLElement {
   const tone = usageTone(percent, lines.warnAt, lines.pauseAt);
   const meter = document.createElement("div");
   meter.className = tone === "normal" ? "meter" : `meter meter-${tone}`;
-  const noteBox = note(tone, lines, options.resetsAt, options.unverified);
-  track.setAttribute("aria-describedby", noteBox.id);
+  const noteBox = known
+    ? note(tone, lines, options.resetsAt, options.unverified)
+    : noReadingNote();
+  if (noteBox.textContent) track.setAttribute("aria-describedby", noteBox.id);
   meter.append(top, track, noteBox);
   if (options.readAgo) meter.append(ageLine(options.readAgo));
   return meter;
@@ -199,12 +215,7 @@ export function buildUsageWindows(options: UsageWindowsOptions): HTMLElement {
   if (options.windows.length === 0) {
     const empty = document.createElement("div");
     empty.className = "meter meter-windows";
-    const none = document.createElement("div");
-    none.className = "meter-note";
-    const text = document.createElement("span");
-    text.textContent = "No usage reading yet.";
-    none.append(createIcon(ShieldAlert, "sm"), text);
-    empty.append(none);
+    empty.append(noReadingNote());
     return empty;
   }
   const bars = options.windows.map((w) =>
@@ -234,8 +245,12 @@ export function buildUsageWindows(options: UsageWindowsOptions): HTMLElement {
     meter.append(group);
   }
   // Each window's reset time is in its own row; the note does not repeat it.
-  const noteBox = note(tone, lines, undefined, drivenUnverified);
-  for (const b of bars) b.track.setAttribute("aria-describedby", noteBox.id);
+  const noteBox = bars.some((b) => b.known)
+    ? note(tone, lines, undefined, drivenUnverified)
+    : noReadingNote();
+  if (noteBox.textContent) {
+    for (const b of bars) b.track.setAttribute("aria-describedby", noteBox.id);
+  }
   meter.append(noteBox);
   if (options.readAgo) meter.append(ageLine(options.readAgo));
   return meter;
@@ -262,11 +277,9 @@ export type RunCountOptions =
  * owner's full Claude usage is not shown, because Mnemo cannot read it.
  */
 export function buildRunCount(options: RunCountOptions): HTMLElement {
-  for (const n of [options.count, options.today, options.week]) {
-    if (n !== undefined && !(Number.isFinite(n) && n >= 0)) {
-      throw new RangeError("A run count is a number of 0 or more.");
-    }
-  }
+  // Display code never throws on a bad number: it says "No reading".
+  const shown = (n: number): string =>
+    Number.isFinite(n) && n >= 0 ? String(n) : "No reading";
   const meter = document.createElement("div");
   meter.className = "meter";
   const top = document.createElement("div");
@@ -278,8 +291,8 @@ export function buildRunCount(options: RunCountOptions): HTMLElement {
   const split = options.count === undefined;
   value.textContent =
     options.count === undefined
-      ? `${options.today} today, ${options.week} this week`
-      : String(options.count);
+      ? `${shown(options.today)} today, ${shown(options.week)} this week`
+      : shown(options.count);
   top.append(label, value);
   const box = document.createElement("div");
   box.className = "meter-note";
