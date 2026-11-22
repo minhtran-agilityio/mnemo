@@ -62,10 +62,17 @@ impl UsageWindow {
     }
 }
 
-/// `round(utilization * 100)`, as a whole percent. **Unverified** scale.
+/// `round(utilization * 100)`, as a whole percent, capped at 100. **Unverified** scale.
+/// Fail safe: a value above 1.0 cannot be a fraction, so it is read as a percent already (a
+/// plan used 0..100). A wrong guess then never reads as a huge percent and never denies
+/// background work on its own.
 pub fn percent_of(utilization: f64) -> i64 {
-    // Far above any real value, so the cast never saturates in a way that matters.
-    (utilization * 100.0).round().clamp(0.0, 1_000_000.0) as i64
+    let percent = if utilization > 1.0 {
+        utilization
+    } else {
+        utilization * 100.0
+    };
+    percent.round().clamp(0.0, 100.0) as i64
 }
 
 /// True when `t` is in the future and at most `MAX_RESET_AHEAD_SECS` away.
@@ -158,7 +165,7 @@ impl UsageReading {
             windows
                 .iter()
                 .copied()
-                .filter(|w| w.utilization.is_some_and(|u| u >= 1.0))
+                .filter(|w| w.utilization.is_some_and(|u| percent_of(u) >= 100))
                 .collect()
         } else {
             rejected
@@ -223,6 +230,17 @@ mod tests {
         assert_eq!(w(0.95).percent(), Some(95));
         assert_eq!(w(1.0).percent(), Some(100));
         assert_eq!(UsageWindow::default().percent(), None);
+    }
+
+    #[test]
+    fn usage_percent_of_a_value_above_one_is_read_as_a_percent_and_never_denies_by_mistake() {
+        // 12 cannot be a fraction: it is 12%, not 1200%.
+        assert_eq!(percent_of(12.0), 12);
+        assert_eq!(percent_of(50.0), 50);
+        assert_eq!(percent_of(100.0), 100);
+        assert_eq!(percent_of(250.0), 100);
+        assert_eq!(percent_of(0.4), 40);
+        assert_eq!(percent_of(1.0), 100);
     }
 
     #[test]
@@ -310,7 +328,7 @@ mod tests {
         // No status: the window at or above 100%.
         assert_eq!(
             at(
-                json!({"utilization": 1.02, "resetsAt": NOW + 100}),
+                json!({"utilization": 1.0, "resetsAt": NOW + 100}),
                 json!({"utilization": 0.3, "resetsAt": NOW + 200}),
                 json!({})
             ),
