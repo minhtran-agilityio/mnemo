@@ -511,3 +511,63 @@ export async function deleteFile(id: string): Promise<void> {
 export function fileOrphanReport(): Promise<OrphanReport> {
   return invoke<OrphanReport>("file_orphan_report");
 }
+
+// ---- Data: export, backup and reset ----
+
+/** How many live records of each type an export wrote. */
+export interface ExportCounts {
+  notes: number;
+  bookmarks: number;
+  ideas: number;
+  projects: number;
+  tasks: number;
+  events: number;
+  runs: number;
+  memories: number;
+  labels: number;
+  links: number;
+  files: number;
+}
+
+export interface ExportSummary {
+  /** The new `mnemo-export-<time>` folder. */
+  folder: string;
+  counts: ExportCounts;
+  /** Live file records whose file was gone from the files folder. */
+  filesMissing: number;
+}
+
+export interface DataFolderInfo {
+  path: string;
+  macosCommand: string;
+  ubuntuCommand: string;
+}
+
+/** The word the owner types to confirm a reset. */
+export const RESET_WORD = "RESET";
+
+/** Asks for a folder in the native folder dialog. Null when the owner cancels. */
+export async function pickFolder(): Promise<string | null> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const picked = await open({ directory: true, multiple: false });
+  return typeof picked === "string" ? picked : null;
+}
+
+/** Exports all live data into a new folder inside `folder`. */
+export function exportData(folder: string): Promise<ExportSummary> {
+  return invoke<ExportSummary>("export_data", { folder });
+}
+
+/** Deletes all data and files. The core refuses any word but `RESET`. */
+export async function resetData(confirm: string): Promise<void> {
+  await invoke<void>("reset_data", { confirm });
+}
+
+export function dataFolderInfo(): Promise<DataFolderInfo> {
+  return invoke<DataFolderInfo>("data_folder_info");
+}
+
+/** Opens the data folder in the system file manager. */
+export async function openDataFolder(): Promise<void> {
+  await invoke<void>("open_data_folder");
+}
