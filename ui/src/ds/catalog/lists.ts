@@ -88,6 +88,6 @@ export const LISTS = [
     ],
     source: "ds",
     className: "setting-row",
-    notes: `A bold label, a muted sub-line and the controls the caller gives (${ref(154)}). The row is not focusable and has no hover: Tab goes to its controls. A long label or sub-line wraps; under a narrow width the controls drop under the text. A one-line error sits under the row. The caller gives each control its name; disabled turns the controls off while a save is pending. Empty, loading and AI off do not apply: the screen shows its own state box, skeleton rows or banner.`,
+    notes: `A bold label, a muted sub-line and the controls the caller gives (${ref(154)}). The row is not focusable and has no hover: Tab goes to its controls. A long label or sub-line wraps; under a narrow width the controls drop under the text. A one-line error sits under the row; setSettingsRowError shows, changes or clears it on a row already on screen, without rebuilding it (a polite live region). The caller gives each control its name; disabled turns the controls off (and inert on the control box) while a save is pending; custom controls are covered by the inert box. Empty, loading and AI off do not apply: the screen shows its own state box, skeleton rows or banner.`,
   },
 ] as const satisfies readonly CatalogEntry[];

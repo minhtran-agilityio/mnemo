@@ -11,7 +11,7 @@ export interface SettingsRowOptions {
   readonly sub?: string;
   /** The controls at the right (selects, toggles, buttons), in tab order. */
   readonly controls: readonly HTMLElement[];
-  /** A one-line error under the row. */
+  /** A one-line error under the row. Change it later with setSettingsRowError. */
   readonly error?: string;
   /** Disables every form control and button in the row (a save is pending). */
   readonly disabled?: boolean;
@@ -27,7 +27,22 @@ let counter = 0;
 
 const DISABLE = "button, input, select, textarea";
 
-/** Turns the controls of a row off (a save is pending) or on again. */
+interface RowState {
+  readonly note: HTMLElement;
+  readonly controls: HTMLElement;
+  readonly sub: HTMLElement | null;
+  readonly errorId: string;
+  err: HTMLElement | null;
+  errText: Text | null;
+}
+
+const rows = new WeakMap<HTMLElement, RowState>();
+
+/**
+ * Turns the controls of a row off (a save is pending) or on again. Native controls get the
+ * `disabled` attribute; the whole control box also gets `inert`, so a control that is not a native
+ * form element (a custom switch, a link) cannot be reached by Tab or the pointer either.
+ */
 export function setSettingsRowDisabled(
   row: HTMLElement,
   disabled: boolean,
@@ -35,7 +50,49 @@ export function setSettingsRowDisabled(
   for (const control of row.querySelectorAll<HTMLElement>(DISABLE)) {
     (control as HTMLButtonElement).disabled = disabled;
   }
-  row.classList.toggle("is-disabled", disabled);
+  const box = rows.get(row)?.controls;
+  if (!box) return;
+  if (disabled) box.setAttribute("inert", "");
+  else box.removeAttribute("inert");
+}
+
+/**
+ * Show, change or clear the one-line error under a row that is already on screen. The row is not
+ * rebuilt, so focus stays on the control. The error sits in a polite live region that stays in the
+ * row; its text changes in place, and the same message set again writes nothing, so it is not
+ * announced twice. `null` or an empty message clears it. `row` must come from createSettingsRow.
+ */
+export function setSettingsRowError(
+  row: HTMLElement,
+  message: string | null,
+): void {
+  const state = rows.get(row);
+  if (!state) {
+    throw new Error("setSettingsRowError: not a row made by createSettingsRow");
+  }
+  const text = message?.trim() ?? "";
+  const ids = [state.sub?.id];
+  if (text) {
+    if (state.err && state.errText) {
+      if (state.errText.data !== text) state.errText.data = text;
+      if (state.err.parentNode !== state.note) state.note.append(state.err);
+    } else {
+      const err = row.ownerDocument.createElement("span");
+      err.className = "setting-row-error";
+      err.id = state.errorId;
+      const node = row.ownerDocument.createTextNode(text);
+      err.append(node);
+      state.err = err;
+      state.errText = node;
+      state.note.append(err);
+    }
+    ids.push(state.errorId);
+  } else {
+    state.err?.remove();
+  }
+  const described = ids.filter(Boolean).join(" ");
+  if (described) row.setAttribute("aria-describedby", described);
+  else row.removeAttribute("aria-describedby");
 }
 
 export function createSettingsRow(
@@ -55,31 +112,31 @@ export function createSettingsRow(
   label.id = `${id}-label`;
   label.textContent = options.label;
   text.append(label);
-  const described: string[] = [];
+  let sub: HTMLElement | null = null;
   if (options.sub) {
-    const sub = doc.createElement("span");
+    sub = doc.createElement("span");
     sub.className = "setting-row-sub";
     sub.id = `${id}-sub`;
     sub.textContent = options.sub;
     text.append(sub);
-    described.push(sub.id);
   }
   const controls = doc.createElement("div");
   controls.className = "setting-row-controls";
   controls.append(...options.controls);
-  row.append(text, controls);
-  if (options.error) {
-    const error = doc.createElement("span");
-    error.className = "setting-row-error";
-    error.id = `${id}-error`;
-    error.setAttribute("role", "alert");
-    error.textContent = options.error;
-    row.append(error);
-    row.classList.add("has-error");
-    described.push(error.id);
-  }
-  if (described.length > 0)
-    row.setAttribute("aria-describedby", described.join(" "));
+  // The live region is in the row from the start, so a screen reader hears the error when it is put in.
+  const note = doc.createElement("div");
+  note.className = "setting-row-note";
+  note.setAttribute("aria-live", "polite");
+  row.append(text, controls, note);
+  rows.set(row, {
+    note,
+    controls,
+    sub,
+    errorId: `${id}-error`,
+    err: null,
+    errText: null,
+  });
+  setSettingsRowError(row, options.error ?? null);
   if (options.disabled) setSettingsRowDisabled(row, true);
   return row;
 }

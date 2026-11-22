@@ -6,6 +6,7 @@ import {
   createSettingsRow,
   createSettingsRows,
   setSettingsRowDisabled,
+  setSettingsRowError,
 } from "./settings-row";
 
 const selects = () => [
@@ -67,9 +68,8 @@ test("an error is one line under the row and joins the description", () => {
   });
   const err = row.querySelector(".setting-row-error") as HTMLElement;
   expect(err.textContent).toBe("Could not save. Try again.");
-  expect(err.getAttribute("role")).toBe("alert");
+  expect(err.parentElement?.getAttribute("aria-live")).toBe("polite");
   expect(row.getAttribute("aria-describedby")).toContain(err.id);
-  expect(row.classList).toContain("has-error");
 });
 
 test("disabled turns the controls off and can be undone", () => {
@@ -80,8 +80,14 @@ test("disabled turns the controls off and can be undone", () => {
   });
   const all = () => [...row.querySelectorAll("select")];
   expect(all().every((s) => s.disabled)).toBe(true);
+  expect(
+    row.querySelector(".setting-row-controls")?.hasAttribute("inert"),
+  ).toBe(true);
   setSettingsRowDisabled(row, false);
   expect(all().some((s) => s.disabled)).toBe(false);
+  expect(
+    row.querySelector(".setting-row-controls")?.hasAttribute("inert"),
+  ).toBe(false);
 });
 
 test("rows stack in a named card", () => {
@@ -113,4 +119,59 @@ test("a long label and sub-line wrap and are not cut with an ellipsis", () => {
     ".setting-row",
   );
   expect(rowRule["flex-wrap"]).toBe("wrap");
+});
+
+test("setSettingsRowError shows, changes and clears the error on a row that is built", () => {
+  const [model] = selects();
+  const row = createSettingsRow(document, {
+    label: "A",
+    sub: "B",
+    controls: [model as HTMLElement],
+  });
+  document.body.append(row);
+  const note = row.querySelector(".setting-row-note") as HTMLElement;
+  const select = row.querySelector("select") as HTMLSelectElement;
+  select.focus();
+  const sub = row.querySelector(".setting-row-sub")?.id;
+  expect(note.textContent).toBe("");
+  expect(row.getAttribute("aria-describedby")).toBe(sub);
+
+  setSettingsRowError(row, "Could not save.");
+  const err = row.querySelector(".setting-row-error") as HTMLElement;
+  expect(err.textContent).toBe("Could not save.");
+  expect(err.parentElement).toBe(note);
+  expect(row.getAttribute("aria-describedby")).toBe(`${sub} ${err.id}`);
+  expect(row.querySelector("select")).toBe(select);
+  expect(select.isConnected).toBe(true);
+  expect(document.activeElement).toBe(select);
+
+  setSettingsRowError(row, "Still not saved.");
+  expect(row.querySelector(".setting-row-error")).toBe(err);
+  expect(err.textContent).toBe("Still not saved.");
+
+  setSettingsRowError(row, null);
+  expect(row.querySelector(".setting-row-error")).toBeNull();
+  expect(row.querySelector(".setting-row-note")).toBe(note);
+  expect(row.getAttribute("aria-describedby")).toBe(sub);
+  setSettingsRowError(row, "   ");
+  expect(row.querySelector(".setting-row-error")).toBeNull();
+});
+
+test("the same message set again writes nothing", () => {
+  const row = createSettingsRow(document, { label: "A", controls: [] });
+  setSettingsRowError(row, "Could not save.");
+  const text = row.querySelector(".setting-row-error")?.firstChild as Text;
+  let writes = 0;
+  new MutationObserver(() => {
+    writes += 1;
+  }).observe(row, { subtree: true, childList: true, characterData: true });
+  setSettingsRowError(row, "Could not save.");
+  expect(row.querySelector(".setting-row-error")?.firstChild).toBe(text);
+  return Promise.resolve().then(() => expect(writes).toBe(0));
+});
+
+test("it refuses an element that is not a settings row", () => {
+  expect(() =>
+    setSettingsRowError(document.createElement("div"), "x"),
+  ).toThrow();
 });

@@ -16,6 +16,7 @@ import {
   createSettingsRows,
   createTable,
   createTree,
+  setSettingsRowError,
   type TreeActionsOptions,
   type TreeNode,
 } from "../../../ds/index";
@@ -411,10 +412,20 @@ export const renderLists: TabRenderer = (panel, ctx) => {
       "settings row": () => {
         const models = ["Haiku 5.5", "Sonnet 5.5"];
         const efforts = ["Low effort", "Medium effort"];
+        // Each example has its own scope, so no two controls on the tab share a name.
+        let scope = "default";
         const controls = (name: string, model: string, effort: string) =>
           [
-            { label: `${name}, model`, options: models, value: model },
-            { label: `${name}, effort`, options: efforts, value: effort },
+            {
+              label: `${scope}: ${name}, model`,
+              options: models,
+              value: model,
+            },
+            {
+              label: `${scope}: ${name}, effort`,
+              options: efforts,
+              value: effort,
+            },
           ].map((c) => {
             const { wrap, select } = createSelect(doc, {
               options: c.options,
@@ -445,7 +456,11 @@ export const renderLists: TabRenderer = (panel, ctx) => {
         const S = "Sonnet 5.5";
         const LOW = "Low effort";
         const MED = "Medium effort";
-        const eight = [
+        const withScope = <T>(name: string, make: () => T): T => {
+          scope = name;
+          return make();
+        };
+        const eight = withScope("default", () => [
           feature("Save a link", "Summary, tags and folder", H, LOW),
           feature("Ask Mnemo", "Answers with sources", S, MED),
           feature(
@@ -459,13 +474,26 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           feature("Folder suggestions", "Where a link belongs", H, LOW),
           feature("Idea cards", "Next step for each idea", S, MED),
           feature("Task extraction", "Tasks found in notes", S, MED),
-        ];
+        ]);
         const longLabel = "Một nhãn rất dài về mô hình cho tính năng này "
           .repeat(3)
           .trim()
           .slice(0, 120);
         const grown = (text: string, node: HTMLElement) =>
           state(doc, text, node, { grow: true });
+        const live = withScope("live", () => {
+          const row = feature("Ask Mnemo", "Answers with sources", S, MED);
+          const select = row.querySelector("select");
+          select?.addEventListener("change", () =>
+            setSettingsRowError(
+              row,
+              select.value === S
+                ? null
+                : "Could not save. The next run keeps the old choice.",
+            ),
+          );
+          return card("Live example", [row]);
+        });
         return [
           grown(
             "default: eight rows in a card, two selects each",
@@ -473,41 +501,51 @@ export const renderLists: TabRenderer = (panel, ctx) => {
           ),
           grown(
             "overflow: a 120-character label and a long sub-line wrap",
-            card("Long label example", [
-              feature(
-                longLabel,
-                "A long sub-line that wraps onto a second line instead of being cut with an ellipsis, and keeps its words whole.",
-                S,
-                MED,
-              ),
-              feature("x".repeat(120), "Unbroken text wraps too", H, LOW),
-            ]),
+            withScope("overflow", () =>
+              card("Long label example", [
+                feature(
+                  longLabel,
+                  "A long sub-line that wraps onto a second line instead of being cut with an ellipsis, and keeps its words whole.",
+                  S,
+                  MED,
+                ),
+                feature("x".repeat(120), "Unbroken text wraps too", H, LOW),
+              ]),
+            ),
           ),
           grown(
             "error: one line under the row",
-            card("Error example", [
-              feature("Ask Mnemo", "Answers with sources", S, MED, {
-                error: "Could not save. The next run keeps the old choice.",
-              }),
-            ]),
+            withScope("error", () =>
+              card("Error example", [
+                feature("Ask Mnemo", "Answers with sources", S, MED, {
+                  error: "Could not save. The next run keeps the old choice.",
+                }),
+              ]),
+            ),
+          ),
+          grown(
+            "live error: pick Haiku 5.5 to show the line on this row, pick Sonnet 5.5 to clear it",
+            live,
           ),
           grown(
             "disabled: a save is pending",
-            card("Disabled example", [
-              feature("Save a link", "Summary, tags and folder", H, LOW, {
-                disabled: true,
-              }),
-            ]),
+            withScope("disabled", () =>
+              card("Disabled example", [
+                feature("Save a link", "Summary, tags and folder", H, LOW, {
+                  disabled: true,
+                }),
+              ]),
+            ),
           ),
           grown(
             "narrow: under the text width the controls drop under the label",
-            (() => {
+            withScope("narrow", () => {
               const wrap = card("Narrow example", [
                 feature("Save a link", "Summary, tags and folder", H, LOW),
               ]);
               wrap.classList.add("lst-settings-narrow");
               return wrap;
-            })(),
+            }),
           ),
         ];
       },
