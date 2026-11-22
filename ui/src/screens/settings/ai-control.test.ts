@@ -351,6 +351,23 @@ test("a good threshold change is saved when the field is left; a core rejection 
   expect(errorOf(shown)).toContain("Warn and pause must be whole numbers");
 });
 
+test("an ai-control event does not replace a threshold field that has focus, and the new view shows when it is left", async () => {
+  await open(view());
+  const [warn] = numberInputs();
+  if (!warn) throw new Error("no warn field");
+  warn.focus();
+  type(warn, "4");
+  current = { ...current, enabled: false };
+  fire?.();
+  await tick();
+  expect(numberInputs()[0]).toBe(warn);
+  expect(warn.value).toBe("4");
+  expect(document.activeElement).toBe(warn);
+  warn.blur();
+  await tick();
+  expect(text()).toContain("AI is off");
+});
+
 test("the core's ai-control event reads the view again, and a closed screen stops listening", async () => {
   await open(view());
   current = { ...current, enabled: false };

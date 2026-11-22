@@ -235,12 +235,17 @@ export function createAiControlSection(
   // What the owner typed in the threshold fields, kept across redraws until it is saved.
   let draft: { warn: string; pause: string } | null = null;
   let linesError: ThresholdErrors = { warn: null, pause: null };
+  // True while a threshold field has focus. A view that arrives then waits, so the redraw does
+  // not replace the field the owner is typing in; it is drawn when the field is left.
+  let editing = false;
+  let deferred = false;
 
   function show(view: AiControlView): void {
     if (!isAiControlView(view))
       throw new Error("the core sent an AI control view of the wrong shape");
     load = { kind: "ready", view };
-    redraw();
+    if (editing) deferred = true;
+    else redraw();
   }
 
   async function refresh(): Promise<void> {
@@ -487,6 +492,16 @@ export function createAiControlSection(
       showErrors();
     };
     for (const el of [warnInput, pauseInput]) {
+      el.addEventListener("focus", () => {
+        editing = true;
+      });
+      el.addEventListener("blur", () => {
+        editing = false;
+        if (deferred) {
+          deferred = false;
+          redraw();
+        }
+      });
       el.addEventListener("input", onInput);
       el.addEventListener("change", () => saveLines(view));
     }
