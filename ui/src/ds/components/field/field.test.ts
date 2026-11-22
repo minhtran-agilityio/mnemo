@@ -185,3 +185,33 @@ test("the hint stays outside the live region, so it is not announced when it ret
   expect(note?.children).toHaveLength(0);
   f.remove();
 });
+
+test("a detached field: the same message twice changes nothing in the DOM", async () => {
+  const input = createTextInput(document, {});
+  const f = createField(document, { label: "L", control: input, hint: "Hint" });
+  setFieldError(f, "Same");
+  const seen: MutationRecord[] = [];
+  const observer = new MutationObserver((r) => seen.push(...r));
+  observer.observe(f, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+  });
+  setFieldError(f, "Same");
+  setFieldError(f, "Same");
+  await new Promise((r) => setTimeout(r, 0));
+  seen.push(...observer.takeRecords());
+  observer.disconnect();
+  expect(seen).toHaveLength(0);
+});
+
+test("a message of only spaces clears the error", () => {
+  const { input, f } = build("Hint");
+  setFieldError(f, "Bad");
+  setFieldError(f, "   ");
+  expect(f.querySelector(".err-text")).toBeNull();
+  expect(f.querySelector(".hint")?.textContent).toBe("Hint");
+  expect(input.hasAttribute("aria-invalid")).toBe(false);
+  f.remove();
+});

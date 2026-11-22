@@ -80,6 +80,7 @@ export function createField(doc: Document, options: FieldOptions): HTMLElement {
  * The error sits in a polite live region and its text changes in place; the same message set
  * again writes nothing, so it is not announced twice. Only the attributes this field wrote are
  * changed; what the caller set on the control is put back. `field` must come from createField.
+ * The control's own aria-describedby is read once, at createField: do not change it afterwards.
  */
 export function setFieldError(
   field: HTMLElement,
@@ -88,19 +89,21 @@ export function setFieldError(
   const state = fields.get(field);
   if (!state) throw new Error("setFieldError: not a field made by createField");
   const { target, hintEl, note, errorId } = state;
-  if (message) {
+  // A message of only spaces is empty.
+  const text = message?.trim() ?? "";
+  if (text) {
     hintEl?.remove();
     if (state.err && state.errText) {
-      if (state.errText.data !== message) state.errText.data = message;
-      if (!state.err.isConnected) note.append(state.err);
+      if (state.errText.data !== text) state.errText.data = text;
+      if (state.err.parentNode !== note) note.append(state.err);
     } else {
       const err = field.ownerDocument.createElement("span");
       err.className = "err-text";
       err.id = errorId;
-      const text = field.ownerDocument.createTextNode(message);
-      err.append(createIcon(CircleAlert), text);
+      const node = field.ownerDocument.createTextNode(text);
+      err.append(createIcon(CircleAlert), node);
       state.err = err;
-      state.errText = text;
+      state.errText = node;
       note.append(err);
     }
     setAttr(target, "aria-invalid", "true");
@@ -112,7 +115,7 @@ export function setFieldError(
   else target.setAttribute("aria-invalid", state.ownInvalid);
   if (hintEl) {
     // The hint goes before the live region, outside it.
-    if (!hintEl.isConnected) field.insertBefore(hintEl, note);
+    if (hintEl.parentNode !== field) field.insertBefore(hintEl, note);
     target.setAttribute("aria-describedby", hintEl.id);
   } else if (state.ownDescribedBy === null) {
     target.removeAttribute("aria-describedby");
