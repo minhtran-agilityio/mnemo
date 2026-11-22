@@ -28,6 +28,17 @@ impl Storage {
         )?;
         Ok(())
     }
+
+    /// Deletes every key in `keys` in one transaction: all go or none. A key that was never
+    /// written is not an error.
+    pub fn delete_settings(&self, keys: &[&str]) -> Result<(), StorageError> {
+        let tx = self.conn.unchecked_transaction()?;
+        for key in keys {
+            tx.execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -106,6 +117,27 @@ mod tests {
         let odd = "x'); DROP TABLE settings; --";
         s.set_setting("k", odd).unwrap();
         assert_eq!(s.get_setting("k").unwrap().as_deref(), Some(odd));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn delete_settings_removes_only_the_given_keys() {
+        let (s, dir) = open();
+        for k in ["a", "b", "c"] {
+            s.set_setting(k, "1").unwrap();
+        }
+        s.delete_settings(&["a", "c"]).unwrap();
+        assert_eq!(s.get_setting("a").unwrap(), None);
+        assert_eq!(s.get_setting("c").unwrap(), None);
+        assert_eq!(s.get_setting("b").unwrap().as_deref(), Some("1"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn delete_settings_of_missing_keys_is_ok() {
+        let (s, dir) = open();
+        s.delete_settings(&["never_written", "nor_this"]).unwrap();
+        s.delete_settings(&[]).unwrap();
         let _ = std::fs::remove_dir_all(dir);
     }
 }
