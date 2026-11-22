@@ -9,7 +9,11 @@ use crate::ai::claude::error_kind;
 use crate::ai::health::{self, AiHealth};
 use crate::ai::runner::AiError;
 use crate::ai::test_prompt;
+use crate::scheduler::ai_control::{
+    AiControl, ControlStore, ControlStoreError, Decision, DenyReason,
+};
 use crate::scheduler::queue::{CancelOutcome, Priority, RunLog, RunLogError, RunQueue};
+use crate::storage::ai_control::{StoredAiControl, StoredPause, StoredReading};
 use crate::storage::files::OrphanReport;
 use crate::storage::ideas::{Idea, IdeaInput, IdeaProject};
 use crate::storage::items::{
@@ -139,9 +143,42 @@ fn test_prompt_unfinished() -> AppError {
     }
 }
 
+/// What a feature tells the owner when the AI control refuses a task before it is queued. Only
+/// off and the limit refuse an owner task.
+fn ai_refused(reason: DenyReason) -> AppError {
+    match reason {
+        DenyReason::Off => AppError {
+            code: "ai_off",
+            message: "AI is off, so this did not run. Turn AI on in Settings > AI.".to_string(),
+        },
+        DenyReason::Limit => AppError {
+            code: "ai_limit",
+            message: "Claude is at its usage limit, so Mnemo is holding AI work until the limit resets or you choose Resume in Settings > AI.".to_string(),
+        },
+        DenyReason::Threshold | DenyReason::OwnerPause => AppError {
+            code: "ai_paused",
+            message: "Background AI work is paused, so this did not run.".to_string(),
+        },
+    }
+}
+
+/// Asks the AI control whether an owner task may run now. Every AI feature calls this before
+/// it queues (the queue asks again before the start).
+fn ask_ai_control(control: &AiControl, priority: Priority) -> Result<(), AppError> {
+    match control.may_run(priority, control.now()) {
+        Decision::Allow => Ok(()),
+        Decision::Deny { reason } => Err(ai_refused(reason)),
+    }
+}
+
 /// Runs the test prompt through the queue as an owner task, waits for it on this thread and
-/// times it. The command calls this on a blocking thread.
-fn run_test_prompt_with(queue: &RunQueue) -> Result<TestPromptResult, AppError> {
+/// times it. It asks the AI control first: a refused prompt writes no run row. The command
+/// calls this on a blocking thread.
+fn run_test_prompt_with(
+    queue: &RunQueue,
+    control: &AiControl,
+) -> Result<TestPromptResult, AppError> {
+    ask_ai_control(control, Priority::Owner)?;
     let started = std::time::Instant::now();
     let ticket = queue
         .submit(Priority::Owner, test_prompt::task())
@@ -172,7 +209,7 @@ fn run_test_prompt_with(queue: &RunQueue) -> Result<TestPromptResult, AppError> 
 #[tauri::command]
 pub async fn run_test_prompt(app: tauri::AppHandle) -> Result<TestPromptResult, AppError> {
     let queue = app.state::<RunQueue>().inner().clone();
-    tauri::async_runtime::spawn_blocking(move || run_test_prompt_with(&queue))
+    tauri::async_runtime::spawn_blocking(move || run_test_prompt_with(&queue, &queue.control()))
         .await
         .unwrap_or_else(|e| {
             log::error!("the test prompt did not finish: {e}");
@@ -265,6 +302,56 @@ impl RunLog for AppRunLog {
 
     fn finish(&self, id: &str, end: &RunEnd, duration_ms: Option<i64>) -> Result<(), RunLogError> {
         log_finish(&self.0.state::<AppStorage>(), id, end, duration_ms)
+    }
+}
+
+fn control_store_failed(e: StorageError) -> ControlStoreError {
+    ControlStoreError(e.to_string())
+}
+
+fn locked(storage: &AppStorage) -> Result<MutexGuard<'_, Storage>, ControlStoreError> {
+    storage.get().map_err(|e| ControlStoreError(e.message))
+}
+
+// The AI control's store writes through the one storage the commands use. Each call locks it
+// briefly. The control calls these under its own lock (lock order: control, then storage), so
+// no command may call the control while it holds the storage.
+fn control_load(storage: &AppStorage) -> Result<StoredAiControl, ControlStoreError> {
+    locked(storage)?
+        .ai_control_settings()
+        .map_err(control_store_failed)
+}
+
+/// The AI control's store in the app: the `ai_*` settings keys behind the managed `AppStorage`.
+pub struct AppControlStore(pub tauri::AppHandle);
+
+impl ControlStore for AppControlStore {
+    fn load(&self) -> Result<StoredAiControl, ControlStoreError> {
+        control_load(&self.0.state::<AppStorage>())
+    }
+
+    fn save_enabled(&self, on: bool) -> Result<(), ControlStoreError> {
+        locked(&self.0.state::<AppStorage>())?
+            .set_ai_enabled(on)
+            .map_err(control_store_failed)
+    }
+
+    fn save_thresholds(&self, warn_at: i64, pause_at: i64) -> Result<(), ControlStoreError> {
+        locked(&self.0.state::<AppStorage>())?
+            .set_ai_thresholds(warn_at, pause_at)
+            .map_err(control_store_failed)
+    }
+
+    fn save_pause(&self, pause: Option<&StoredPause>) -> Result<(), ControlStoreError> {
+        locked(&self.0.state::<AppStorage>())?
+            .set_ai_pause(pause)
+            .map_err(control_store_failed)
+    }
+
+    fn save_reading(&self, reading: &StoredReading) -> Result<(), ControlStoreError> {
+        locked(&self.0.state::<AppStorage>())?
+            .set_ai_usage_last(reading)
+            .map_err(control_store_failed)
     }
 }
 
@@ -1281,13 +1368,18 @@ mod tests {
         let (storage, dir) = app_storage();
         let log = Arc::new(StorageLog(storage));
         let notify: crate::scheduler::queue::Notifier = Arc::new(|_| {});
-        (RunQueue::new(runner, log.clone(), notify), log, dir)
+        let control = crate::scheduler::ai_control::testing::open_control();
+        (
+            RunQueue::new(runner, log.clone(), notify, control),
+            log,
+            dir,
+        )
     }
 
     #[test]
     fn test_prompt_command_with_the_fake_gives_the_fake_answer() {
         let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None));
-        let got = run_test_prompt_with(&queue).unwrap();
+        let got = run_test_prompt_with(&queue, &queue.control()).unwrap();
         assert_eq!(got.answer, "Fake answer: AI is in test mode.");
         let json = serde_json::to_value(&got).unwrap();
         assert!(json.get("durationMs").is_some());
@@ -1297,7 +1389,7 @@ mod tests {
     #[test]
     fn test_prompt_through_the_queue_leaves_one_done_run_row() {
         let (queue, log, dir) = test_queue(crate::ai::runner::select_runner(true, None));
-        run_test_prompt_with(&queue).unwrap();
+        run_test_prompt_with(&queue, &queue.control()).unwrap();
         let storage = log.0.get().unwrap();
         let rows = storage
             .list::<Run>(
@@ -1323,7 +1415,7 @@ mod tests {
             crate::ai::fake::FakeResult::Timeout,
         ));
         let (queue, log, dir) = test_queue(fake);
-        let err = run_test_prompt_with(&queue).unwrap_err();
+        let err = run_test_prompt_with(&queue, &queue.control()).unwrap_err();
         assert_eq!(err.code, "timeout");
         let storage = log.0.get().unwrap();
         let page = PageRequest {
@@ -1346,10 +1438,65 @@ mod tests {
             detail: "x".into(),
         }))));
         let notify: crate::scheduler::queue::Notifier = Arc::new(|_| {});
-        let queue = RunQueue::new(fake.clone(), log, notify);
-        let err = run_test_prompt_with(&queue).unwrap_err();
+        let control = crate::scheduler::ai_control::testing::open_control();
+        let queue = RunQueue::new(fake.clone(), log, notify, control);
+        let err = run_test_prompt_with(&queue, &queue.control()).unwrap_err();
         assert_eq!(err.code, "storage_unavailable");
         assert!(fake.requests().is_empty());
+    }
+
+    /// The number of run rows in the queue's storage.
+    fn run_rows(log: &StorageLog) -> usize {
+        let storage = log.0.get().unwrap();
+        let page = PageRequest {
+            limit: 10,
+            after: None,
+        };
+        storage.list::<Run>(&page, true).unwrap().items.len()
+    }
+
+    #[test]
+    fn test_prompt_asks_the_gate_first_and_is_refused_with_ai_off_and_no_run_row() {
+        let fake = Arc::new(crate::ai::fake::FakeRunner::new(
+            crate::ai::fake::FakeResult::Timeout,
+        ));
+        let (queue, log, dir) = test_queue(fake.clone());
+        let control = queue.control();
+        control.set_enabled(false).unwrap();
+        let err = run_test_prompt_with(&queue, &control).unwrap_err();
+        assert_eq!(err.code, "ai_off");
+        assert!(err.message.contains("AI is off"), "{}", err.message);
+        assert_eq!(run_rows(&log), 0, "a refused prompt wrote a run row");
+        assert_eq!(fake.starts(), 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_prompt_at_the_usage_limit_is_refused_with_ai_limit_and_a_plain_message() {
+        let fake = Arc::new(crate::ai::fake::FakeRunner::new(
+            crate::ai::fake::FakeResult::UsageLimit,
+        ));
+        let (queue, log, dir) = test_queue(fake.clone());
+        let control = queue.control();
+        // The first prompt hits the limit; that holds owner tasks.
+        assert_eq!(
+            run_test_prompt_with(&queue, &control).unwrap_err().code,
+            "usage_limit"
+        );
+        let err = run_test_prompt_with(&queue, &control).unwrap_err();
+        assert_eq!(err.code, "ai_limit");
+        assert!(err.message.contains("usage limit") && err.message.contains("Resume"));
+        assert!(!err.message.contains('{'), "no raw output: {}", err.message);
+        assert_eq!(run_rows(&log), 1);
+        assert_eq!(fake.starts(), 1);
+        // A manual pause holds only background work: the owner's prompt runs after Resume.
+        control.resume().unwrap();
+        control.pause().unwrap();
+        fake.push(crate::ai::fake::FakeResult::Valid(
+            r#"{"answer":"hi"}"#.into(),
+        ));
+        assert_eq!(run_test_prompt_with(&queue, &control).unwrap().answer, "hi");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

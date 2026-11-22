@@ -657,6 +657,57 @@ impl AiControl {
     }
 }
 
+/// A control on an in-memory store, for tests of the queue and the commands.
+#[cfg(test)]
+pub(crate) mod testing {
+    use super::*;
+
+    /// Keeps the stored state in memory.
+    pub struct MemoryStore(Mutex<StoredAiControl>);
+
+    impl MemoryStore {
+        fn get(&self) -> MutexGuard<'_, StoredAiControl> {
+            self.0.lock().unwrap_or_else(|e| e.into_inner())
+        }
+    }
+
+    impl ControlStore for MemoryStore {
+        fn load(&self) -> Result<StoredAiControl, ControlStoreError> {
+            Ok(self.get().clone())
+        }
+        fn save_enabled(&self, on: bool) -> Result<(), ControlStoreError> {
+            self.get().enabled = on;
+            Ok(())
+        }
+        fn save_thresholds(&self, warn_at: i64, pause_at: i64) -> Result<(), ControlStoreError> {
+            let mut s = self.get();
+            s.warn_at = Some(warn_at);
+            s.pause_at = Some(pause_at);
+            Ok(())
+        }
+        fn save_pause(&self, pause: Option<&StoredPause>) -> Result<(), ControlStoreError> {
+            self.get().pause = pause.copied();
+            Ok(())
+        }
+        fn save_reading(&self, reading: &StoredReading) -> Result<(), ControlStoreError> {
+            self.get().usage_last = Some(reading.clone());
+            Ok(())
+        }
+    }
+
+    /// A control with nothing stored (AI on, default lines) and the wall clock.
+    pub fn open_control() -> Arc<AiControl> {
+        let store = MemoryStore(Mutex::new(StoredAiControl {
+            enabled: true,
+            warn_at: None,
+            pause_at: None,
+            pause: None,
+            usage_last: None,
+        }));
+        AiControl::new(Arc::new(store), system_clock())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1185,5 +1236,260 @@ mod tests {
         c.on_usage_reading(reading(Some((5.0, None)), None), NOW);
         c.on_limit_error(0, NOW);
         assert_eq!(heard.load(Ordering::SeqCst), 7);
+    }
+
+    // ---- The queue asks the gate (RunQueue + FakeRunner) ----
+
+    use crate::ai::cancel::CancelToken;
+    use crate::ai::fake::{FakeResult, FakeRunner};
+    use crate::ai::runner::{AiError, AiOutput, AiRunner, AiTask};
+    use crate::scheduler::queue::{Notifier, RunLog, RunLogError, RunQueue, RunTicket};
+    use crate::storage::items::{Run, RunState};
+    use crate::storage::record::now_iso;
+    use crate::storage::runs::RunEnd;
+
+    const WAIT: Duration = Duration::from_secs(5);
+    const SETTLE: Duration = Duration::from_millis(150);
+
+    /// The run log on a temporary database.
+    struct StoreLog {
+        storage: Mutex<Storage>,
+        _dir: TempDir,
+    }
+
+    impl StoreLog {
+        fn new() -> Arc<StoreLog> {
+            let (storage, dir) = open_temp();
+            Arc::new(StoreLog {
+                storage: Mutex::new(storage),
+                _dir: dir,
+            })
+        }
+        fn state(&self, id: &str) -> RunState {
+            let s = self.storage.lock().unwrap();
+            s.get::<Run>(id).unwrap().state
+        }
+    }
+
+    fn log_err(e: crate::storage::StorageError) -> RunLogError {
+        RunLogError(e.to_string())
+    }
+
+    impl RunLog for StoreLog {
+        fn enqueue(&self, task_type: &str) -> Result<String, RunLogError> {
+            let s = self.storage.lock().unwrap();
+            Ok(s.enqueue_run(task_type, &now_iso())
+                .map_err(log_err)?
+                .base
+                .id)
+        }
+        fn start(&self, id: &str) -> Result<(), RunLogError> {
+            let s = self.storage.lock().unwrap();
+            s.start_run(id, &now_iso()).map_err(log_err)
+        }
+        fn finish(&self, id: &str, end: &RunEnd, ms: Option<i64>) -> Result<(), RunLogError> {
+            let s = self.storage.lock().unwrap();
+            s.finish_run(id, end, ms, &now_iso()).map_err(log_err)
+        }
+    }
+
+    fn task(name: &str) -> AiTask {
+        AiTask {
+            name: name.into(),
+            prompt: "p".into(),
+            schema: String::new(),
+            tools: vec![],
+            model: "m".into(),
+            effort: None,
+            timeout: Duration::from_secs(5),
+        }
+    }
+
+    fn valid() -> FakeResult {
+        FakeResult::Valid(r#"{"answer":"hi"}"#.into())
+    }
+
+    /// A gate with a settable clock, a queue on `runner`, and the run log.
+    fn gated(
+        runner: Arc<dyn AiRunner>,
+    ) -> (RunQueue, Arc<AiControl>, Arc<StoreLog>, Arc<AtomicI64>) {
+        let (clock, at) = test_clock(NOW);
+        let control = AiControl::with_timer_step(TestStore::new(), clock, Duration::from_millis(5));
+        let log = StoreLog::new();
+        let notify: Notifier = Arc::new(|_| {});
+        let queue = RunQueue::new(runner, log.clone(), notify, control.clone());
+        (queue, control, log, at)
+    }
+
+    fn done(ticket: &RunTicket) -> Result<AiOutput, AiError> {
+        ticket.done.recv_timeout(WAIT).expect("the run did not end")
+    }
+
+    fn still_waiting(ticket: &RunTicket) {
+        assert!(
+            ticket.done.recv_timeout(SETTLE).is_err(),
+            "the run ended but should still wait"
+        );
+    }
+
+    /// A runner that holds each run until its gate opens, then answers; it counts starts.
+    #[derive(Default)]
+    struct HoldRunner {
+        open: AtomicBool,
+        starts: AtomicUsize,
+    }
+
+    impl AiRunner for HoldRunner {
+        fn run_task(&self, _: &AiTask, _: &CancelToken) -> Result<AiOutput, AiError> {
+            self.starts.fetch_add(1, Ordering::SeqCst);
+            while !self.open.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            Ok(AiOutput {
+                structured_output: "{}".into(),
+            })
+        }
+    }
+
+    #[test]
+    fn ai_control_queue_asks_the_gate_before_each_start_and_a_denied_task_never_starts_a_process() {
+        let fake = Arc::new(FakeRunner::new(valid()));
+        let (q, control, log, _at) = gated(fake.clone());
+        control.pause().unwrap();
+        let background = q.submit(Priority::Background, task("bg")).unwrap();
+        still_waiting(&background);
+        assert_eq!(fake.starts(), 0, "a denied task started a process");
+        assert_eq!(log.state(&background.id), RunState::Waiting);
+        // The owner task is allowed and starts; the background one still waits.
+        assert!(done(&q.submit(Priority::Owner, task("owner")).unwrap()).is_ok());
+        assert_eq!(fake.starts(), 1);
+        still_waiting(&background);
+        // Resume: the gate allows it and the queue starts it.
+        control.resume().unwrap();
+        assert!(done(&background).is_ok());
+        assert_eq!(fake.starts(), 2);
+    }
+
+    #[test]
+    fn ai_control_switch_off_gives_zero_process_starts_and_reason_off_for_owner_and_background() {
+        let fake = Arc::new(FakeRunner::new(valid()));
+        let (q, control, log, _at) = gated(fake.clone());
+        control.set_enabled(false).unwrap();
+        assert_eq!(control.may_run(OWNER, NOW), deny(DenyReason::Off));
+        assert_eq!(control.may_run(BACKGROUND, NOW), deny(DenyReason::Off));
+        // Even a task submitted without asking first never starts: it ends cancelled.
+        let owner = q.submit(Priority::Owner, task("owner")).unwrap();
+        let background = q.submit(Priority::Background, task("bg")).unwrap();
+        assert_eq!(done(&owner), Err(AiError::Cancelled));
+        assert_eq!(done(&background), Err(AiError::Cancelled));
+        assert_eq!(fake.starts(), 0);
+        assert_eq!(log.state(&owner.id), RunState::Cancelled);
+        assert_eq!(log.state(&background.id), RunState::Cancelled);
+    }
+
+    #[test]
+    fn ai_control_switch_off_cancels_every_waiting_run_and_lets_the_running_runs_finish() {
+        let runner = Arc::new(HoldRunner::default());
+        let (q, control, log, _at) = gated(runner.clone());
+        let a = q.submit(Priority::Owner, task("a")).unwrap();
+        let b = q.submit(Priority::Background, task("b")).unwrap();
+        let c = q.submit(Priority::Owner, task("c")).unwrap();
+        let d = q.submit(Priority::Background, task("d")).unwrap();
+        let end = std::time::Instant::now() + WAIT;
+        while runner.starts.load(Ordering::SeqCst) < 2 {
+            assert!(std::time::Instant::now() < end, "two runs did not start");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        control.set_enabled(false).unwrap();
+        // Every waiting run ends as cancelled at once; the running ones are not stopped.
+        assert_eq!(done(&c), Err(AiError::Cancelled));
+        assert_eq!(done(&d), Err(AiError::Cancelled));
+        assert_eq!(log.state(&c.id), RunState::Cancelled);
+        assert_eq!(log.state(&d.id), RunState::Cancelled);
+        still_waiting(&a);
+        assert_eq!(log.state(&a.id), RunState::Running);
+        // Nothing new starts, even with both slots busy.
+        let late = q.submit(Priority::Background, task("late")).unwrap();
+        assert_eq!(done(&late), Err(AiError::Cancelled));
+        runner.open.store(true, Ordering::SeqCst);
+        assert!(done(&a).is_ok());
+        assert!(done(&b).is_ok());
+        assert_eq!(log.state(&a.id), RunState::Done);
+        assert_eq!(log.state(&b.id), RunState::Done);
+        assert_eq!(runner.starts.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn ai_control_queue_at_the_pause_line_a_background_task_waits_and_an_owner_task_runs() {
+        let fake = Arc::new(FakeRunner::new(valid()));
+        let (q, control, log, _at) = gated(fake.clone());
+        let sink_control = control.clone();
+        fake.set_sink(Arc::new(move |r| {
+            sink_control.on_usage_reading(r, NOW);
+        }));
+        // An owner run reads usage at 96%: above the pause line of 95.
+        fake.push_reading(reading(Some((96.0, Some(NOW + HOUR))), Some((20.0, None))));
+        assert!(done(&q.submit(Priority::Owner, task("first")).unwrap()).is_ok());
+        let background = q.submit(Priority::Background, task("bg")).unwrap();
+        still_waiting(&background);
+        assert_eq!(log.state(&background.id), RunState::Waiting);
+        assert_eq!(fake.starts(), 1);
+        // An owner task still runs at the pause line.
+        assert!(done(&q.submit(Priority::Owner, task("owner")).unwrap()).is_ok());
+        assert_eq!(fake.starts(), 2);
+        still_waiting(&background);
+        // A lower reading brings usage below the line: the background task starts.
+        control.on_usage_reading(reading(Some((40.0, Some(NOW + HOUR))), None), NOW);
+        assert!(done(&background).is_ok());
+        assert_eq!(fake.starts(), 3);
+    }
+
+    #[test]
+    fn ai_control_queue_a_fake_limit_result_pauses_background_and_holds_owner_until_resets_at() {
+        let fake = Arc::new(FakeRunner::new(valid()));
+        let (q, control, log, at) = gated(fake.clone());
+        let sink_control = control.clone();
+        fake.set_sink(Arc::new(move |r| {
+            sink_control.on_usage_reading(r, NOW);
+        }));
+        let mut limit = reading(Some((100.0, Some(NOW + HOUR))), Some((60.0, None)));
+        limit.five_hour.as_mut().unwrap().status = Some("rejected".into());
+        limit.status = Some("rejected".into());
+        fake.push_reading(limit);
+        fake.push(FakeResult::UsageLimit);
+        let first = q.submit(Priority::Owner, task("first")).unwrap();
+        assert_eq!(done(&first), Err(AiError::UsageLimit));
+        // Owner and background are held, with reason Limit.
+        assert_eq!(control.may_run(OWNER, NOW), deny(DenyReason::Limit));
+        assert_eq!(control.may_run(BACKGROUND, NOW), deny(DenyReason::Limit));
+        let background = q.submit(Priority::Background, task("bg")).unwrap();
+        still_waiting(&background);
+        // An owner task that reaches the queue anyway ends at once with the limit, no process.
+        let owner = q.submit(Priority::Owner, task("owner")).unwrap();
+        assert_eq!(done(&owner), Err(AiError::UsageLimit));
+        assert_eq!(log.state(&owner.id), RunState::Failed);
+        assert_eq!(fake.starts(), 1);
+        // At resetsAt the timer lifts the pause and the background task starts.
+        at.store(NOW + HOUR, Ordering::SeqCst);
+        assert!(done(&background).is_ok());
+        assert_eq!(fake.starts(), 2);
+        assert_eq!(control.may_run(OWNER, NOW + HOUR), ALLOW);
+    }
+
+    #[test]
+    fn ai_control_queue_a_limit_with_no_reset_time_waits_for_resume() {
+        let fake = Arc::new(FakeRunner::new(valid()));
+        let (q, control, _log, at) = gated(fake.clone());
+        fake.push(FakeResult::UsageLimit);
+        assert_eq!(
+            done(&q.submit(Priority::Owner, task("first")).unwrap()),
+            Err(AiError::UsageLimit)
+        );
+        let background = q.submit(Priority::Background, task("bg")).unwrap();
+        at.store(NOW + 30 * 24 * HOUR, Ordering::SeqCst);
+        control.tick();
+        still_waiting(&background);
+        control.resume().unwrap();
+        assert!(done(&background).is_ok());
     }
 }

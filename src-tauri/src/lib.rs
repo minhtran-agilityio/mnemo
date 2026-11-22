@@ -10,7 +10,10 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
 
-use commands::{AiHealthState, AiRunnerState, AppRunLog, AppStorage, StartupError};
+use commands::{
+    AiHealthState, AiRunnerState, AppControlStore, AppRunLog, AppStorage, StartupError,
+};
+use scheduler::ai_control::AiControl;
 use scheduler::queue::{Notifier, RunEvent, RunQueue};
 use storage::StorageError;
 
@@ -109,13 +112,27 @@ pub fn run() {
             let fake =
                 ai::runner::fake_requested(std::env::var_os(ai::runner::FAKE_AI_ENV).as_deref());
             log::info!("AI runner: {}", if fake { "fake" } else { "real" });
-            let runner = ai::runner::select_runner(
-                fake,
-                paths
-                    .as_ref()
-                    .ok()
-                    .map(|p| ai::runner::runs_dir(&p.data_dir)),
+            // The AI control: the master switch, the usage lines and the pause. Every AI feature
+            // and the queue ask it before a run. It reads its state from the one storage.
+            let control = AiControl::new(
+                Arc::new(AppControlStore(app.handle().clone())),
+                scheduler::ai_control::system_clock(),
             );
+            let runs_dir = paths
+                .as_ref()
+                .ok()
+                .map(|p| ai::runner::runs_dir(&p.data_dir));
+            let runner: Arc<dyn ai::runner::AiRunner> = if fake {
+                ai::runner::select_runner(true, runs_dir)
+            } else {
+                // The real runner hands each usage reading of a run to the control.
+                let sink_control = control.clone();
+                let sink: ai::usage::UsageSink = Arc::new(move |reading| {
+                    let now = sink_control.now();
+                    sink_control.on_usage_reading(reading, now);
+                });
+                Arc::new(ai::claude::UsageClaudeRunner::new(runs_dir, sink))
+            };
             app.manage(AiRunnerState { fake });
 
             // Every AI run goes through this queue: at most 2 at once, owner tasks first. Its
@@ -133,6 +150,7 @@ pub fn run() {
                 runner,
                 Arc::new(AppRunLog(app.handle().clone())),
                 notify,
+                control,
             ));
 
             // The Claude Code check runs off the main thread, so the window never waits for
