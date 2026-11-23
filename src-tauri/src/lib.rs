@@ -121,13 +121,18 @@ pub fn run() {
                     })
                     .ok()
             });
-            let runner = ai::runner::select_runner(
-                fake,
-                paths
-                    .as_ref()
-                    .ok()
-                    .map(|p| ai::runner::runs_dir(&p.data_dir)),
-                claude_config,
+            // Every run reads its feature's model and effort from the settings table (#24),
+            // so the queue gets the runner wrapped in `ConfiguredRunner`.
+            let runner = ai::models::app_runner(
+                ai::runner::select_runner(
+                    fake,
+                    paths
+                        .as_ref()
+                        .ok()
+                        .map(|p| ai::runner::runs_dir(&p.data_dir)),
+                    claude_config,
+                ),
+                Arc::new(commands::StoredChoices(app.handle().clone())),
             );
             app.manage(AiRunnerState { fake });
 
@@ -222,6 +227,9 @@ pub fn run() {
             commands::check_ai_health,
             commands::get_ai_mode,
             commands::run_test_prompt,
+            commands::list_ai_models,
+            commands::set_ai_model,
+            commands::reset_ai_models,
             commands::cancel_run,
             commands::add_bookmark,
             commands::get_bookmark,

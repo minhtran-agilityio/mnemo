@@ -4,6 +4,7 @@ pub mod claude;
 pub mod config;
 pub mod fake;
 pub mod health;
+pub mod models;
 pub mod process;
 #[cfg(test)]
 mod proof;

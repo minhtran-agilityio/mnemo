@@ -1,11 +1,13 @@
 // The developer test prompt of Settings > AI: one tiny fixed task that proves the runner works.
-// It follows the feature pattern of `sample.rs`: take `&dyn AiRunner`, build an `AiTask`, parse
-// `structured_output` into a typed struct, and invent nothing on an error.
+// The app sends `task()` through the run queue (`commands::run_test_prompt`), whose runner sets
+// the owner's model and effort, and reads the result with `answer()`, inventing nothing on an
+// error. `run` calls a runner directly and is for tests only.
 
 use std::time::Duration;
 
 use serde::Deserialize;
 
+use super::models::default_choice;
 use super::runner::{AiError, AiOutput, AiTask};
 
 /// The answer shape of the test prompt.
@@ -14,8 +16,9 @@ struct TestAnswer {
     answer: String,
 }
 
-/// The fixed task: no tools, the small model, and a short timeout.
+/// The fixed task: no tools, a short timeout, and the model and effort of its row in `models`.
 pub fn task() -> AiTask {
+    let (model, effort) = default_choice("test_prompt");
     AiTask {
         name: "test_prompt".to_string(),
         prompt: "Write one short friendly sentence for the owner of a notes app. Put it in the answer field."
@@ -24,8 +27,8 @@ pub fn task() -> AiTask {
             r#"{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"#
                 .to_string(),
         tools: vec![],
-        model: "haiku".to_string(),
-        effort: None,
+        model,
+        effort,
         timeout: Duration::from_secs(60),
     }
 }

@@ -35,8 +35,9 @@ import {
   RESET_WORD,
   type TestPromptResult,
 } from "../../shared/api";
+import { type AiModelsDeps, createAiModelsCard } from "./ai-models";
 
-export interface SettingsDeps {
+export interface SettingsDeps extends AiModelsDeps {
   /** The theme that is in use now. */
   getTheme(): Theme;
   /** Shows `theme` at once. Nothing is saved here. */
@@ -292,6 +293,8 @@ export function renderSettings(
   });
   const body = doc.createElement("div");
   body.className = "settings-body";
+  // Built once, so a save in progress and the focused dropdown survive a redraw of the AI section.
+  const models = createAiModelsCard(doc, deps);
   const layout = doc.createElement("div");
   layout.className = "settings-layout";
   layout.append(list.element, body);
@@ -305,8 +308,17 @@ export function renderSettings(
 
   function renderBody(): void {
     if (open === "appearance") body.replaceChildren(appearance());
-    else if (open === "ai") body.replaceChildren(aiSection());
-    else body.replaceChildren(dataSection());
+    else if (open === "ai") {
+      models.setAiOff(aiIsOff());
+      body.replaceChildren(aiSection(), models.element);
+    } else body.replaceChildren(dataSection());
+  }
+
+  // AI is off when the check is known (or failed) and Claude Code is not ready. The fake runner
+  // counts as on.
+  function aiIsOff(): boolean {
+    if (aiMode === "fake" || ai.kind === "checking") return false;
+    return !(ai.kind === "known" && ai.health.state === "ready");
   }
 
   function card(label: string, children: Node[]): HTMLElement {
