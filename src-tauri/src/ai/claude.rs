@@ -10,7 +10,7 @@
 // app made up and never the model's free text. Output can hold account data, so no error value
 // and no log line carries any of it.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -19,9 +19,11 @@ use serde_json::Value;
 
 use super::cancel::CancelToken;
 use super::config::ClaudeConfig;
+use super::health::{ClaudeCli, SystemClaude};
 use super::process::{self, Limits, ProcessError};
 use super::run_dir::RunDir;
-use super::runner::{AiError, AiOutput, AiTask};
+use super::runner::{AiError, AiOutput, AiRunner, AiTask};
+use super::usage::{UsageReading, UsageSink};
 
 /// The most output read from one run. A structured answer is small; this is a safety cap.
 const MAX_OUTPUT: u64 = 4 * 1024 * 1024;
@@ -133,14 +135,10 @@ pub(super) struct Event {
     result: Option<Value>,
     #[serde(default)]
     structured_output: Option<Value>,
+    /// Kept as raw JSON and read field by field: a field of an unexpected type must not drop
+    /// the whole event, or a `rejected` status would be lost with it (see `ai::usage`).
     #[serde(default)]
-    rate_limit_info: Option<RateLimitInfo>,
-}
-
-#[derive(Deserialize, Default)]
-struct RateLimitInfo {
-    #[serde(default)]
-    status: Option<String>,
+    rate_limit_info: Option<Value>,
 }
 
 impl Event {
@@ -156,8 +154,20 @@ impl Event {
             && self
                 .rate_limit_info
                 .as_ref()
-                .and_then(|i| i.status.as_deref())
+                .and_then(|i| i.get("status"))
+                .and_then(Value::as_str)
                 == Some("rejected")
+    }
+
+    /// The usage reading of a `rate_limit_event`, or `None` for any other event and for one
+    /// that holds no usage number and no reset time.
+    pub(super) fn usage_reading(&self) -> Option<UsageReading> {
+        if self.kind != "rate_limit_event" {
+            return None;
+        }
+        self.rate_limit_info
+            .as_ref()
+            .and_then(UsageReading::from_rate_limit_info)
     }
 }
 
@@ -257,8 +267,21 @@ pub(super) fn finish(
 }
 
 /// Reads the output of a `--output-format json` run: one result object, or an array of events
-/// whose last `type: "result"` element is the result.
+/// whose last `type: "result"` element is the result. Runs read their output with
+/// `parse_output_with_usage`; this form is for the tests.
+#[cfg(test)]
 pub fn parse_output(bytes: &[u8], schema: &str, exit: ExitInfo) -> Result<AiOutput, AiError> {
+    parse_output_with_usage(bytes, schema, exit, None)
+}
+
+/// `parse_output`, and each usage reading of the output's `rate_limit_event` elements goes to
+/// `usage`, in order, before the result is judged. A reading never changes the result.
+pub fn parse_output_with_usage(
+    bytes: &[u8],
+    schema: &str,
+    exit: ExitInfo,
+    usage: Option<&UsageSink>,
+) -> Result<AiOutput, AiError> {
     let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
         return Err(failure(exit));
     };
@@ -270,6 +293,11 @@ pub fn parse_output(bytes: &[u8], schema: &str, exit: ExitInfo) -> Result<AiOutp
         object @ Value::Object(_) => serde_json::from_value(object).ok().into_iter().collect(),
         _ => Vec::new(),
     };
+    if let Some(sink) = usage {
+        for reading in events.iter().filter_map(Event::usage_reading) {
+            sink(reading);
+        }
+    }
     let Some(result) = events.iter().rev().find(|e| e.is_result()) else {
         return Err(failure(exit));
     };
@@ -372,6 +400,19 @@ pub fn run_claude(
     config: &ClaudeConfig,
     cancel: &CancelToken,
 ) -> Result<AiOutput, AiError> {
+    run_claude_with_usage(program, task, runs_dir, config, cancel, None)
+}
+
+/// `run_claude`, and each usage reading in the output goes to `usage` (see
+/// `parse_output_with_usage`).
+pub fn run_claude_with_usage(
+    program: &Path,
+    task: &AiTask,
+    runs_dir: &Path,
+    config: &ClaudeConfig,
+    cancel: &CancelToken,
+    usage: Option<&UsageSink>,
+) -> Result<AiOutput, AiError> {
     let started = Instant::now();
     let run_dir = RunDir::create(runs_dir).map_err(|_| AiError::Unavailable)?;
     let command = build_command(program, task, run_dir.path(), config, OutputMode::Json);
@@ -385,11 +426,51 @@ pub fn run_claude(
     .map_err(process_error)
     .and_then(|out| {
         let exit = ExitInfo::of(out.status);
-        parse_output(&out.stdout, &task.schema, exit)
+        parse_output_with_usage(&out.stdout, &task.schema, exit, usage)
             .map_err(|e| limit_from_raw(e, exit, &[&out.stdout, &out.stderr]))
     });
     log::info!("{}", outcome_line(&task.name, &result, started.elapsed()));
     result
+}
+
+/// The real runner with a usage sink: one `claude -p` process per task, like
+/// `runner::ClaudeRunner`, and every usage reading of a run goes to the sink (the app's AI
+/// control stores it). The app uses this runner when AI is real.
+pub struct UsageClaudeRunner {
+    /// Mnemo's folder for per-run folders; `None` when the data folder could not be found.
+    runs_dir: Option<PathBuf>,
+    /// Mnemo's own Claude config files; `None` when they could not be made. Either `None`
+    /// starts no run (see `runner::prepare`).
+    config: Option<ClaudeConfig>,
+    usage: UsageSink,
+}
+
+impl UsageClaudeRunner {
+    pub fn new(runs_dir: Option<PathBuf>, config: Option<ClaudeConfig>, usage: UsageSink) -> Self {
+        UsageClaudeRunner {
+            runs_dir,
+            config,
+            usage,
+        }
+    }
+}
+
+/// Stops a test that reaches the real runner. Tests never call the real Claude.
+fn guard_against_test_use() {
+    #[cfg(test)]
+    panic!("the real AI runner was used in a test");
+}
+
+impl AiRunner for UsageClaudeRunner {
+    fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
+        guard_against_test_use();
+        let (runs_dir, config) =
+            super::runner::prepare(self.runs_dir.as_ref(), self.config.as_ref())?;
+        let Some(program) = SystemClaude::from_env().locate() else {
+            return Err(AiError::Unavailable);
+        };
+        run_claude_with_usage(&program, task, runs_dir, config, cancel, Some(&self.usage))
+    }
 }
 
 #[cfg(test)]
@@ -657,6 +738,97 @@ mod tests {
             parse_output(text.as_bytes(), SCHEMA, FAILED),
             Err(AiError::UsageLimit)
         );
+    }
+
+    /// A sink that keeps every reading it gets.
+    fn collecting_sink() -> (
+        UsageSink,
+        std::sync::Arc<std::sync::Mutex<Vec<UsageReading>>>,
+    ) {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = seen.clone();
+        let sink: UsageSink = std::sync::Arc::new(move |r| kept.lock().unwrap().push(r));
+        (sink, seen)
+    }
+
+    const WINDOWS_EVENT: &str = r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1794999600,"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":0.57,"resetsAt":1794999600,"status":"allowed"},"seven_day":{"utilization":0.18,"resetsAt":1795557600,"status":"allowed"}}}}"#;
+
+    #[test]
+    fn usage_reading_comes_from_the_json_output_array_and_the_answer_is_unchanged() {
+        let text = format!(
+            r#"[{{"type":"system","subtype":"init"}},{WINDOWS_EVENT},{}]"#,
+            result_object()
+        );
+        let (sink, seen) = collecting_sink();
+        let got = parse_output_with_usage(text.as_bytes(), SCHEMA, OK, Some(&sink)).unwrap();
+        assert_eq!(got.structured_output, r#"{"greeting":"Hi!"}"#);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].five_hour.as_ref().unwrap().percent(), Some(57));
+        assert_eq!(seen[0].seven_day.as_ref().unwrap().percent(), Some(18));
+        assert_eq!(
+            seen[0].seven_day.as_ref().unwrap().resets_at,
+            Some(1_795_557_600)
+        );
+    }
+
+    #[test]
+    fn usage_reading_json_output_without_windows_or_as_one_object_gives_no_reading() {
+        let (sink, seen) = collecting_sink();
+        let allowed_only = format!(
+            r#"[{{"type":"rate_limit_event","rate_limit_info":{{"status":"allowed"}}}},{}]"#,
+            result_object()
+        );
+        parse_output_with_usage(allowed_only.as_bytes(), SCHEMA, OK, Some(&sink)).unwrap();
+        parse_output_with_usage(result_object().as_bytes(), SCHEMA, OK, Some(&sink)).unwrap();
+        let _ = parse_output_with_usage(b"not json", SCHEMA, OK, Some(&sink));
+        assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_rejected_rate_limit_event_with_broken_windows_is_still_a_usage_limit() {
+        let text = r#"[{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":"x","unifiedWindows":{"five_hour":{"utilization":"full","resetsAt":"x"}}}},{"type":"result","is_error":true,"result":"x"}]"#;
+        let (sink, seen) = collecting_sink();
+        assert_eq!(
+            parse_output_with_usage(text.as_bytes(), SCHEMA, FAILED, Some(&sink)),
+            Err(AiError::UsageLimit)
+        );
+        // No usage number and no time in it, so no reading either.
+        assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn usage_reading_of_a_stand_in_claude_run_reaches_the_sink() {
+        let output = format!("[{WINDOWS_EVENT},{}]", result_object());
+        let program = stand_in("usage", &format!("cat <<'EOF'\n{output}\nEOF"));
+        let (sink, seen) = collecting_sink();
+        let got = run_claude_with_usage(
+            &program,
+            &task(),
+            &runs(),
+            &test_config(),
+            &CancelToken::default(),
+            Some(&sink),
+        )
+        .unwrap();
+        assert_eq!(got.structured_output, r#"{"greeting":"Hi!"}"#);
+        assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_usage_claude_runner_panics_in_a_test() {
+        let sink: UsageSink = std::sync::Arc::new(|_| {});
+        let runner = UsageClaudeRunner::new(Some(std::env::temp_dir()), Some(test_config()), sink);
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runner.run_task(&task(), &CancelToken::default())
+        }));
+        let payload = caught.expect_err("the real runner must refuse to run in a test");
+        let text = payload
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_default();
+        assert_eq!(text, "the real AI runner was used in a test");
     }
 
     #[test]

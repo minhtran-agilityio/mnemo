@@ -23,6 +23,7 @@ use super::config::ClaudeConfig;
 use super::process;
 use super::run_dir::RunDir;
 use super::runner::{AiError, AiOutput, AiTask};
+use super::usage::UsageSink;
 
 #[derive(Deserialize, Default)]
 struct AssistantEvent {
@@ -50,15 +51,18 @@ struct StreamReader<'a> {
     on_text: &'a mut dyn FnMut(&str),
     result: Option<Event>,
     limit_seen: bool,
+    /// Gets the usage reading of each `rate_limit_event` line, as it arrives.
+    usage: Option<&'a UsageSink>,
 }
 
 impl<'a> StreamReader<'a> {
-    fn new(on_text: &'a mut dyn FnMut(&str)) -> Self {
+    fn new(on_text: &'a mut dyn FnMut(&str), usage: Option<&'a UsageSink>) -> Self {
         StreamReader {
             pending: Vec::new(),
             on_text,
             result: None,
             limit_seen: false,
+            usage,
         }
     }
 
@@ -89,7 +93,12 @@ impl<'a> StreamReader<'a> {
                     }
                 }
             }
-            "rate_limit_event" => self.limit_seen |= event.is_rejected_rate_limit(),
+            "rate_limit_event" => {
+                self.limit_seen |= event.is_rejected_rate_limit();
+                if let (Some(sink), Some(reading)) = (self.usage, event.usage_reading()) {
+                    sink(reading);
+                }
+            }
             "result" => self.result = Some(event),
             _ => {}
         }
@@ -118,6 +127,21 @@ pub fn run_stream(
     cancel: &CancelToken,
     on_text: &mut dyn FnMut(&str),
 ) -> Result<AiOutput, AiError> {
+    run_stream_with_usage(program, task, runs_dir, config, cancel, on_text, None)
+}
+
+/// `run_stream`, and the usage reading of each `rate_limit_event` line goes to `usage` as the
+/// line arrives. Not used by a feature yet (Ask Mnemo uses it later).
+#[allow(dead_code)]
+pub fn run_stream_with_usage(
+    program: &Path,
+    task: &AiTask,
+    runs_dir: &Path,
+    config: &ClaudeConfig,
+    cancel: &CancelToken,
+    on_text: &mut dyn FnMut(&str),
+    usage: Option<&UsageSink>,
+) -> Result<AiOutput, AiError> {
     let started = Instant::now();
     let run_dir = RunDir::create(runs_dir).map_err(|_| AiError::Unavailable)?;
     let command = build_command(
@@ -127,7 +151,7 @@ pub fn run_stream(
         config,
         OutputMode::StreamJson,
     );
-    let mut reader = StreamReader::new(on_text);
+    let mut reader = StreamReader::new(on_text, usage);
     let ran = process::run_bounded_with(
         command,
         limits_for(task),
@@ -187,7 +211,7 @@ mod tests {
     fn read(chunks: &[&[u8]], exit: ExitInfo) -> (Vec<String>, Result<AiOutput, AiError>) {
         let mut pieces: Vec<String> = Vec::new();
         let mut on_text = |t: &str| pieces.push(t.to_string());
-        let mut reader = StreamReader::new(&mut on_text);
+        let mut reader = StreamReader::new(&mut on_text, None);
         for chunk in chunks {
             reader.push(chunk);
         }
@@ -250,6 +274,71 @@ mod tests {
         );
         let (_, result) = read(&[text.as_bytes()], FAILED);
         assert_eq!(result, Err(AiError::UsageLimit));
+    }
+
+    const WINDOWS_LINE: &str = r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":0.1,"resetsAt":1794999600,"status":"allowed"},"seven_day":{"utilization":0.12,"resetsAt":1795557600,"status":"allowed"}}}}"#;
+
+    /// A sink that keeps every reading it gets.
+    fn collecting_sink() -> (
+        UsageSink,
+        std::sync::Arc<std::sync::Mutex<Vec<crate::ai::usage::UsageReading>>>,
+    ) {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = seen.clone();
+        let sink: UsageSink = std::sync::Arc::new(move |r| kept.lock().unwrap().push(r));
+        (sink, seen)
+    }
+
+    #[test]
+    fn usage_reading_comes_from_a_stream_json_rate_limit_event_line() {
+        let text = format!("{WINDOWS_LINE}\n{STREAM}");
+        let (sink, seen) = collecting_sink();
+        let mut on_text = |_: &str| {};
+        let mut reader = StreamReader::new(&mut on_text, Some(&sink));
+        // Split inside the rate limit line: the reading comes once the line is whole.
+        let (a, b) = text.as_bytes().split_at(40);
+        reader.push(a);
+        assert!(seen.lock().unwrap().is_empty());
+        reader.push(b);
+        assert!(reader.finish(SCHEMA, OK).is_ok());
+        let seen = seen.lock().unwrap();
+        // The STREAM's own event has only a status: no reading from it.
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].five_hour.as_ref().unwrap().percent(), Some(10));
+        assert_eq!(seen[0].seven_day.as_ref().unwrap().percent(), Some(12));
+    }
+
+    #[test]
+    fn a_stream_line_with_broken_windows_still_gives_the_usage_limit() {
+        let text = concat!(
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","unifiedWindows":{"five_hour":{"utilization":"x","resetsAt":"y"}}}}"#,
+            "\n",
+            r#"{"type":"result","is_error":true,"result":"x"}"#,
+            "\n"
+        );
+        let (sink, seen) = collecting_sink();
+        let mut on_text = |_: &str| {};
+        let mut reader = StreamReader::new(&mut on_text, Some(&sink));
+        reader.push(text.as_bytes());
+        assert_eq!(reader.finish(SCHEMA, FAILED), Err(AiError::UsageLimit));
+        assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn usage_reading_of_a_stand_in_stream_run_reaches_the_sink() {
+        let program = stand_in(&format!("cat <<'EOF'\n{WINDOWS_LINE}\n{STREAM}EOF"));
+        let (sink, seen) = collecting_sink();
+        let got = run_stream_with_usage(
+            &program,
+            &task(),
+            &runs(),
+            &crate::ai::config::test_config(),
+            &CancelToken::default(),
+            &mut |_| {},
+            Some(&sink),
+        );
+        assert!(got.is_ok());
+        assert_eq!(seen.lock().unwrap().len(), 1);
     }
 
     #[test]

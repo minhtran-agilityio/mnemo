@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Theme } from "../../frame/theme";
 import type {
+  AiControlView,
   AiHealth,
   AiMode,
   AiModelTable,
@@ -31,6 +32,19 @@ let checks: number;
 let aiMode: AiMode | Error;
 let prompts: Array<(result: TestPromptResult | unknown) => void>;
 let promptRejects: Array<(error: unknown) => void>;
+let control: AiControlView;
+let controlReads: number;
+
+const CONTROL_ON: AiControlView = {
+  enabled: true,
+  warnAt: 60,
+  pauseAt: 95,
+  pause: null,
+  backgroundGate: { kind: "allow" },
+  warn: false,
+  usage: { kind: "runs", today: 2, week: 7 },
+};
+
 let pickResult: string | null;
 let picks: number;
 let exportCalls: string[];
@@ -111,6 +125,36 @@ function deps(): SettingsDeps {
         prompts.push(done as (r: unknown) => void);
         promptRejects.push(fail);
       }),
+    aiControl: {
+      getAiControl: async () => {
+        controlReads += 1;
+        return control;
+      },
+      setAiEnabled: async (on) => {
+        control = { ...control, enabled: on };
+        return control;
+      },
+      setAiThresholds: async (warnAt, pauseAt) => {
+        control = { ...control, warnAt, pauseAt };
+        return control;
+      },
+      pauseBackground: async () => {
+        control = {
+          ...control,
+          pause: { reason: "owner", until: null },
+          backgroundGate: { kind: "deny", reason: "owner_pause" },
+        };
+        return control;
+      },
+      resumeAi: async () => {
+        control = {
+          ...control,
+          pause: null,
+          backgroundGate: { kind: "allow" },
+        };
+        return control;
+      },
+    },
     listAiModels: async () => MODEL_TABLE,
     setAiModel: async () => MODEL_TABLE,
     resetAiModels: async () => MODEL_TABLE,
@@ -178,6 +222,8 @@ beforeEach(() => {
   aiMode = "real";
   prompts = [];
   promptRejects = [];
+  control = CONTROL_ON;
+  controlReads = 0;
   pickResult = "/home/ana/Out";
   picks = 0;
   exportCalls = [];
@@ -413,6 +459,8 @@ test("the AI section shows the state, the fix message and a Check again button",
   openSection("AI");
   expect(aiBody()).toContain("Not signed in");
   expect(aiBody()).toContain("Open a terminal and run `claude`.");
+  // The Claude Code check card (the first card) has one pill and one button; the AI control
+  // card and the model table below it have their own controls (#23, #24).
   expect(
     container.querySelectorAll(".settings-body > :first-child .pill").length,
   ).toBe(1);
@@ -781,4 +829,84 @@ test("the usage limit shows the limit state instead of the button, and Check aga
   await tick();
   expect(sendButton()).toBeDefined();
   log.mockRestore();
+});
+
+// ---- AI control (#23) ----
+
+function aiSwitch(): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>("button[role=switch]");
+}
+
+test("the AI section shows the AI switch, the Mnemo run count and the label of which number is shown", async () => {
+  await openAi();
+  await tick();
+  expect(aiSwitch()?.getAttribute("aria-checked")).toBe("true");
+  expect(aiBody()).toContain("AI control");
+  expect(aiBody()).toContain("2 today, 7 this week");
+  expect(aiBody()).toContain(
+    "Shown: Mnemo runs, because the Claude usage percent was not read yet.",
+  );
+});
+
+test("turning the AI switch off shows AI is off, and the test prompt shows why instead of its button", async () => {
+  await openAi();
+  await tick();
+  expect(sendButton()).toBeDefined();
+  expect(aiBody()).not.toContain("AI is off now.");
+  aiSwitch()?.click();
+  await tick();
+  await tick();
+  expect(aiSwitch()?.getAttribute("aria-checked")).toBe("false");
+  expect(aiBody()).toContain("AI is off");
+  expect(aiBody()).toContain("The test prompt does not run while AI is off.");
+  expect(sendButton()).toBeUndefined();
+  // The model table below agrees: its off note shows too (#24).
+  expect(aiBody()).toContain("AI is off now.");
+});
+
+test("with background work paused by the owner, the pause banner shows and the test prompt is still offered", async () => {
+  control = {
+    ...CONTROL_ON,
+    pause: { reason: "owner", until: null },
+    backgroundGate: { kind: "deny", reason: "owner_pause" },
+  };
+  renderSettings(container, deps());
+  await openAi();
+  await tick();
+  expect(aiBody()).toContain(
+    "Background work is paused by you. Your own tasks still run.",
+  );
+  expect(sendButton()).toBeDefined();
+});
+
+test("at the usage limit pause the test prompt waits and the limit state shows once", async () => {
+  control = {
+    ...CONTROL_ON,
+    pause: { reason: "limit", until: null },
+    backgroundGate: { kind: "deny", reason: "limit" },
+  };
+  renderSettings(container, deps());
+  await openAi();
+  await tick();
+  expect(sendButton()).toBeUndefined();
+  expect(aiBody()).toContain(
+    "The test prompt waits while Mnemo holds AI work at the usage limit.",
+  );
+  expect(container.querySelectorAll(".state-box")).toHaveLength(1);
+});
+
+test("a test prompt refused because AI is off shows the core's reason and the next step, then reads the AI control again", async () => {
+  await openAi();
+  await tick();
+  const before = controlReads;
+  sendButton()?.click();
+  promptRejects[0]?.({
+    code: "ai_off",
+    message: "AI is off, so this did not run. Turn AI on in Settings > AI.",
+  });
+  await tick();
+  await tick();
+  expect(aiBody()).toContain("AI is off, so this did not run.");
+  expect(aiBody()).toContain("Turn AI on above, then try again.");
+  expect(controlReads).toBeGreaterThan(before);
 });

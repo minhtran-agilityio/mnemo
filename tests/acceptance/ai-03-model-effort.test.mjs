@@ -208,6 +208,13 @@ test('AC9: listAiModels, setAiModel and resetAiModels call their command with th
 
 // ---------------------------------------------------------------- branch diff (AC10, AC11)
 const git = (...a) => spawnSync('git', ['-C', ROOT, ...a], { encoding: 'utf8' });
+/** True on the #24 branch, also on a detached checkout of its tip (a pull-request CI run). */
+function onTicketBranch() {
+  if (git('rev-parse', '--abbrev-ref', 'HEAD').stdout.trim() === BRANCH) return true;
+  const tip = git('rev-parse', '--verify', '--quiet', `origin/${BRANCH}`);
+  return tip.status === 0 && tip.stdout.trim() === git('rev-parse', 'HEAD').stdout.trim();
+}
+
 function changedOnBranch() {
   const base = git('merge-base', 'HEAD', 'origin/main');
   if (base.status !== 0) return null;
@@ -219,7 +226,12 @@ function changedOnBranch() {
 // ---------------------------------------------------------------- AC10
 // "No change to ui/src/ds/**, no Settings table UI and no screen CSS in this run; the PR body says the Settings UI
 // waits for #154 and #155."
-test('AC10: no change to ui/src/ds, no Settings UI and no screen CSS, and the PR body says the Settings UI waits for #154 and #155', PR, () => {
+test('AC10: no change to ui/src/ds, no Settings UI and no screen CSS, and the PR body says the Settings UI waits for #154 and #155', PR, (t) => {
+  // The diff rule is about the #24 branch; a later branch (for example #23) changes Settings.
+  if (!onTicketBranch()) {
+    t.skip(`AC10 checks the ${BRANCH} diff only`);
+    return;
+  }
   const d = changedOnBranch();
   assert.ok(d, 'no origin/main to compare with (git fetch origin)');
   const ui = d.files.filter((f) => f.startsWith('ui/'));
@@ -251,6 +263,12 @@ test('AC11: no new migration, small edits to runner.rs and claude.rs, and the re
   }
   const added = git('diff', '--name-only', '--diff-filter=A', d.base, 'HEAD', '--', 'src-tauri/migrations');
   assert.equal(added.stdout.trim(), '', `the branch adds a migration: ${added.stdout}`);
+  // The size limit is about the #24 branch's own diff. On any other branch the diff against
+  // origin/main is that branch's work (for example #23's usage reading in claude.rs).
+  if (!onTicketBranch()) {
+    t.skip(`the size check runs on ${BRANCH} only`);
+    return;
+  }
   const stat = git('diff', '--numstat', d.base, 'HEAD', '--', 'src-tauri/src/ai/runner.rs', 'src-tauri/src/ai/claude.rs');
   const changed = stat.stdout.split('\n').filter(Boolean).reduce((s, l) => s + l.split('\t').slice(0, 2).reduce((a, n) => a + (Number(n) || 0), 0), 0);
   assert.ok(changed <= 80, `runner.rs and claude.rs change by ${changed} lines (more than 80):\n${stat.stdout}`);

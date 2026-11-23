@@ -1,9 +1,11 @@
 // The Settings screen: a title, a list of sections on the left (each row shows its current value)
 // and the open section on the right. Appearance, AI and Data have content. The AI section shows
-// the Claude Code check (state, how to fix it, Check again). The Data section shows the data
-// folder, the backup commands, Export, Open data folder and Reset. All text goes in as text, never
-// as markup. Every part comes from ui/src/ds (section list, card, choice list, text, copy line,
-// confirm dialog); settings.css lays them out.
+// the Claude Code check (state, how to fix it, Check again), the AI control (#23: master switch,
+// usage, warn and pause lines, Pause/Resume; see ai-control.ts) and the model and effort of each
+// feature (see ai-models.ts). The Data section shows the data folder, the backup commands, Export,
+// Open data folder and Reset. All text goes in as text, never as markup. Every part comes from
+// ui/src/ds (section list, card, choice list, text, copy line, confirm dialog); settings.css lays
+// them out.
 
 import {
   buildAiOffState,
@@ -35,6 +37,11 @@ import {
   RESET_WORD,
   type TestPromptResult,
 } from "../../shared/api";
+import {
+  AI_CONTROL_COMMANDS,
+  type AiControlDeps,
+  startAiControl,
+} from "./ai-control";
 import { type AiModelsDeps, createAiModelsCard } from "./ai-models";
 
 export interface SettingsDeps extends AiModelsDeps {
@@ -58,6 +65,8 @@ export interface SettingsDeps extends AiModelsDeps {
   checkAiHealth(): Promise<AiHealth>;
   /** Runs the developer test prompt. Rejects with an AppError (code and plain message). */
   runTestPrompt(): Promise<TestPromptResult>;
+  /** The AI control commands. The real ones when left out. */
+  aiControl?: AiControlDeps;
   /** Asks for a folder in the native dialog. Null when the owner cancels. */
   pickFolder(): Promise<string | null>;
   /** Exports all data into a new folder inside `folder`. Rejects with an AppError. */
@@ -200,6 +209,8 @@ const NEXT_STEPS: Readonly<Record<string, string>> = {
     "Choose Check again to see if Claude Code is signed in, then try again.",
   unavailable:
     "Choose Check again to see if Claude Code is installed, then try again.",
+  ai_off: "Turn AI on above, then try again.",
+  ai_limit: "Choose Resume above, or wait until the limit resets.",
 };
 const DEFAULT_NEXT_STEP = "Try again in a moment.";
 
@@ -310,16 +321,30 @@ export function renderSettings(
     if (open === "appearance") body.replaceChildren(appearance());
     else if (open === "ai") {
       models.setAiOff(aiIsOff());
-      body.replaceChildren(aiSection(), models.element);
+      body.replaceChildren(
+        aiSection(),
+        card("AI control", control.render(doc)),
+        models.element,
+      );
     } else body.replaceChildren(dataSection());
   }
 
-  // AI is off when the check is known (or failed) and Claude Code is not ready. The fake runner
-  // counts as on.
+  // AI is off when the owner turned the AI control's switch off (#23), or when the check is known
+  // (or failed) and Claude Code is not ready. The fake runner counts as on for the check.
   function aiIsOff(): boolean {
+    if (control.view()?.enabled === false) return true;
     if (aiMode === "fake" || ai.kind === "checking") return false;
     return !(ai.kind === "known" && ai.health.state === "ready");
   }
+
+  // The AI control: read once, then again on every change in the core while Settings is open.
+  const control = startAiControl(
+    deps.aiControl ?? AI_CONTROL_COMMANDS,
+    () => {
+      if (open === "ai" && body.isConnected) renderBody();
+    },
+    () => body.isConnected,
+  );
 
   function card(label: string, children: Node[]): HTMLElement {
     const section = createCard({
@@ -615,6 +640,31 @@ export function renderSettings(
   // or the fake) and the limit was not reached. Otherwise the AI-off or limit state shows
   // instead, and the rest of the app keeps working.
   function testBlock(): Node[] {
+    // The AI control decides first: with AI off, or held at the usage limit, the prompt is not
+    // offered. Why is shown in the AI control card.
+    const controlView = control.view();
+    if (
+      controlView &&
+      !controlView.enabled &&
+      testPromptRun.view.kind !== "running"
+    )
+      return [
+        buildText(doc, {
+          tone: "muted",
+          content: "The test prompt does not run while AI is off.",
+        }),
+      ];
+    if (
+      controlView?.pause?.reason === "limit" &&
+      testPromptRun.view.kind !== "running"
+    )
+      return [
+        buildText(doc, {
+          tone: "muted",
+          content:
+            "The test prompt waits while Mnemo holds AI work at the usage limit.",
+        }),
+      ];
     if (testPromptRun.view.kind === "limit")
       return [buildAiOffState({ reason: "limit" })];
     const ready = ai.kind === "known" && ai.health.state === "ready";
@@ -693,6 +743,8 @@ export function renderSettings(
                 DEFAULT_NEXT_STEP,
             };
     }
+    // A run can change the usage and the pause: read the AI control again.
+    void control.refresh();
     // The view on screen now may be a newer one than the view that started the run.
     testPromptRun.redraw?.();
   }

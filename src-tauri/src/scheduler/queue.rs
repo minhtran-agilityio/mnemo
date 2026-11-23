@@ -3,10 +3,17 @@
 // log (waiting, running, then done, failed or cancelled) and every state change is sent to
 // the notifier (the app sends it to the UI as the `run-state` event).
 //
-// One mutex guards the two waiting lines and the map of running runs. The run log and the
-// notifier are called outside that mutex, so the queue never holds its lock across SQLite or
-// the UI. Each started run gets its own thread; a guard on that thread ends the row and frees
-// the slot even when the runner panics.
+// Before each start the queue asks the AI control (`ai_control::AiControl::may_run`, #23):
+// with AI off every waiting run ends as cancelled; at the usage limit waiting owner runs end
+// with the limit error and background runs wait; at the pause line or under the owner's pause
+// background runs wait while owner runs go on. Running runs are never stopped by the gate. A
+// run that ends at the usage limit tells the control, which holds AI work. Every change of the
+// control starts a dispatch.
+//
+// One mutex guards the two waiting lines and the map of running runs. The run log, the
+// notifier and the control are called outside that mutex, so the queue never holds its lock
+// across SQLite, the UI or a control that waits on a write. Each started run gets its own thread; a guard on that thread
+// ends the row and frees the slot even when the runner panics.
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -16,6 +23,7 @@ use std::time::Instant;
 
 use serde::Serialize;
 
+use super::ai_control::{AiControl, Decision, DenyReason};
 use crate::ai::cancel::CancelToken;
 use crate::ai::runner::{AiError, AiOutput, AiRunner, AiTask};
 use crate::storage::items::RunState;
@@ -109,6 +117,7 @@ struct Inner {
     runner: Arc<dyn AiRunner>,
     log: Arc<dyn RunLog>,
     notify: Notifier,
+    control: Arc<AiControl>,
     state: Mutex<State>,
 }
 
@@ -117,13 +126,34 @@ struct Inner {
 pub struct RunQueue(Arc<Inner>);
 
 impl RunQueue {
-    pub fn new(runner: Arc<dyn AiRunner>, log: Arc<dyn RunLog>, notify: Notifier) -> Self {
-        RunQueue(Arc::new(Inner {
+    /// A queue that asks `control` before each start and dispatches again after every change of
+    /// the control (it holds the queue only weakly, so the two do not keep each other alive).
+    pub fn new(
+        runner: Arc<dyn AiRunner>,
+        log: Arc<dyn RunLog>,
+        notify: Notifier,
+        control: Arc<AiControl>,
+    ) -> Self {
+        let inner = Arc::new(Inner {
             runner,
             log,
             notify,
+            control: control.clone(),
             state: Mutex::new(State::default()),
-        }))
+        });
+        let weak = Arc::downgrade(&inner);
+        control.subscribe(Arc::new(move || {
+            if let Some(inner) = weak.upgrade() {
+                dispatch(&inner);
+            }
+        }));
+        RunQueue(inner)
+    }
+
+    /// The AI control this queue asks before each start. Features ask the same one before they
+    /// queue.
+    pub fn control(&self) -> Arc<AiControl> {
+        self.0.control.clone()
     }
 
     /// Adds a task: writes its waiting row, sends the waiting event, and starts it when a slot
@@ -205,25 +235,81 @@ impl Inner {
     }
 }
 
-/// Starts waiting jobs while a slot is free: owner jobs first, each line in order.
+/// A waiting job the gate ended before it started, and how it ended.
+struct Refused {
+    job: Job,
+    end: RunEnd,
+    error: AiError,
+}
+
+/// Starts waiting jobs while a slot is free and the AI control allows them: owner jobs first,
+/// each line in order. With AI off every waiting job ends as cancelled; at the usage limit
+/// every waiting owner job ends with the limit error (an owner action never hangs) and
+/// background jobs wait. A background job the gate denies stays waiting, and the loop stops.
 fn dispatch(inner: &Arc<Inner>) {
-    let started: Vec<(Job, CancelToken)> = {
+    let now = inner.control.now();
+    // Asked before the queue's lock is taken: the control's lock may wait on a storage write,
+    // and the queue must not stall behind it. A change of the control after this answer starts
+    // another dispatch, which corrects a stale one.
+    let owner_gate = inner.control.may_run(Priority::Owner, now);
+    let background_gate = inner.control.may_run(Priority::Background, now);
+    let (started, refused) = {
         let mut state = inner.lock();
+        let mut refused: Vec<Refused> = Vec::new();
+        match owner_gate {
+            Decision::Deny {
+                reason: DenyReason::Off,
+            } => {
+                let mut waiting: Vec<Job> = state.owner.drain(..).collect();
+                waiting.extend(state.background.drain(..));
+                refused.extend(waiting.into_iter().map(|job| Refused {
+                    job,
+                    end: RunEnd::Cancelled,
+                    error: AiError::Cancelled,
+                }));
+            }
+            Decision::Deny {
+                reason: DenyReason::Limit,
+            } => {
+                refused.extend(state.owner.drain(..).map(|job| Refused {
+                    job,
+                    end: RunEnd::Failed(AiError::UsageLimit.to_string()),
+                    error: AiError::UsageLimit,
+                }));
+            }
+            _ => {}
+        }
         let mut started = Vec::new();
         while state.running.len() < MAX_CONCURRENT_RUNS {
-            let Some(job) = state
-                .owner
-                .pop_front()
-                .or_else(|| state.background.pop_front())
-            else {
+            // Owner jobs left here are allowed: only off and the limit deny them.
+            let next = match state.owner.pop_front() {
+                Some(job) => Some(job),
+                None if background_gate == Decision::Allow => state.background.pop_front(),
+                None => None,
+            };
+            let Some(job) = next else {
                 break;
             };
             let token = CancelToken::default();
             state.running.insert(job.id.clone(), token.clone());
             started.push((job, token));
         }
-        started
+        (started, refused)
     };
+    for Refused { job, end, error } in refused {
+        log::info!(
+            "AI run {} ({}) did not start: {}",
+            job.id,
+            job.task.name,
+            if error == AiError::Cancelled {
+                "AI is off"
+            } else {
+                "at the usage limit"
+            }
+        );
+        inner.record_end(&job.id, &job.task.name, &end, None);
+        let _ = job.reply.send(Err(error));
+    }
     for (job, token) in started {
         start(inner, job, token);
     }
@@ -241,6 +327,7 @@ fn start(inner: &Arc<Inner>, job: Job, token: CancelToken) {
     inner.emit(&job.id, &job.task.name, RunState::Running);
     let Job { id, task, reply } = job;
     let mut slot = Slot {
+        reading_seq: inner.control.reading_seq(),
         inner: inner.clone(),
         id,
         task_type: task.name.clone(),
@@ -277,6 +364,9 @@ struct Slot {
     started: Instant,
     /// True once the run left the running map.
     freed: bool,
+    /// The AI control's reading count when the run started: a limit error uses only readings
+    /// that came after it.
+    reading_seq: u64,
 }
 
 impl Slot {
@@ -297,6 +387,11 @@ impl Slot {
         let Some(reply) = self.reply.take() else {
             return;
         };
+        // The control holds AI work before the slot frees, so the next dispatch sees the pause.
+        if result == Err(AiError::UsageLimit) {
+            let control = &self.inner.control;
+            control.on_limit_error(self.reading_seq, control.now());
+        }
         let end = match &result {
             Ok(_) => RunEnd::Done,
             Err(AiError::Cancelled) => RunEnd::Cancelled,
@@ -509,7 +604,15 @@ mod tests {
         let notify: Notifier = Arc::new(move |e: &RunEvent| {
             let _ = tx.lock().unwrap().send(e.clone());
         });
-        (RunQueue::new(runner, log, notify), rx)
+        (
+            RunQueue::new(
+                runner,
+                log,
+                notify,
+                crate::scheduler::ai_control::testing::open_control(),
+            ),
+            rx,
+        )
     }
 
     /// Waits for the next event in `state` and gives its task name. Earlier events in other
@@ -814,7 +917,12 @@ mod tests {
         }
         let runner = Arc::new(ScriptRunner::default());
         let notify: Notifier = Arc::new(|_: &RunEvent| {});
-        let q = RunQueue::new(runner.clone(), Arc::new(BrokenLog), notify);
+        let q = RunQueue::new(
+            runner.clone(),
+            Arc::new(BrokenLog),
+            notify,
+            crate::scheduler::ai_control::testing::open_control(),
+        );
         assert!(q.submit(Priority::Owner, task("x")).is_err());
         assert!(runner.called().is_empty());
     }

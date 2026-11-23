@@ -10,13 +10,21 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
 
-use commands::{AiHealthState, AiRunnerState, AppRunLog, AppStorage, StartupError};
+use commands::{
+    AiHealthState, AiRunnerState, AppControlStore, AppRunLog, AppStorage, StartupError,
+};
+use scheduler::ai_control::AiControl;
 use scheduler::queue::{Notifier, RunEvent, RunQueue};
 use storage::StorageError;
 
 /// The event the UI gets on every AI run state change. Its payload is a `RunEvent`: the run
 /// id, the task name and the state, nothing else.
 const RUN_STATE_EVENT: &str = "run-state";
+
+/// The event the UI gets after every change of the AI control (switch, lines, pause, a usage
+/// reading, a limit pause and its lift). It has no payload: an open Settings screen reads the
+/// view again.
+const AI_CONTROL_EVENT: &str = "ai-control";
 
 /// The stable code for a storage error. Only this code reaches the UI; the full
 /// reason, which can name file paths, goes to the terminal.
@@ -111,6 +119,18 @@ pub fn run() {
             let fake =
                 ai::runner::fake_requested(std::env::var_os(ai::runner::FAKE_AI_ENV).as_deref());
             log::info!("AI runner: {}", if fake { "fake" } else { "real" });
+            // The AI control: the master switch, the usage lines and the pause. Every AI feature
+            // and the queue ask it before a run. It reads its state from the one storage.
+            let control = AiControl::new(
+                Arc::new(AppControlStore(app.handle().clone())),
+                scheduler::ai_control::system_clock(),
+            );
+            let handle = app.handle().clone();
+            control.subscribe(Arc::new(move || {
+                if let Err(e) = handle.emit(AI_CONTROL_EVENT, ()) {
+                    log::error!("could not send the ai-control event: {e}");
+                }
+            }));
             // Mnemo's own Claude config files are made once and never rewritten. If they cannot be
             // made, no AI run starts; saving and reading still work. The log holds the error
             // kind only: no path, no file text.
@@ -121,17 +141,29 @@ pub fn run() {
                     })
                     .ok()
             });
+            let runs_dir = paths
+                .as_ref()
+                .ok()
+                .map(|p| ai::runner::runs_dir(&p.data_dir));
+            let inner: Arc<dyn ai::runner::AiRunner> = if fake {
+                ai::runner::select_runner(true, runs_dir, claude_config)
+            } else {
+                // The real runner hands each usage reading of a run to the control.
+                let sink_control = control.clone();
+                let sink: ai::usage::UsageSink = Arc::new(move |reading| {
+                    let now = sink_control.now();
+                    sink_control.on_usage_reading(reading, now);
+                });
+                Arc::new(ai::claude::UsageClaudeRunner::new(
+                    runs_dir,
+                    claude_config,
+                    sink,
+                ))
+            };
             // Every run reads its feature's model and effort from the settings table (#24),
             // so the queue gets the runner wrapped in `ConfiguredRunner`.
             let runner = ai::models::app_runner(
-                ai::runner::select_runner(
-                    fake,
-                    paths
-                        .as_ref()
-                        .ok()
-                        .map(|p| ai::runner::runs_dir(&p.data_dir)),
-                    claude_config,
-                ),
+                inner,
                 Arc::new(commands::StoredChoices(app.handle().clone())),
             );
             app.manage(AiRunnerState { fake });
@@ -151,6 +183,7 @@ pub fn run() {
                 runner,
                 Arc::new(AppRunLog(app.handle().clone())),
                 notify,
+                control,
             ));
 
             // The Claude Code check runs off the main thread, so the window never waits for
@@ -231,6 +264,11 @@ pub fn run() {
             commands::set_ai_model,
             commands::reset_ai_models,
             commands::cancel_run,
+            commands::get_ai_control,
+            commands::set_ai_enabled,
+            commands::set_ai_thresholds,
+            commands::pause_background,
+            commands::resume_ai,
             commands::add_bookmark,
             commands::get_bookmark,
             commands::list_bookmarks,

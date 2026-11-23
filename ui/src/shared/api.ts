@@ -1,6 +1,7 @@
 // The one typed client for the Tauri commands. Screens call these functions and never
 // call invoke themselves.
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 /** The error shape every command rejects with: a stable code and a plain message. */
 export interface AppError {
@@ -84,6 +85,96 @@ export interface TestPromptResult {
  */
 export function runTestPrompt(): Promise<TestPromptResult> {
   return invoke<TestPromptResult>("run_test_prompt");
+}
+
+// ---- AI control (#23) ----
+// The master switch, the warn and pause lines, the pause and the usage. Every command returns
+// the new view, read from the core.
+
+/** Why the AI control refuses a task. */
+export type AiDenyReason = "off" | "limit" | "threshold" | "owner_pause";
+
+/** What the gate answers a background task now. */
+export type AiGate = { kind: "allow" } | { kind: "deny"; reason: AiDenyReason };
+
+/** A pause in force. `until` is a verified reset time (Unix seconds), or null: Resume only. */
+export interface AiPause {
+  reason: "limit" | "owner";
+  until: number | null;
+}
+
+/** One usage window. `percent` is null when the window has reset; it is Unverified. */
+export interface AiUsageWindow {
+  percent: number | null;
+  resetsAt: number | null;
+  status: string | null;
+}
+
+/** The last usage reading, or, when there is none, Mnemo's own run count. */
+export type AiUsage =
+  | {
+      kind: "reading";
+      readAt: number;
+      fiveHour: AiUsageWindow | null;
+      sevenDay: AiUsageWindow | null;
+    }
+  | { kind: "runs"; today: number; week: number };
+
+/** What Settings > AI shows. */
+export interface AiControlView {
+  enabled: boolean;
+  warnAt: number;
+  pauseAt: number;
+  pause: AiPause | null;
+  backgroundGate: AiGate;
+  warn: boolean;
+  usage: AiUsage;
+}
+
+/** Local midnight today and local Monday 00:00, as Unix seconds, for the run count. */
+export interface DayBounds {
+  todayStart: number;
+  weekStart: number;
+}
+
+/** Reads the AI control. */
+export function getAiControl(bounds: DayBounds): Promise<AiControlView> {
+  return invoke<AiControlView>("get_ai_control", { ...bounds });
+}
+
+/** Turns AI on or off. Off: nothing new starts, waiting runs are cancelled. */
+export function setAiEnabled(
+  on: boolean,
+  bounds: DayBounds,
+): Promise<AiControlView> {
+  return invoke<AiControlView>("set_ai_enabled", { on, ...bounds });
+}
+
+/** Sets the warn and pause lines. Rejects with code "invalid_input" and a plain message. */
+export function setAiThresholds(
+  warn: number,
+  pause: number,
+  bounds: DayBounds,
+): Promise<AiControlView> {
+  return invoke<AiControlView>("set_ai_thresholds", { warn, pause, ...bounds });
+}
+
+/** Pauses background AI work. Your own tasks still run. */
+export function pauseBackground(bounds: DayBounds): Promise<AiControlView> {
+  return invoke<AiControlView>("pause_background", { ...bounds });
+}
+
+/** Lifts any pause at once, the usage limit pause included. */
+export function resumeAi(bounds: DayBounds): Promise<AiControlView> {
+  return invoke<AiControlView>("resume_ai", { ...bounds });
+}
+
+/** The event the core sends after every change of the AI control. */
+export const AI_CONTROL_EVENT = "ai-control";
+
+/** Calls `handler` after every change of the AI control. Resolves to the unsubscribe call. */
+export function onAiControl(handler: () => void): Promise<() => void> {
+  return listen(AI_CONTROL_EVENT, () => handler());
 }
 
 // The model and effort of each AI feature (the Rust core owns the list, the defaults and the
