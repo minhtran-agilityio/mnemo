@@ -19,6 +19,7 @@ use super::claude::{
     self, build_command, failure, limit_from_raw, limits_for, outcome_line, process_error, Event,
     ExitInfo, OutputMode,
 };
+use super::config::ClaudeConfig;
 use super::process;
 use super::run_dir::RunDir;
 use super::runner::{AiError, AiOutput, AiTask};
@@ -113,12 +114,19 @@ pub fn run_stream(
     program: &Path,
     task: &AiTask,
     runs_dir: &Path,
+    config: &ClaudeConfig,
     cancel: &CancelToken,
     on_text: &mut dyn FnMut(&str),
 ) -> Result<AiOutput, AiError> {
     let started = Instant::now();
     let run_dir = RunDir::create(runs_dir).map_err(|_| AiError::Unavailable)?;
-    let command = build_command(program, task, run_dir.path(), OutputMode::StreamJson);
+    let command = build_command(
+        program,
+        task,
+        run_dir.path(),
+        config,
+        OutputMode::StreamJson,
+    );
     let mut reader = StreamReader::new(on_text);
     let ran = process::run_bounded_with(
         command,
@@ -286,6 +294,7 @@ mod tests {
             &program,
             &task(),
             &runs(),
+            &crate::ai::config::test_config(),
             &CancelToken::default(),
             &mut |t| pieces.push(t.to_string()),
         );
@@ -303,6 +312,7 @@ mod tests {
             &program,
             &task(),
             &runs(),
+            &crate::ai::config::test_config(),
             &CancelToken::default(),
             &mut |_| {},
         );
@@ -315,7 +325,14 @@ mod tests {
         let mut t = task();
         t.timeout = Duration::from_secs(1);
         let started = Instant::now();
-        let got = run_stream(&program, &t, &runs(), &CancelToken::default(), &mut |_| {});
+        let got = run_stream(
+            &program,
+            &t,
+            &runs(),
+            &crate::ai::config::test_config(),
+            &CancelToken::default(),
+            &mut |_| {},
+        );
         assert_eq!(got, Err(AiError::Timeout));
         assert!(started.elapsed() < Duration::from_secs(5));
     }

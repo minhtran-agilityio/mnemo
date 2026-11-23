@@ -1599,7 +1599,7 @@ mod tests {
 
     #[test]
     fn test_prompt_command_with_the_fake_gives_the_fake_answer() {
-        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None));
+        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None, None));
         let got = run_test_prompt_with(&queue).unwrap();
         assert_eq!(got.answer, "Fake answer: AI is in test mode.");
         let json = serde_json::to_value(&got).unwrap();
@@ -1609,7 +1609,7 @@ mod tests {
 
     #[test]
     fn test_prompt_through_the_queue_leaves_one_done_run_row() {
-        let (queue, log, dir) = test_queue(crate::ai::runner::select_runner(true, None));
+        let (queue, log, dir) = test_queue(crate::ai::runner::select_runner(true, None, None));
         run_test_prompt_with(&queue).unwrap();
         let storage = log.0.get().unwrap();
         let rows = storage
@@ -1667,7 +1667,7 @@ mod tests {
 
     #[test]
     fn cancel_run_checks_the_id_and_says_when_the_run_is_not_active() {
-        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None));
+        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None, None));
         assert_eq!(
             cancel_run_with(&queue, " ").unwrap_err().code,
             "invalid_input"
@@ -1685,7 +1685,7 @@ mod tests {
 
     #[test]
     fn cancel_run_blocking_runs_the_cancel_on_a_blocking_thread() {
-        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None));
+        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None, None));
         let err = tauri::async_runtime::block_on(cancel_run_blocking(queue, "no-such-run".into()))
             .unwrap_err();
         assert_eq!(err.code, "run_not_active");

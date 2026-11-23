@@ -14,6 +14,7 @@ use serde_json::Value;
 
 use super::cancel::CancelToken;
 use super::claude::{build_command, run_claude, OutputMode};
+use super::config::ensure_config;
 use super::health::{ClaudeCli, SystemClaude};
 use super::process::{self, Limits};
 use super::run_dir::RunDir;
@@ -34,6 +35,12 @@ fn proof_runs_dir() -> PathBuf {
         .join(".cache")
         .join("mnemo-proof")
         .join("ai-runs")
+}
+
+/// Mnemo's own config, in a folder next to the proof runs (never the owner's real config).
+fn proof_config() -> super::config::ClaudeConfig {
+    ensure_config(&proof_runs_dir().with_file_name("config"))
+        .expect("the proof config was not made")
 }
 
 fn real_claude() -> PathBuf {
@@ -100,6 +107,7 @@ fn real_run_gives_an_answer() {
         &real_claude(),
         &test_prompt::task(),
         &proof_runs_dir(),
+        &proof_config(),
         &CancelToken::default(),
     )
     .expect("the real test prompt gave no answer");
@@ -119,7 +127,13 @@ fn real_run_refuses_a_tool_not_in_the_allowed_list() {
     // A folder of its own, so a wrongly allowed command could touch nothing else.
     let run_dir = RunDir::create(&proof_runs_dir()).unwrap();
     let dir = run_dir.path().to_path_buf();
-    let command = build_command(&real_claude(), &task, &dir, OutputMode::Json);
+    let command = build_command(
+        &real_claude(),
+        &task,
+        &dir,
+        &proof_config(),
+        OutputMode::Json,
+    );
     let limits = Limits {
         timeout: task.timeout,
         max_output: 4 * 1024 * 1024,
