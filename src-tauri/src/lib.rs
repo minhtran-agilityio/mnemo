@@ -64,6 +64,8 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             system::window::show_main(app);
         }))
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         // Keep size and position (not visibility, so a hidden window never starts hidden).
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -102,6 +104,16 @@ pub fn run() {
             let fake =
                 ai::runner::fake_requested(std::env::var_os(ai::runner::FAKE_AI_ENV).as_deref());
             log::info!("AI runner: {}", if fake { "fake" } else { "real" });
+            // Mnemo's own Claude config files are made once and never rewritten. If they cannot be
+            // made, no AI run starts; saving and reading still work. The log holds the error
+            // kind only: no path, no file text.
+            let claude_config = paths.as_ref().ok().and_then(|p| {
+                ai::config::ensure_config(&p.config_dir)
+                    .map_err(|e| {
+                        log::error!("could not create Mnemo's Claude config: {:?}", e.kind())
+                    })
+                    .ok()
+            });
             app.manage(AiRunnerState {
                 // Every run reads its feature's model and effort from the settings table.
                 runner: std::sync::Arc::new(ai::models::ConfiguredRunner::new(
@@ -111,6 +123,7 @@ pub fn run() {
                             .as_ref()
                             .ok()
                             .map(|p| ai::runner::runs_dir(&p.data_dir)),
+                        claude_config,
                     ),
                     std::sync::Arc::new(commands::StoredChoices(app.handle().clone())),
                 )),
@@ -183,6 +196,10 @@ pub fn run() {
             commands::ping,
             commands::get_setting,
             commands::set_setting,
+            commands::export_data,
+            commands::reset_data,
+            commands::data_folder_info,
+            commands::open_data_folder,
             commands::get_ai_health,
             commands::check_ai_health,
             commands::get_ai_mode,

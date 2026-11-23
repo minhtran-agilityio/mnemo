@@ -5,9 +5,12 @@ import type {
   AiHealth,
   AiMode,
   AiModelTable,
+  DataFolderInfo,
+  ExportSummary,
   TestPromptResult,
 } from "../../shared/api";
 import {
+  RESET_RESTART_MS,
   renderSettings,
   resetTestPromptForTests,
   type SettingsDeps,
@@ -28,6 +31,38 @@ let checks: number;
 let aiMode: AiMode | Error;
 let prompts: Array<(result: TestPromptResult | unknown) => void>;
 let promptRejects: Array<(error: unknown) => void>;
+let pickResult: string | null;
+let picks: number;
+let exportCalls: string[];
+let exportResult: Array<(value: ExportSummary | Error) => void>;
+let resetCalls: string[];
+let resetFails: Error | null;
+let opens: number;
+let afterResets: number;
+let afterResetFlags: boolean[];
+
+const INFO: DataFolderInfo = {
+  path: "/home/ana/.local/share/io.mnemo.desktop",
+  macosCommand: 'cp -Rp "/home/ana/x" ~/mnemo-backup-$(date +%Y-%m-%d)',
+  ubuntuCommand: 'cp -a "/home/ana/x" ~/mnemo-backup-$(date +%Y-%m-%d)',
+};
+const SUMMARY: ExportSummary = {
+  folder: "/home/ana/Out/mnemo-export-20261121-120000",
+  counts: {
+    notes: 3,
+    bookmarks: 2,
+    ideas: 0,
+    projects: 0,
+    tasks: 0,
+    events: 0,
+    runs: 0,
+    memories: 0,
+    labels: 1,
+    links: 0,
+    files: 0,
+  },
+  filesMissing: 0,
+};
 
 const READY: AiHealth = { state: "ready", message: "Claude Code is ready." };
 const SIGNED_OUT: AiHealth = {
@@ -79,6 +114,27 @@ function deps(): SettingsDeps {
     listAiModels: async () => MODEL_TABLE,
     setAiModel: async () => MODEL_TABLE,
     resetAiModels: async () => MODEL_TABLE,
+    pickFolder: async () => {
+      picks += 1;
+      return pickResult;
+    },
+    exportData: (folder) =>
+      new Promise<ExportSummary>((done, fail) => {
+        exportCalls.push(folder);
+        exportResult.push((v) => (v instanceof Error ? fail(v) : done(v)));
+      }),
+    resetData: async (word) => {
+      resetCalls.push(word);
+      if (resetFails) throw resetFails;
+    },
+    dataFolderInfo: async () => INFO,
+    openDataFolder: async () => {
+      opens += 1;
+    },
+    afterReset: (complete) => {
+      afterResets += 1;
+      afterResetFlags.push(complete);
+    },
   };
 }
 
@@ -122,6 +178,15 @@ beforeEach(() => {
   aiMode = "real";
   prompts = [];
   promptRejects = [];
+  pickResult = "/home/ana/Out";
+  picks = 0;
+  exportCalls = [];
+  exportResult = [];
+  resetCalls = [];
+  resetFails = null;
+  opens = 0;
+  afterResets = 0;
+  afterResetFlags = [];
   renderSettings(container, deps());
 });
 
@@ -144,13 +209,172 @@ test("Appearance offers System, Light and Dark, and no other theme", () => {
   expect(checked?.value).toBe("system");
 });
 
-test("the Data section opens and has no controls", () => {
+function dataButton(label: string): HTMLButtonElement {
+  const b = [...container.querySelectorAll(".settings-body button")].find(
+    (x) => x.textContent?.trim() === label,
+  );
+  if (!b) throw new Error(`no ${label} button`);
+  return b as HTMLButtonElement;
+}
+
+function dialogButton(label: string): HTMLButtonElement {
+  const b = [...document.querySelectorAll("dialog button")].find(
+    (x) => x.textContent?.trim() === label,
+  );
+  if (!b) throw new Error(`no dialog ${label} button`);
+  return b as HTMLButtonElement;
+}
+
+function typeWord(word: string): void {
+  const input = document
+    .querySelector("dialog")
+    ?.querySelector("input") as HTMLInputElement;
+  input.value = word;
+  input.dispatchEvent(new Event("input"));
+}
+
+function openReset(): void {
+  dataButton("Reset all data").click();
+}
+
+test("the Data section shows the path and both commands as text, and no Back up now", async () => {
   openSection("Data");
+  await tick();
+  const text = aiBody();
+  expect(text).toContain(INFO.path);
+  expect(text).toContain("Close Mnemo first");
+  expect(text).toContain(INFO.macosCommand);
+  expect(text).toContain(INFO.ubuntuCommand);
+  expect(text).not.toMatch(/back up now/i);
   expect(container.querySelector(".settings-body h2")?.textContent).toBe(
     "Data",
   );
-  expect(container.querySelectorAll(".settings-body input").length).toBe(0);
-  expect(container.querySelectorAll(".settings-body button").length).toBe(0);
+});
+
+test("Reset stays disabled until RESET is typed exactly, and Cancel never resets", async () => {
+  openSection("Data");
+  await tick();
+  openReset();
+  const confirm = dialogButton("Reset all data");
+  for (const word of ["", "reset", "RESET "]) {
+    typeWord(word);
+    expect(confirm.disabled).toBe(true);
+  }
+  typeWord("RESET");
+  expect(confirm.disabled).toBe(false);
+  dialogButton("Cancel").click();
+  await tick();
+  expect(resetCalls).toEqual([]);
+  expect(afterResets).toBe(0);
+});
+
+test("a confirmed reset runs once with RESET, then starts the app over", async () => {
+  openSection("Data");
+  await tick();
+  openReset();
+  typeWord("RESET");
+  dialogButton("Reset all data").click();
+  await tick();
+  await tick();
+  expect(resetCalls).toEqual(["RESET"]);
+  expect(aiBody()).toContain("All data was deleted");
+  expect(afterResets).toBe(0);
+  await new Promise((done) => setTimeout(done, RESET_RESTART_MS + 50));
+  expect(afterResets).toBe(1);
+  expect(afterResetFlags).toEqual([true]);
+});
+
+test("a failed reset shows a message and does not start the app over", async () => {
+  resetFails = new Error("disk is full");
+  openSection("Data");
+  await tick();
+  openReset();
+  typeWord("RESET");
+  dialogButton("Reset all data").click();
+  await tick();
+  await tick();
+  expect(afterResets).toBe(0);
+  expect(aiBody()).toContain("Mnemo could not reset your data");
+});
+
+test("a reset that failed part way reloads the app so no stale data stays on screen", async () => {
+  resetFails = Object.assign(new Error("x"), {
+    code: "reset_failed",
+    message: "Mnemo could not delete everything.",
+  });
+  openSection("Data");
+  await tick();
+  openReset();
+  typeWord("RESET");
+  dialogButton("Reset all data").click();
+  await tick();
+  await tick();
+  expect(aiBody()).toContain("Mnemo could not reset your data");
+  expect(afterResets).toBe(0);
+  await new Promise((done) => setTimeout(done, RESET_RESTART_MS + 50));
+  expect(afterResets).toBe(1);
+  expect(afterResetFlags).toEqual([false]);
+});
+
+test("the Reset dialog says what is deleted, that no backup is made, and points to Export", async () => {
+  openSection("Data");
+  await tick();
+  openReset();
+  const text = document.querySelector("dialog")?.textContent ?? "";
+  expect(text).toMatch(/deletes the Mnemo database/i);
+  expect(text).toMatch(/error log and the AI run output are kept/i);
+  expect(text).toMatch(/no backup/i);
+  expect(text).toMatch(/Export/);
+  expect(text).toMatch(/settings/i);
+  expect(resetCalls).toEqual([]);
+});
+
+test("Export picks a folder, shows pending, blocks a second click, then names the folder and counts", async () => {
+  openSection("Data");
+  await tick();
+  dataButton("Export").click();
+  await tick();
+  expect(exportCalls).toEqual(["/home/ana/Out"]);
+  expect(aiBody()).toContain("Exporting...");
+  const busy = container.querySelector(".settings-body [aria-busy=true]");
+  expect(busy).not.toBeNull();
+  (busy as HTMLButtonElement).click();
+  await tick();
+  expect(picks).toBe(1);
+  exportResult[0]?.(SUMMARY);
+  await tick();
+  expect(aiBody()).toContain("Exported.");
+  expect(aiBody()).toContain(SUMMARY.folder);
+  expect(aiBody()).toContain("3 notes, 2 links, 1 label");
+});
+
+test("Export shows an error line when it fails", async () => {
+  openSection("Data");
+  await tick();
+  dataButton("Export").click();
+  await tick();
+  exportResult[0]?.(new Error("no space"));
+  await tick();
+  expect(aiBody()).toContain("Mnemo could not export your data");
+});
+
+test("cancelling the folder dialog exports nothing and shows nothing", async () => {
+  pickResult = null;
+  openSection("Data");
+  await tick();
+  dataButton("Export").click();
+  await tick();
+  expect(exportCalls).toEqual([]);
+  expect(aiBody()).not.toContain("Exporting");
+  expect(dataButton("Export").getAttribute("aria-busy")).toBeNull();
+});
+
+test("Open data folder asks the core to open it", async () => {
+  openSection("Data");
+  await tick();
+  dataButton("Open data folder").click();
+  await tick();
+  expect(opens).toBe(1);
 });
 
 function openSection(name: string): void {

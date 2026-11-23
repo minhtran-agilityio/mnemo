@@ -5,13 +5,14 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   root: "ui",
   clearScreen: false,
-  test: {
-    // The full suite runs 80+ files in parallel; DOM-heavy screens can pass the 5 s default under that load.
-    testTimeout: 20000,
-  },
   server: {
     port: 1420,
     strictPort: true,
+  },
+  // The jsdom suites build whole screens; with every test file running at once
+  // a slow one passes in 2s alone but can pass 5s, so allow more headroom.
+  test: {
+    testTimeout: 30_000,
   },
   build: {
     outDir: "../dist",
