@@ -19,6 +19,7 @@ import {
   loadSavedTheme,
   readCachedTheme,
   saveAndCacheTheme,
+  THEME_CACHE_KEY,
   THEME_KEY,
   type Theme,
   ThemeReadTimeoutError,
@@ -32,21 +33,29 @@ import {
   checkAiHealth,
   countLabelDeleteMoves,
   createLabel,
+  dataFolderInfo,
   deleteLabel,
   errorMessage,
+  exportData,
   getAiHealth,
   getAiMode,
   getSetting,
+  listAiModels,
   listBookmarks,
   listIdeas,
   listLabelledNotes,
   listLabels,
   listNotes,
   moveLabel,
+  openDataFolder,
+  pickFolder,
   ping,
   renameLabel,
+  resetAiModels,
+  resetData,
   runTestPrompt,
   saveLabelledNote,
+  setAiModel,
   setSetting,
   turnIdeaIntoProject,
   updateIdea,
@@ -257,6 +266,26 @@ async function start(): Promise<void> {
         getAiMode,
         checkAiHealth,
         runTestPrompt,
+        listAiModels,
+        setAiModel,
+        resetAiModels,
+        pickFolder,
+        exportData,
+        resetData,
+        dataFolderInfo,
+        openDataFolder,
+        afterReset: (complete) => {
+          // A complete reset deleted the theme with the data, so its cached copy goes too.
+          // After a partial one the setting may have survived, so the cache stays.
+          if (complete) {
+            try {
+              localStorage.removeItem(THEME_CACHE_KEY);
+            } catch {
+              // Blocked storage has nothing cached to forget.
+            }
+          }
+          location.reload();
+        },
       });
     } else if (item.id === IDEAS_ID) {
       leaveScreen = renderIdeas(screen, {

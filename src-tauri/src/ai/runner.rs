@@ -10,12 +10,13 @@
 
 use std::ffi::OsStr;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use super::cancel::CancelToken;
 use super::claude;
+use super::config::ClaudeConfig;
 use super::fake::{FakeResult, FakeRunner};
 use super::health::{ClaudeCli, SystemClaude};
 
@@ -101,6 +102,14 @@ pub trait AiRunner: Send + Sync {
     /// Runs `task` and returns its structured output, or why there is none. When `cancel` is
     /// set, the run stops as soon as it can and gives `AiError::Cancelled`.
     fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError>;
+
+    /// The task as this runner would run it (with the owner's model and effort set). A way to
+    /// run a task that skips `run_task`, such as stream mode, must call this first on the app's
+    /// runner. Only the run queue holds that runner, so the first such caller (none exists yet)
+    /// must add a way to reach it. The default returns the task as built.
+    fn configure(&self, task: &AiTask) -> AiTask {
+        task.clone()
+    }
 }
 
 /// The real runner: one `claude -p` process per task.
@@ -108,11 +117,26 @@ pub struct ClaudeRunner {
     /// The folder inside Mnemo's data folder that holds one new owner-only folder per run (see
     /// `run_dir`). `None` when the data folder could not be found: then no run starts.
     runs_dir: Option<PathBuf>,
+    /// Mnemo's own Claude config files (see `config`). `None` when they could not be made: then
+    /// no run starts, so a run never falls back to the owner's personal Claude setup.
+    config: Option<ClaudeConfig>,
 }
 
 impl ClaudeRunner {
-    pub fn new(runs_dir: Option<PathBuf>) -> Self {
-        ClaudeRunner { runs_dir }
+    pub fn new(runs_dir: Option<PathBuf>, config: Option<ClaudeConfig>) -> Self {
+        ClaudeRunner { runs_dir, config }
+    }
+}
+
+/// The folders and config a run needs. Fails closed: no runs folder, no config, or a config
+/// file that is gone gives `Unavailable`, and no process starts.
+pub(crate) fn prepare<'a>(
+    runs_dir: Option<&'a PathBuf>,
+    config: Option<&'a ClaudeConfig>,
+) -> Result<(&'a Path, &'a ClaudeConfig), AiError> {
+    match (runs_dir, config) {
+        (Some(runs_dir), Some(config)) if config.is_ready() => Ok((runs_dir, config)),
+        _ => Err(AiError::Unavailable),
     }
 }
 
@@ -125,13 +149,11 @@ fn guard_against_test_use() {
 impl AiRunner for ClaudeRunner {
     fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
         guard_against_test_use();
-        let Some(runs_dir) = &self.runs_dir else {
-            return Err(AiError::Unavailable);
-        };
+        let (runs_dir, config) = prepare(self.runs_dir.as_ref(), self.config.as_ref())?;
         let Some(program) = SystemClaude::from_env().locate() else {
             return Err(AiError::Unavailable);
         };
-        claude::run_claude(&program, task, runs_dir, cancel)
+        claude::run_claude(&program, task, runs_dir, config, cancel)
     }
 }
 
@@ -147,19 +169,24 @@ pub fn runs_dir(data_dir: &std::path::Path) -> PathBuf {
 
 /// The runner the app uses: the fake (one fixed valid answer) or the real one. `runs_dir` is
 /// Mnemo's own folder for runs (see `runs_dir`), never `/tmp` and never an owner project folder.
-pub fn select_runner(fake: bool, runs_dir: Option<PathBuf>) -> Arc<dyn AiRunner> {
+pub fn select_runner(
+    fake: bool,
+    runs_dir: Option<PathBuf>,
+    config: Option<ClaudeConfig>,
+) -> Arc<dyn AiRunner> {
     if fake {
         Arc::new(FakeRunner::new(FakeResult::Valid(
             r#"{"answer":"Fake answer: AI is in test mode.","fake":true}"#.to_string(),
         )))
     } else {
-        Arc::new(ClaudeRunner::new(runs_dir))
+        Arc::new(ClaudeRunner::new(runs_dir, config))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ai::config::test_config;
 
     fn task() -> AiTask {
         AiTask {
@@ -176,7 +203,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "the real AI runner was used in a test")]
     fn the_real_runner_panics_in_a_test() {
-        let _ = ClaudeRunner::new(Some(std::env::temp_dir()))
+        let _ = ClaudeRunner::new(Some(std::env::temp_dir()), None)
             .run_task(&task(), &CancelToken::default());
     }
 
@@ -196,13 +223,45 @@ mod tests {
 
     #[test]
     fn select_runner_gives_the_fake_answer_when_fake() {
-        let out = select_runner(true, None)
+        let out = select_runner(true, None, None)
             .run_task(&task(), &CancelToken::default())
             .unwrap();
         assert_eq!(
             out.structured_output,
             r#"{"answer":"Fake answer: AI is in test mode.","fake":true}"#
         );
+    }
+
+    #[test]
+    fn a_runner_with_no_config_is_unavailable_and_starts_nothing() {
+        let runs = PathBuf::from("/runs");
+        assert_eq!(prepare(Some(&runs), None).err(), Some(AiError::Unavailable));
+    }
+
+    #[test]
+    fn a_config_with_a_missing_mcp_file_is_unavailable() {
+        let runs = PathBuf::from("/runs");
+        let config = test_config();
+        std::fs::remove_file(config.mcp_path()).unwrap();
+        assert_eq!(
+            prepare(Some(&runs), Some(&config)).err(),
+            Some(AiError::Unavailable)
+        );
+        let _ = std::fs::remove_dir_all(config.dir());
+    }
+
+    #[test]
+    fn a_ready_config_and_a_runs_dir_are_ok_and_no_runs_dir_is_unavailable() {
+        let runs = PathBuf::from("/runs");
+        let config = test_config();
+        let (dir, cfg) = prepare(Some(&runs), Some(&config)).unwrap();
+        assert_eq!(dir, Path::new("/runs"));
+        assert_eq!(cfg, &config);
+        assert_eq!(
+            prepare(None, Some(&config)).err(),
+            Some(AiError::Unavailable)
+        );
+        let _ = std::fs::remove_dir_all(config.dir());
     }
 
     #[test]

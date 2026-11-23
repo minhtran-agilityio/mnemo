@@ -39,8 +39,32 @@
   gap: var(--space-3);
 }
 
+.settings-models-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.settings-models-head > :first-child {
+  flex: 1 1 var(--size-section-list-max);
+  min-width: 0;
+}
+
+.settings-models-note:empty {
+  display: none;
+}
+
 @media (max-width: 760px) {
   .settings-layout {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.settings-data-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
 }

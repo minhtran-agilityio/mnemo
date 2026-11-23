@@ -1,9 +1,11 @@
 // The Settings screen: a title, a list of sections on the left (each row shows its current value)
-// and the open section on the right. Appearance and AI have content; Data is empty until its own
-// ticket. The AI section shows the Claude Code check (state, how to fix it, Check again) and the AI
-// control (#23: master switch, usage, warn and pause lines, Pause/Resume; see ai-control.ts). All
-// text goes in as text, never as markup. Every part comes from ui/src/ds (section list, card,
-// choice list, text); settings.css lays them out.
+// and the open section on the right. Appearance, AI and Data have content. The AI section shows
+// the Claude Code check (state, how to fix it, Check again), the AI control (#23: master switch,
+// usage, warn and pause lines, Pause/Resume; see ai-control.ts) and the model and effort of each
+// feature (see ai-models.ts). The Data section shows the data folder, the backup commands, Export,
+// Open data folder and Reset. All text goes in as text, never as markup. Every part comes from
+// ui/src/ds (section list, card, choice list, text, copy line, confirm dialog); settings.css lays
+// them out.
 
 import {
   buildAiOffState,
@@ -16,6 +18,8 @@ import {
   createButton,
   createCard,
   createChoiceList,
+  createConfirmDialog,
+  createCopyLine,
   createSectionList,
   type PillTint,
   setButtonBusy,
@@ -26,8 +30,11 @@ import {
   type AiHealth,
   type AiMode,
   type AiState,
+  type DataFolderInfo,
+  type ExportSummary,
   errorMessage,
   isAppError,
+  RESET_WORD,
   type TestPromptResult,
 } from "../../shared/api";
 import {
@@ -35,8 +42,9 @@ import {
   type AiControlDeps,
   startAiControl,
 } from "./ai-control";
+import { type AiModelsDeps, createAiModelsCard } from "./ai-models";
 
-export interface SettingsDeps {
+export interface SettingsDeps extends AiModelsDeps {
   /** The theme that is in use now. */
   getTheme(): Theme;
   /** Shows `theme` at once. Nothing is saved here. */
@@ -59,6 +67,21 @@ export interface SettingsDeps {
   runTestPrompt(): Promise<TestPromptResult>;
   /** The AI control commands. The real ones when left out. */
   aiControl?: AiControlDeps;
+  /** Asks for a folder in the native dialog. Null when the owner cancels. */
+  pickFolder(): Promise<string | null>;
+  /** Exports all data into a new folder inside `folder`. Rejects with an AppError. */
+  exportData(folder: string): Promise<ExportSummary>;
+  /** Deletes all data. The core accepts only the word `RESET`. Rejects with an AppError. */
+  resetData(confirm: string): Promise<void>;
+  /** Where the data lives, and the copy commands for a backup. */
+  dataFolderInfo(): Promise<DataFolderInfo>;
+  /** Opens the data folder in the file manager. Rejects with an AppError. */
+  openDataFolder(): Promise<void>;
+  /**
+   * Runs after a reset worked (`complete`), or failed part way: start the app over.
+   * Only a complete reset forgets the cached theme; a partial one may have kept it.
+   */
+  afterReset(complete: boolean): void;
 }
 
 type SectionId = "appearance" | "ai" | "data";
@@ -74,8 +97,8 @@ const SECTIONS: readonly Section[] = [
   { id: "data", label: "Data" },
 ];
 
-/** What a section without content shows as its value, and in its body. */
-const EMPTY_VALUE = "Not built yet";
+/** What the Data row shows as its value. */
+const DATA_VALUE = "Export and reset";
 
 const AI_LABELS: Readonly<Record<AiState, string>> = {
   ready: "Ready",
@@ -104,6 +127,61 @@ type TestPromptView =
   | { kind: "done"; answer: string; durationMs: number }
   | { kind: "failed"; message: string; next: string }
   | { kind: "limit" };
+
+/** What the Data section knows about the data folder. */
+type DataInfoView =
+  | { kind: "loading" }
+  | { kind: "known"; info: DataFolderInfo }
+  | { kind: "failed"; text: string };
+
+/** What Export and Reset show: nothing yet, the work, a result, or a failure. */
+type ActionView =
+  | { kind: "idle" }
+  | { kind: "running" }
+  | { kind: "done"; text: string }
+  | { kind: "failed"; text: string };
+
+const COUNT_LABELS: ReadonlyArray<readonly [string, string, string]> = [
+  ["notes", "note", "notes"],
+  ["bookmarks", "link", "links"],
+  ["ideas", "idea", "ideas"],
+  ["projects", "project", "projects"],
+  ["tasks", "task", "tasks"],
+  ["events", "event", "events"],
+  ["runs", "run", "runs"],
+  ["memories", "memory", "memories"],
+  ["labels", "label", "labels"],
+  ["links", "connection", "connections"],
+  ["files", "file", "files"],
+];
+
+/** The plain sentence that names the new folder and what went into it. */
+function exportSentence(summary: ExportSummary): string {
+  const counts = summary.counts as unknown as Record<string, number>;
+  const parts = COUNT_LABELS.flatMap(([key, one, many]) =>
+    counts[key] ? [`${counts[key]} ${counts[key] === 1 ? one : many}`] : [],
+  );
+  const what = parts.length > 0 ? parts.join(", ") : "no records";
+  const missing =
+    summary.filesMissing > 0
+      ? ` ${summary.filesMissing} file${summary.filesMissing === 1 ? " was" : "s were"} missing from the files folder and could not be copied.`
+      : "";
+  return `Saved in the folder ${summary.folder}. It holds ${what}.${missing}`;
+}
+
+/** The export failure sentence. The core's message says what is left of the export folder;
+ * "Nothing was changed." is added only when that message does not already say so. */
+function exportFailureText(error: unknown): string {
+  const message = errorMessage(error);
+  const says = /unchanged|nothing was/i.test(message);
+  return `Mnemo could not export your data. ${message}${says ? "" : " Nothing was changed."}`;
+}
+
+/** How long the reset result stays on screen before the app starts over. */
+export const RESET_RESTART_MS = 1500;
+
+const EXPORT_LABEL = "Export";
+const RESET_LABEL = "Reset all data";
 
 const TEST_LABEL = "Send test prompt";
 
@@ -168,6 +246,10 @@ export function renderSettings(
   let ai: AiView = { kind: "checking" };
   let aiBusy = false;
   let aiMode: AiMode = "real";
+  let dataInfo: DataInfoView = { kind: "loading" };
+  let exportView: ActionView = { kind: "idle" };
+  let resetView: ActionView = { kind: "idle" };
+  let openFolderFailure: string | null = null;
 
   const title = doc.createElement("h1");
   title.textContent = "Settings";
@@ -203,7 +285,7 @@ export function renderSettings(
       ? THEME_LABELS[deps.getTheme()]
       : id === "ai"
         ? aiValue()
-        : EMPTY_VALUE;
+        : DATA_VALUE;
 
   // The section list builds its rows once and updates them in place, so the row that has
   // keyboard focus keeps it.
@@ -222,6 +304,8 @@ export function renderSettings(
   });
   const body = doc.createElement("div");
   body.className = "settings-body";
+  // Built once, so a save in progress and the focused dropdown survive a redraw of the AI section.
+  const models = createAiModelsCard(doc, deps);
   const layout = doc.createElement("div");
   layout.className = "settings-layout";
   layout.append(list.element, body);
@@ -235,12 +319,21 @@ export function renderSettings(
 
   function renderBody(): void {
     if (open === "appearance") body.replaceChildren(appearance());
-    else if (open === "ai")
+    else if (open === "ai") {
+      models.setAiOff(aiIsOff());
       body.replaceChildren(
         aiSection(),
         card("AI control", control.render(doc)),
+        models.element,
       );
-    else body.replaceChildren(emptySection(open));
+    } else body.replaceChildren(dataSection());
+  }
+
+  // AI is off when the check is known (or failed) and Claude Code is not ready. The fake runner
+  // counts as on.
+  function aiIsOff(): boolean {
+    if (aiMode === "fake" || ai.kind === "checking") return false;
+    return !(ai.kind === "known" && ai.health.state === "ready");
   }
 
   // The AI control: read once, then again on every change in the core while Settings is open.
@@ -265,12 +358,218 @@ export function renderSettings(
     return section;
   }
 
-  function emptySection(id: SectionId): HTMLElement {
-    const label = SECTIONS.find((s) => s.id === id)?.label ?? "";
-    return card(label, [
-      buildText(doc, { tone: "muted", content: "Nothing to set here yet." }),
-    ]);
+  // ---- Data ----
+
+  function redrawData(): void {
+    if (open === "data" && body.isConnected) renderBody();
   }
+
+  function statusBanner(view: ActionView, busyText: string): Node[] {
+    if (view.kind === "running")
+      return [buildBanner({ tone: "info", message: busyText })];
+    if (view.kind === "done")
+      return [buildBanner({ tone: "info", lead: "Done.", message: view.text })];
+    if (view.kind === "failed")
+      return [buildBanner({ tone: "bad", message: view.text })];
+    return [];
+  }
+
+  function dataSection(): HTMLElement {
+    const exportRunning = exportView.kind === "running";
+    const resetRunning = resetView.kind === "running";
+    const exportButton = createButton(doc, {
+      label: EXPORT_LABEL,
+      variant: "primary",
+      onClick: () => void exportAll(),
+    });
+    if (exportRunning)
+      setButtonBusy(exportButton, true, { label: EXPORT_LABEL });
+    const exportBox = doc.createElement("div");
+    exportBox.className = "settings-data-block";
+    exportBox.append(
+      buildText(doc, {
+        tone: "muted",
+        content:
+          "Export saves your notes, links, ideas, projects, tasks, events, runs, memories, labels and files as Markdown, JSON and copied files, in a new folder inside the folder you pick. It never overwrites a folder.",
+      }),
+      exportButton,
+      ...(exportView.kind === "done"
+        ? [
+            buildBanner({
+              tone: "info",
+              lead: "Exported.",
+              message: exportView.text,
+            }),
+          ]
+        : statusBanner(exportView, "Exporting...")),
+    );
+
+    const folderBox = doc.createElement("div");
+    folderBox.className = "settings-data-block";
+    const openButton = createButton(doc, {
+      label: "Open data folder",
+      onClick: () => void openFolder(),
+    });
+    if (dataInfo.kind === "known")
+      folderBox.append(
+        createCopyLine(doc, { label: "Data folder", text: dataInfo.info.path }),
+      );
+    else
+      folderBox.append(
+        buildText(doc, {
+          tone: "muted",
+          content:
+            dataInfo.kind === "loading"
+              ? "Reading where the data folder is."
+              : dataInfo.text,
+        }),
+      );
+    folderBox.append(openButton);
+    if (openFolderFailure)
+      folderBox.append(
+        buildBanner({ tone: "bad", message: openFolderFailure }),
+      );
+
+    const backupBox = doc.createElement("div");
+    backupBox.className = "settings-data-block";
+    backupBox.append(
+      buildText(doc, {
+        tone: "muted",
+        content:
+          "To back up everything, close Mnemo first, then run one of these commands in a terminal. It copies the whole data folder. Close Mnemo first, so the copy is complete.",
+      }),
+    );
+    if (dataInfo.kind === "known")
+      backupBox.append(
+        createCopyLine(doc, {
+          label: "macOS",
+          text: dataInfo.info.macosCommand,
+        }),
+        createCopyLine(doc, {
+          label: "Ubuntu",
+          text: dataInfo.info.ubuntuCommand,
+        }),
+      );
+
+    const resetButton = createButton(doc, {
+      label: RESET_LABEL,
+      variant: "danger",
+      onClick: () => askReset(resetButton),
+    });
+    if (resetRunning) setButtonBusy(resetButton, true, { label: RESET_LABEL });
+    const resetBox = doc.createElement("div");
+    resetBox.className = "settings-data-block";
+    resetBox.append(
+      buildText(doc, {
+        tone: "muted",
+        content:
+          "Reset deletes the Mnemo database and the saved files and starts empty, like a first start. The error log and the AI run output are kept. It makes no backup.",
+      }),
+      resetButton,
+      ...statusBanner(resetView, "Resetting..."),
+    );
+    return card("Data", [exportBox, folderBox, backupBox, resetBox]);
+  }
+
+  async function exportAll(): Promise<void> {
+    if (exportView.kind === "running") return;
+    exportView = { kind: "running" };
+    redrawData();
+    try {
+      const folder = await deps.pickFolder();
+      if (folder === null) {
+        // The owner cancelled the folder dialog: nothing happens.
+        exportView = { kind: "idle" };
+        return;
+      }
+      const summary = await deps.exportData(folder);
+      exportView = { kind: "done", text: exportSentence(summary) };
+    } catch (error) {
+      console.error("the export failed:", error);
+      exportView = {
+        kind: "failed",
+        text: exportFailureText(error),
+      };
+    } finally {
+      redrawData();
+    }
+  }
+
+  async function openFolder(): Promise<void> {
+    try {
+      await deps.openDataFolder();
+      openFolderFailure = null;
+    } catch (error) {
+      console.error("could not open the data folder:", error);
+      openFolderFailure = `Mnemo could not open the data folder. ${errorMessage(error)}`;
+    }
+    redrawData();
+  }
+
+  function askReset(opener: HTMLElement): void {
+    if (resetView.kind === "running") return;
+    createConfirmDialog({
+      doc,
+      title: "Reset all Mnemo data?",
+      message:
+        "This deletes the Mnemo database and the saved files folder. The error log and the AI run output are kept. Mnemo makes no backup first, and this cannot be undone. Use Export or the backup command first if you want to keep a copy.",
+      lose: [
+        "All notes, links, ideas, projects, tasks, events, runs, memories and labels",
+        "All saved files",
+        "Your settings, the theme included",
+      ],
+      keepLabel: "Cancel",
+      confirmLabel: RESET_LABEL,
+      typeToConfirm: {
+        word: RESET_WORD,
+        label: `Type ${RESET_WORD} to confirm`,
+      },
+      onConfirm: () => void resetAll(),
+    }).open(opener);
+  }
+
+  async function resetAll(): Promise<void> {
+    if (resetView.kind === "running") return;
+    resetView = { kind: "running" };
+    redrawData();
+    try {
+      await deps.resetData(RESET_WORD);
+    } catch (error) {
+      console.error("the reset failed:", error);
+      // "reset_failed" means the delete got as far as starting, so part of the data may be
+      // gone and the screens may show stale rows. Reload so the app shows what is really left.
+      const partial = isAppError(error) && error.code === "reset_failed";
+      resetView = {
+        kind: "failed",
+        text: `Mnemo could not reset your data. ${errorMessage(error)}`,
+      };
+      redrawData();
+      if (partial) setTimeout(() => deps.afterReset(false), RESET_RESTART_MS);
+      return;
+    }
+    // The core is empty now. Say so for a moment, then start the app over like a first start.
+    resetView = {
+      kind: "done",
+      text: "All data was deleted. Mnemo is starting over.",
+    };
+    redrawData();
+    setTimeout(() => deps.afterReset(true), RESET_RESTART_MS);
+  }
+
+  deps
+    .dataFolderInfo()
+    .then((info) => {
+      dataInfo = { kind: "known", info };
+      redrawData();
+    })
+    .catch((error: unknown) => {
+      console.error("could not read the data folder:", error);
+      dataInfo = {
+        kind: "failed",
+        text: `Mnemo could not find its data folder. ${errorMessage(error)}`,
+      };
+      redrawData();
+    });
 
   function appearance(): HTMLElement {
     const choices: ChoiceList<Theme> = createChoiceList<Theme>(doc, {

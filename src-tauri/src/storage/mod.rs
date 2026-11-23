@@ -3,6 +3,7 @@ pub mod ai_control;
 #[cfg(test)]
 mod concurrency;
 mod error;
+pub mod export;
 pub mod files;
 pub mod ideas;
 pub mod items;
@@ -10,6 +11,7 @@ pub mod labels;
 pub mod links;
 mod migrate;
 pub mod record;
+mod reset;
 pub mod runs;
 mod settings;
 
@@ -33,6 +35,11 @@ pub struct Storage {
     conn: Connection,
     /// The folder for images and attachments, beside the database. Made on the first save.
     files_dir: PathBuf,
+    /// The database file, kept so Reset can delete it and open a new one.
+    db_path: PathBuf,
+    /// Set when a Reset deleted the data but could not open a new database. The
+    /// connection is then an empty stand-in; callers must treat the storage as down.
+    unavailable: bool,
 }
 
 #[allow(dead_code)] // Status readers; callers arrive with later tickets.
@@ -72,7 +79,12 @@ impl Storage {
             .parent()
             .unwrap_or_else(|| Path::new(""))
             .join(files::FILES_DIR);
-        let storage = Storage { conn, files_dir };
+        let storage = Storage {
+            conn,
+            files_dir,
+            db_path: path.to_path_buf(),
+            unavailable: false,
+        };
         // The app holds one storage, opened before any run is queued, so a run still in
         // running or waiting here was left by an app that closed. A failure is logged and
         // does not stop the app: the rows stay as they are until the next start.
@@ -82,6 +94,11 @@ impl Storage {
             Err(e) => log::error!("could not mark interrupted AI runs as failed: {e}"),
         }
         Ok(storage)
+    }
+
+    /// True after a failed Reset left no usable database. The app must be restarted.
+    pub fn is_unavailable(&self) -> bool {
+        self.unavailable
     }
 
     /// The journal mode in use. Expected to be "wal".

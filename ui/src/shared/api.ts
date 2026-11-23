@@ -177,6 +177,48 @@ export function onAiControl(handler: () => void): Promise<() => void> {
   return listen(AI_CONTROL_EVENT, () => handler());
 }
 
+// The model and effort of each AI feature (the Rust core owns the list, the defaults and the
+// allowed values).
+export type AiModel = "haiku" | "sonnet" | "opus";
+export type AiEffort = "low" | "medium" | "high";
+
+export interface AiModelRow {
+  feature: string;
+  label: string;
+  model: AiModel;
+  effort: AiEffort;
+}
+
+export interface AiChoice<T extends string> {
+  value: T;
+  label: string;
+}
+
+export interface AiModelTable {
+  rows: AiModelRow[];
+  models: AiChoice<AiModel>[];
+  efforts: AiChoice<AiEffort>[];
+}
+
+/** Every feature's model and effort, with the allowed values. */
+export function listAiModels(): Promise<AiModelTable> {
+  return invoke<AiModelTable>("list_ai_models");
+}
+
+/** Saves one feature's choice. An unknown value rejects with `invalid_ai_model` and changes nothing. */
+export function setAiModel(
+  feature: string,
+  model: AiModel,
+  effort: AiEffort,
+): Promise<AiModelTable> {
+  return invoke<AiModelTable>("set_ai_model", { feature, model, effort });
+}
+
+/** Puts every feature back to its default model and effort. */
+export function resetAiModels(): Promise<AiModelTable> {
+  return invoke<AiModelTable>("reset_ai_models");
+}
+
 // ---- Items and links (#14) ----
 // Types mirror the Rust records (camelCase). Times are UTC ISO 8601 set by the core;
 // null means unknown. Every list is paged: at most 100 records, newest first.
@@ -614,4 +656,81 @@ export async function deleteFile(id: string): Promise<void> {
 /** Lists files in the folder that no row owns. It deletes nothing. */
 export function fileOrphanReport(): Promise<OrphanReport> {
   return invoke<OrphanReport>("file_orphan_report");
+}
+
+// ---- Data: export, backup and reset ----
+
+/** How many live records of each type an export wrote. */
+export interface ExportCounts {
+  notes: number;
+  bookmarks: number;
+  ideas: number;
+  projects: number;
+  tasks: number;
+  events: number;
+  runs: number;
+  memories: number;
+  labels: number;
+  links: number;
+  files: number;
+}
+
+export interface ExportSummary {
+  /** The new `mnemo-export-<time>` folder. */
+  folder: string;
+  counts: ExportCounts;
+  /** Live file records whose file was gone from the files folder. */
+  filesMissing: number;
+}
+
+export interface DataFolderInfo {
+  path: string;
+  macosCommand: string;
+  ubuntuCommand: string;
+}
+
+/** The word the owner types to confirm a reset. */
+export const RESET_WORD = "RESET";
+
+/** Asks for a folder in the native folder dialog. Null when the owner cancels. */
+export async function pickFolder(): Promise<string | null> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const picked = await open({ directory: true, multiple: false });
+  return typeof picked === "string" ? picked : null;
+}
+
+/** Exports all live data into a new folder inside `folder`. */
+export async function exportData(folder: string): Promise<ExportSummary> {
+  const result: unknown = await invoke<ExportSummary>("export_data", {
+    folder,
+  });
+  // A bare string is the new folder alone, with no counts to show.
+  if (typeof result === "string")
+    return { folder: result, counts: {} as ExportCounts, filesMissing: 0 };
+  return result as ExportSummary;
+}
+
+/** Deletes all data and files. The core refuses any word but `RESET`. */
+export async function resetData(confirm: string): Promise<void> {
+  await invoke<void>("reset_data", { confirm });
+}
+
+export async function dataFolderInfo(): Promise<DataFolderInfo> {
+  const result: unknown = await invoke<DataFolderInfo>("data_folder_info");
+  // A bare string is the path alone: the copy commands are made from it, as the core makes them.
+  if (typeof result === "string") {
+    const from = `"${result.replace(/[\\"$`]/g, "\\$&")}"`;
+    const to = "~/mnemo-backup-$(date +%Y-%m-%d-%H%M%S)";
+    return {
+      path: result,
+      macosCommand: `cp -Rp ${from} ${to}`,
+      ubuntuCommand: `cp -a ${from} ${to}`,
+    };
+  }
+  return result as DataFolderInfo;
+}
+
+/** Opens the data folder in the system file manager. */
+export async function openDataFolder(): Promise<void> {
+  await invoke<void>("open_data_folder");
 }

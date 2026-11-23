@@ -1,5 +1,6 @@
 // Commands the UI can call through Tauri's invoke bridge, and the state they share.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
@@ -7,6 +8,7 @@ use tauri::Manager;
 
 use crate::ai::claude::error_kind;
 use crate::ai::health::{self, AiHealth};
+use crate::ai::models::{self, AiModelTable, ModelChoices, ModelError, ModelRow};
 use crate::ai::runner::AiError;
 use crate::ai::test_prompt;
 use crate::scheduler::ai_control::{
@@ -15,6 +17,7 @@ use crate::scheduler::ai_control::{
 };
 use crate::scheduler::queue::{CancelOutcome, Priority, RunLog, RunLogError, RunQueue};
 use crate::storage::ai_control::{StoredAiControl, StoredPause, StoredReading};
+use crate::storage::export::{ExportError, ExportSummary, FolderState};
 use crate::storage::files::OrphanReport;
 use crate::storage::ideas::{Idea, IdeaInput, IdeaProject};
 use crate::storage::items::{
@@ -47,20 +50,72 @@ pub struct StartupError {
 
 /// The storage the commands use: the open database, or why it could not be opened.
 /// It is always registered, so a command gets an error back instead of a panic.
-pub struct AppStorage(Result<Mutex<Storage>, StartupError>);
+pub struct AppStorage {
+    db: Result<Mutex<Storage>, StartupError>,
+    /// True while an export copies its files without the storage lock. Reset refuses
+    /// to run then. It is set and read only while the lock is held, so they cannot overlap.
+    exporting: AtomicBool,
+}
+
+/// Clears the export-in-progress flag when the export ends, also on a panic.
+struct ExportingFlag<'a>(&'a AtomicBool);
+
+impl Drop for ExportingFlag<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
 
 impl AppStorage {
     pub fn new(opened: Result<Storage, StartupError>) -> Self {
-        AppStorage(opened.map(Mutex::new))
+        AppStorage {
+            db: opened.map(Mutex::new),
+            exporting: AtomicBool::new(false),
+        }
+    }
+
+    /// Exports into a new folder inside `folder`. The records are written under the
+    /// storage lock; the file copy runs after it is released, so reads and saves are not
+    /// held up. Reset is refused until the copy ends.
+    fn export(&self, folder: &str, now: &str) -> Result<ExportSummary, AppError> {
+        let (job, _running) = {
+            let guard = self.get()?;
+            if self.exporting.swap(true, Ordering::SeqCst) {
+                return Err(AppError {
+                    code: "export_running",
+                    message: "An export is already running. Wait for it to finish.".to_string(),
+                });
+            }
+            let running = ExportingFlag(&self.exporting);
+            (
+                guard
+                    .export_begin(std::path::Path::new(folder), now)
+                    .map_err(export_failed)?,
+                running,
+            )
+        };
+        job.finish().map_err(export_failed)
+    }
+
+    /// A storage that a failed Reset left without a database answers every call with
+    /// `storage_unavailable`, not with a table error from an empty database.
+    fn usable(guard: MutexGuard<'_, Storage>) -> Result<MutexGuard<'_, Storage>, AppError> {
+        if guard.is_unavailable() {
+            return Err(AppError {
+                code: "storage_unavailable",
+                message: "Mnemo could not open its data file again after a reset. Quit Mnemo and start it again.".to_string(),
+            });
+        }
+        Ok(guard)
     }
 
     /// Locks the database, or returns `storage_unavailable` when it was not opened.
     /// A lock poisoned by an earlier panic is recovered after rolling back any
     /// transaction the panicking code left open.
     pub fn get(&self) -> Result<MutexGuard<'_, Storage>, AppError> {
-        match &self.0 {
+        match &self.db {
             Ok(m) => match m.lock() {
-                Ok(guard) => Ok(guard),
+                Ok(guard) => Self::usable(guard),
                 Err(poisoned) => {
                     // An earlier command panicked while holding the lock. Roll back what
                     // it left open, then carry on with the last committed state.
@@ -70,7 +125,7 @@ impl AppStorage {
                         message: "Mnemo could not recover its data file after an error. Nothing was deleted. Quit Mnemo and start it again.".to_string(),
                     })?;
                     m.clear_poison();
-                    Ok(guard)
+                    Self::usable(guard)
                 }
             },
             Err(_) => Err(AppError {
@@ -668,6 +723,194 @@ pub async fn resume_ai(
     week_start: i64,
 ) -> Result<AiControlView, AppError> {
     change_ai_control(app, today_start, week_start, |c| c.resume()).await
+}
+
+/// Gives the runner the owner's model row for a task from the app storage. A run starts only
+/// after the queue wrote its row, so storage was open then; if it is lost before the run starts,
+/// the run uses the code default instead of failing.
+pub struct StoredChoices(pub tauri::AppHandle);
+
+impl ModelChoices for StoredChoices {
+    fn row(&self, task: &str) -> Option<ModelRow> {
+        match self.0.state::<AppStorage>().get() {
+            Ok(storage) => models::row_for(&storage, task),
+            Err(_) => models::default_row(task),
+        }
+    }
+}
+
+/// The error the UI sees for an export that did not finish. The reason goes to the log.
+/// The message says only what is true about the export folder.
+fn export_failed(e: ExportError) -> AppError {
+    match e {
+        ExportError::Target(message) => AppError {
+            code: "export_target_invalid",
+            message,
+        },
+        ExportError::Failed { cause, folder } => {
+            log::error!("export failed: {cause}");
+            let about_folder = match folder {
+                FolderState::NotCreated => "No export folder was made.",
+                FolderState::Removed => "The partly written export folder was removed.",
+                FolderState::Left => {
+                    "The partly written export folder could not be removed; delete it yourself."
+                }
+            };
+            AppError {
+                code: "export_failed",
+                message: format!(
+                    "Mnemo could not finish the export. Your data is unchanged. {about_folder}"
+                ),
+            }
+        }
+    }
+}
+
+/// The error the UI sees when a model row was not changed. An unknown value is the owner's
+/// mistake and has its own code; a storage failure uses the same words as every setting.
+fn model_failed(e: ModelError) -> AppError {
+    match e {
+        ModelError::Storage(inner) => storage_failed(inner),
+        other => AppError {
+            code: "invalid_ai_model",
+            message: other.to_string(),
+        },
+    }
+}
+
+fn list_ai_models_with(storage: &AppStorage) -> Result<AiModelTable, AppError> {
+    let guard = storage.get()?;
+    Ok(models::table(&guard))
+}
+
+fn set_ai_model_with(
+    storage: &AppStorage,
+    feature: &str,
+    model: &str,
+    effort: &str,
+) -> Result<AiModelTable, AppError> {
+    let guard = storage.get()?;
+    models::set_row(&guard, feature, model, effort).map_err(model_failed)
+}
+
+fn reset_ai_models_with(storage: &AppStorage) -> Result<AiModelTable, AppError> {
+    let guard = storage.get()?;
+    models::reset_rows(&guard).map_err(model_failed)
+}
+
+/// The model and effort of every AI feature, with the allowed values.
+#[tauri::command]
+pub async fn list_ai_models(app: tauri::AppHandle) -> Result<AiModelTable, AppError> {
+    off_main_thread(app, list_ai_models_with).await
+}
+
+/// Saves the model and effort of one feature. An unknown value changes nothing.
+#[tauri::command]
+pub async fn set_ai_model(
+    app: tauri::AppHandle,
+    feature: String,
+    model: String,
+    effort: String,
+) -> Result<AiModelTable, AppError> {
+    off_main_thread(app, move |s| {
+        set_ai_model_with(s, &feature, &model, &effort)
+    })
+    .await
+}
+
+fn export_item(storage: &AppStorage, folder: &str, now: &str) -> Result<ExportSummary, AppError> {
+    storage.export(folder, now)
+}
+
+/// Exports every live record into a new dated export folder inside `folder` (storage names it).
+#[tauri::command]
+pub async fn export_data(app: tauri::AppHandle, folder: String) -> Result<ExportSummary, AppError> {
+    off_main_thread(app, move |storage| {
+        export_item(storage, &folder, &crate::storage::record::now_iso())
+    })
+    .await
+}
+
+/// Puts every feature back to its default model and effort.
+#[tauri::command]
+pub async fn reset_ai_models(app: tauri::AppHandle) -> Result<AiModelTable, AppError> {
+    off_main_thread(app, reset_ai_models_with).await
+}
+
+fn reset_item(storage: &AppStorage, confirm: &str) -> Result<(), AppError> {
+    let mut guard = storage.get()?;
+    if storage.exporting.load(Ordering::SeqCst) {
+        return Err(AppError {
+            code: "export_running",
+            message: "An export is running. Wait for it to finish, then reset.".to_string(),
+        });
+    }
+    guard.reset(confirm).map_err(|e| match e {
+        StorageError::Invalid(message) => AppError {
+            code: "reset_not_confirmed",
+            message,
+        },
+        other => {
+            log::error!("reset failed: {other}");
+            AppError {
+                code: "reset_failed",
+                message: "Mnemo could not delete everything. Some data may be left. Mnemo is reloading to show what is left; if errors continue, quit Mnemo and start it again.".to_string(),
+            }
+        }
+    })
+}
+
+/// Deletes all data and the files folder when `confirm` is exactly `RESET`.
+#[tauri::command]
+pub async fn reset_data(app: tauri::AppHandle, confirm: String) -> Result<(), AppError> {
+    off_main_thread(app, move |storage| reset_item(storage, &confirm)).await
+}
+
+/// Where the data lives and the one-line copy commands that back it up.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataFolderInfo {
+    pub path: String,
+    pub macos_command: String,
+    pub ubuntu_command: String,
+}
+
+fn path_unknown() -> AppError {
+    AppError {
+        code: "open_folder_failed",
+        message: "Mnemo could not find its data folder.".to_string(),
+    }
+}
+
+#[tauri::command]
+pub fn data_folder_info(app: tauri::AppHandle) -> Result<DataFolderInfo, AppError> {
+    let paths = crate::system::paths::app_paths(&app).map_err(|e| {
+        log::error!("data folder path: {e}");
+        path_unknown()
+    })?;
+    let c = crate::system::paths::backup_commands(&paths.data_dir);
+    Ok(DataFolderInfo {
+        path: paths.data_dir.to_string_lossy().into_owned(),
+        macos_command: c.macos,
+        ubuntu_command: c.ubuntu,
+    })
+}
+
+/// Opens the data folder in the system file manager.
+#[tauri::command]
+pub async fn open_data_folder(app: tauri::AppHandle) -> Result<(), AppError> {
+    let paths = crate::system::paths::app_paths(&app).map_err(|e| {
+        log::error!("data folder path: {e}");
+        path_unknown()
+    })?;
+    crate::system::paths::open_folder(&app, &paths.data_dir).map_err(|e| {
+        log::error!("could not open the data folder: {e}");
+        AppError {
+            code: "open_folder_failed",
+            message: "Mnemo could not open the data folder. Open it from your file manager."
+                .to_string(),
+        }
+    })
 }
 
 /// The latest Claude Code check, kept in memory only. `None` until the first check ends.
@@ -1329,6 +1572,149 @@ mod tests {
     }
 
     #[test]
+    fn reset_with_a_wrong_word_gives_reset_not_confirmed_and_keeps_data() {
+        let (state, dir) = app_storage();
+        state
+            .get()
+            .unwrap()
+            .add::<Note>(&NoteInput {
+                body: "keep".into(),
+            })
+            .unwrap();
+        for word in ["", "reset", "RESET "] {
+            let err = reset_item(&state, word).unwrap_err();
+            assert_eq!(err.code, "reset_not_confirmed");
+            assert!(!err.message.contains('/'));
+        }
+        let page = state
+            .get()
+            .unwrap()
+            .list::<Note>(
+                &PageRequest {
+                    limit: 10,
+                    after: None,
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(page.items.len(), 1);
+        reset_item(&state, "RESET").unwrap();
+        let page = state
+            .get()
+            .unwrap()
+            .list::<Note>(
+                &PageRequest {
+                    limit: 10,
+                    after: None,
+                },
+                false,
+            )
+            .unwrap();
+        assert!(page.items.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn export_with_a_missing_folder_gives_export_target_invalid() {
+        let (state, dir) = app_storage();
+        let missing = dir.join("nope");
+        let err =
+            export_item(&state, &missing.to_string_lossy(), "2026-11-21T12:00:00Z").unwrap_err();
+        assert_eq!(err.code, "export_target_invalid");
+        assert!(!err.message.contains('/'));
+        assert!(!missing.exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn export_failed_messages_match_what_happened_to_the_folder() {
+        use crate::storage::export::{ExportError, FolderState};
+        let msg = |folder| {
+            export_failed(ExportError::Failed {
+                cause: StorageError::FileMissing,
+                folder,
+            })
+        };
+        let none = msg(FolderState::NotCreated);
+        assert_eq!(none.code, "export_failed");
+        assert!(none.message.contains("No export folder was made"));
+        assert!(!none.message.contains("was removed"));
+        assert!(msg(FolderState::Removed).message.contains("was removed"));
+        let left = msg(FolderState::Left);
+        assert!(left.message.contains("could not be removed"));
+        assert!(!left.message.contains("was removed"));
+        // A database error with an Invalid-looking cause is not a bad target.
+        let other = export_failed(ExportError::Failed {
+            cause: StorageError::Invalid("x".into()),
+            folder: FolderState::Removed,
+        });
+        assert_eq!(other.code, "export_failed");
+    }
+
+    #[test]
+    fn export_does_not_hold_the_storage_lock_while_finishing() {
+        let (state, dir) = app_storage();
+        let job = {
+            let g = state.get().unwrap();
+            g.export_begin(&dir, "2026-11-21T12:00:00Z").unwrap()
+        };
+        // The guard is gone: another caller can lock while the copy is still to do.
+        assert!(state.get().is_ok());
+        assert!(job.finish().is_ok());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn reset_is_refused_while_an_export_is_copying_and_allowed_after() {
+        let (state, dir) = app_storage();
+        // Same steps as `export`, paused after the lock is released and before the copy.
+        let job = {
+            let g = state.get().unwrap();
+            state.exporting.store(true, Ordering::SeqCst);
+            g.export_begin(&dir, "2026-11-21T12:00:00Z").unwrap()
+        };
+        let err = reset_item(&state, "RESET").unwrap_err();
+        assert_eq!(err.code, "export_running");
+        assert!(err.message.contains("Wait for it to finish"));
+        // Reads and saves are not held up by the copy.
+        assert!(state.get().is_ok());
+        let second = state.export(&dir.to_string_lossy(), "2026-11-21T12:00:01Z");
+        assert_eq!(second.unwrap_err().code, "export_running");
+        assert!(job.finish().is_ok());
+        state.exporting.store(false, Ordering::SeqCst);
+        reset_item(&state, "RESET").unwrap();
+        // A whole export clears the flag by itself.
+        state
+            .export(&dir.to_string_lossy(), "2026-11-21T12:00:02Z")
+            .unwrap();
+        reset_item(&state, "RESET").unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn storage_that_lost_its_database_after_a_failed_reset_says_unavailable() {
+        let (state, dir) = app_storage();
+        {
+            let mut g = state.get().unwrap();
+            g.break_for_test();
+            let err = g.reset("RESET").unwrap_err();
+            assert!(matches!(err, StorageError::Open(_)));
+        }
+        let err = state.get().err().expect("unavailable");
+        assert_eq!(err.code, "storage_unavailable");
+        assert!(!err.message.contains("no such table"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn export_through_the_command_layer_makes_the_folder() {
+        let (state, dir) = app_storage();
+        let sum = export_item(&state, &dir.to_string_lossy(), "2026-11-21T12:00:00Z").unwrap();
+        assert!(std::path::Path::new(&sum.folder).join("notes").is_dir());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn read_file_refuses_a_dotdot_request() {
         let (state, dir) = app_storage();
         std::fs::write(dir.join("outside.txt"), b"secret").unwrap();
@@ -1743,7 +2129,7 @@ mod tests {
 
     #[test]
     fn test_prompt_command_with_the_fake_gives_the_fake_answer() {
-        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None));
+        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None, None));
         let got = run_test_prompt_with(&queue, &queue.control()).unwrap();
         assert_eq!(got.answer, "Fake answer: AI is in test mode.");
         let json = serde_json::to_value(&got).unwrap();
@@ -1753,7 +2139,7 @@ mod tests {
 
     #[test]
     fn test_prompt_through_the_queue_leaves_one_done_run_row() {
-        let (queue, log, dir) = test_queue(crate::ai::runner::select_runner(true, None));
+        let (queue, log, dir) = test_queue(crate::ai::runner::select_runner(true, None, None));
         run_test_prompt_with(&queue, &queue.control()).unwrap();
         let storage = log.0.get().unwrap();
         let rows = storage
@@ -1866,7 +2252,7 @@ mod tests {
 
     #[test]
     fn cancel_run_checks_the_id_and_says_when_the_run_is_not_active() {
-        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None));
+        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None, None));
         assert_eq!(
             cancel_run_with(&queue, " ").unwrap_err().code,
             "invalid_input"
@@ -1884,10 +2270,36 @@ mod tests {
 
     #[test]
     fn cancel_run_blocking_runs_the_cancel_on_a_blocking_thread() {
-        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None));
+        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None, None));
         let err = tauri::async_runtime::block_on(cancel_run_blocking(queue, "no-such-run".into()))
             .unwrap_err();
         assert_eq!(err.code, "run_not_active");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Every task gets the same fixed row, standing in for the owner's Settings choice.
+    struct FixedChoice(ModelRow);
+
+    impl ModelChoices for FixedChoice {
+        fn row(&self, _task: &str) -> Option<ModelRow> {
+            Some(self.0)
+        }
+    }
+
+    #[test]
+    fn the_app_queue_runs_the_test_prompt_with_the_owners_model_and_effort() {
+        let fake = Arc::new(crate::ai::fake::FakeRunner::new(
+            crate::ai::fake::FakeResult::Valid(r#"{"answer":"Hi"}"#.into()),
+        ));
+        let mut row = models::default_row("test_prompt").unwrap();
+        row.model = models::AiModel::Opus;
+        row.effort = models::AiEffort::High;
+        let (queue, _log, dir) =
+            test_queue(models::app_runner(fake.clone(), Arc::new(FixedChoice(row))));
+        run_test_prompt_with(&queue, &queue.control()).unwrap();
+        let seen = fake.requests();
+        assert_eq!(seen[0].model, "opus");
+        assert_eq!(seen[0].effort.as_deref(), Some("high"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -2203,5 +2615,64 @@ mod tests {
             delete_item::<Run>(&closed, "x").unwrap_err().code,
             "storage_unavailable"
         );
+    }
+
+    fn row_of(table: &AiModelTable, feature: &str) -> (String, String) {
+        let r = table.rows.iter().find(|r| r.feature == feature).unwrap();
+        (r.model.value().to_string(), r.effort.value().to_string())
+    }
+
+    #[test]
+    fn set_ai_model_with_an_unknown_model_gives_invalid_ai_model_and_keeps_the_row() {
+        let (state, dir) = app_storage();
+        set_ai_model_with(&state, "save", "sonnet", "high").unwrap();
+        let err = set_ai_model_with(&state, "save", "gpt-4", "low").unwrap_err();
+        assert_eq!(err.code, "invalid_ai_model");
+        assert!(err.message.contains("gpt-4"));
+        let table = list_ai_models_with(&state).unwrap();
+        assert_eq!(row_of(&table, "save"), ("sonnet".into(), "high".into()));
+        let err = set_ai_model_with(&state, "save", "opus", "xhigh").unwrap_err();
+        assert_eq!(err.code, "invalid_ai_model");
+        let err = set_ai_model_with(&state, "nope", "opus", "low").unwrap_err();
+        assert_eq!(err.code, "invalid_ai_model");
+        let table = list_ai_models_with(&state).unwrap();
+        assert_eq!(row_of(&table, "save"), ("sonnet".into(), "high".into()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ai_model_commands_list_set_reset_end_to_end() {
+        let (state, dir) = app_storage();
+        let first = list_ai_models_with(&state).unwrap();
+        assert_eq!(first.rows.len(), models::DEFAULTS.len());
+        assert_eq!(row_of(&first, "save"), ("haiku".into(), "low".into()));
+        let set = set_ai_model_with(&state, "ask", "opus", "high").unwrap();
+        assert_eq!(row_of(&set, "ask"), ("opus".into(), "high".into()));
+        assert_eq!(list_ai_models_with(&state).unwrap(), set);
+        let reset = reset_ai_models_with(&state).unwrap();
+        assert_eq!(row_of(&reset, "ask"), ("sonnet".into(), "medium".into()));
+        assert_eq!(reset.rows, models::DEFAULTS.to_vec());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ai_model_error_message_has_no_path_or_debug_text() {
+        let (state, dir) = app_storage();
+        let mut errors = vec![
+            set_ai_model_with(&state, "save", "gpt-4", "low").unwrap_err(),
+            set_ai_model_with(&state, "save", "opus", "xhigh").unwrap_err(),
+            set_ai_model_with(&state, "nope", "opus", "low").unwrap_err(),
+        ];
+        let closed = AppStorage::new(Err(StartupError {
+            code: "x",
+            detail: "/secret/path".into(),
+        }));
+        errors.push(list_ai_models_with(&closed).unwrap_err());
+        for e in errors {
+            for bad in ["/", "\\", "Error", "panicked", "Storage(", "{", "secret"] {
+                assert!(!e.message.contains(bad), "{} has {bad}", e.message);
+            }
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

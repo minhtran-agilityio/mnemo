@@ -79,6 +79,8 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             system::window::show_main(app);
         }))
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         // Keep size and position (not visibility, so a hidden window never starts hidden).
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -129,12 +131,22 @@ pub fn run() {
                     log::error!("could not send the ai-control event: {e}");
                 }
             }));
+            // Mnemo's own Claude config files are made once and never rewritten. If they cannot be
+            // made, no AI run starts; saving and reading still work. The log holds the error
+            // kind only: no path, no file text.
+            let claude_config = paths.as_ref().ok().and_then(|p| {
+                ai::config::ensure_config(&p.config_dir)
+                    .map_err(|e| {
+                        log::error!("could not create Mnemo's Claude config: {:?}", e.kind())
+                    })
+                    .ok()
+            });
             let runs_dir = paths
                 .as_ref()
                 .ok()
                 .map(|p| ai::runner::runs_dir(&p.data_dir));
-            let runner: Arc<dyn ai::runner::AiRunner> = if fake {
-                ai::runner::select_runner(true, runs_dir)
+            let inner: Arc<dyn ai::runner::AiRunner> = if fake {
+                ai::runner::select_runner(true, runs_dir, claude_config)
             } else {
                 // The real runner hands each usage reading of a run to the control.
                 let sink_control = control.clone();
@@ -142,8 +154,18 @@ pub fn run() {
                     let now = sink_control.now();
                     sink_control.on_usage_reading(reading, now);
                 });
-                Arc::new(ai::claude::UsageClaudeRunner::new(runs_dir, sink))
+                Arc::new(ai::claude::UsageClaudeRunner::new(
+                    runs_dir,
+                    claude_config,
+                    sink,
+                ))
             };
+            // Every run reads its feature's model and effort from the settings table (#24),
+            // so the queue gets the runner wrapped in `ConfiguredRunner`.
+            let runner = ai::models::app_runner(
+                inner,
+                Arc::new(commands::StoredChoices(app.handle().clone())),
+            );
             app.manage(AiRunnerState { fake });
 
             // Every AI run goes through this queue: at most 2 at once, owner tasks first. Its
@@ -230,10 +252,17 @@ pub fn run() {
             commands::ping,
             commands::get_setting,
             commands::set_setting,
+            commands::export_data,
+            commands::reset_data,
+            commands::data_folder_info,
+            commands::open_data_folder,
             commands::get_ai_health,
             commands::check_ai_health,
             commands::get_ai_mode,
             commands::run_test_prompt,
+            commands::list_ai_models,
+            commands::set_ai_model,
+            commands::reset_ai_models,
             commands::cancel_run,
             commands::get_ai_control,
             commands::set_ai_enabled,

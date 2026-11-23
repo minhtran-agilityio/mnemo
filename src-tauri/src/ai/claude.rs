@@ -18,6 +18,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::cancel::CancelToken;
+use super::config::ClaudeConfig;
 use super::health::{ClaudeCli, SystemClaude};
 use super::process::{self, Limits, ProcessError};
 use super::run_dir::RunDir;
@@ -50,7 +51,13 @@ pub enum OutputMode {
 
 /// The `claude -p` command for one task. Mnemo's own settings only: no `--bare`, the
 /// subscription is used (no API key in the child), and the run starts in `work_dir`.
-pub fn build_command(program: &Path, task: &AiTask, work_dir: &Path, mode: OutputMode) -> Command {
+pub fn build_command(
+    program: &Path,
+    task: &AiTask,
+    work_dir: &Path,
+    config: &ClaudeConfig,
+    mode: OutputMode,
+) -> Command {
     let mut command = Command::new(program);
     // The prompt is not an argument: other local accounts can read a command line (`ps`), and
     // one argument is capped in size. `claude -p` with no prompt argument reads it from stdin,
@@ -75,6 +82,10 @@ pub fn build_command(program: &Path, task: &AiTask, work_dir: &Path, mode: Outpu
         .args(["--permission-mode", "dontAsk"])
         .args(["--setting-sources", "project"])
         .arg("--strict-mcp-config")
+        .arg("--mcp-config")
+        .arg(config.mcp_path())
+        .arg("--settings")
+        .arg(config.settings_path())
         .arg("--no-session-persistence")
         .arg("--model")
         .arg(&task.model);
@@ -386,9 +397,10 @@ pub fn run_claude(
     program: &Path,
     task: &AiTask,
     runs_dir: &Path,
+    config: &ClaudeConfig,
     cancel: &CancelToken,
 ) -> Result<AiOutput, AiError> {
-    run_claude_with_usage(program, task, runs_dir, cancel, None)
+    run_claude_with_usage(program, task, runs_dir, config, cancel, None)
 }
 
 /// `run_claude`, and each usage reading in the output goes to `usage` (see
@@ -397,12 +409,13 @@ pub fn run_claude_with_usage(
     program: &Path,
     task: &AiTask,
     runs_dir: &Path,
+    config: &ClaudeConfig,
     cancel: &CancelToken,
     usage: Option<&UsageSink>,
 ) -> Result<AiOutput, AiError> {
     let started = Instant::now();
     let run_dir = RunDir::create(runs_dir).map_err(|_| AiError::Unavailable)?;
-    let command = build_command(program, task, run_dir.path(), OutputMode::Json);
+    let command = build_command(program, task, run_dir.path(), config, OutputMode::Json);
     let result = process::run_bounded_with(
         command,
         limits_for(task),
@@ -426,12 +439,19 @@ pub fn run_claude_with_usage(
 pub struct UsageClaudeRunner {
     /// Mnemo's folder for per-run folders; `None` when the data folder could not be found.
     runs_dir: Option<PathBuf>,
+    /// Mnemo's own Claude config files; `None` when they could not be made. Either `None`
+    /// starts no run (see `runner::prepare`).
+    config: Option<ClaudeConfig>,
     usage: UsageSink,
 }
 
 impl UsageClaudeRunner {
-    pub fn new(runs_dir: Option<PathBuf>, usage: UsageSink) -> Self {
-        UsageClaudeRunner { runs_dir, usage }
+    pub fn new(runs_dir: Option<PathBuf>, config: Option<ClaudeConfig>, usage: UsageSink) -> Self {
+        UsageClaudeRunner {
+            runs_dir,
+            config,
+            usage,
+        }
     }
 }
 
@@ -444,19 +464,19 @@ fn guard_against_test_use() {
 impl AiRunner for UsageClaudeRunner {
     fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
         guard_against_test_use();
-        let Some(runs_dir) = &self.runs_dir else {
-            return Err(AiError::Unavailable);
-        };
+        let (runs_dir, config) =
+            super::runner::prepare(self.runs_dir.as_ref(), self.config.as_ref())?;
         let Some(program) = SystemClaude::from_env().locate() else {
             return Err(AiError::Unavailable);
         };
-        run_claude_with_usage(&program, task, runs_dir, cancel, Some(&self.usage))
+        run_claude_with_usage(&program, task, runs_dir, config, cancel, Some(&self.usage))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ai::config::{ensure_config, test_config};
     use std::ffi::OsStr;
     use std::path::PathBuf;
 
@@ -515,6 +535,7 @@ mod tests {
             Path::new("/x/claude"),
             &task(),
             Path::new("/work"),
+            &test_config(),
             OutputMode::Json,
         );
         let args = args_of(&command);
@@ -536,7 +557,13 @@ mod tests {
     #[test]
     fn the_command_args_never_hold_bare() {
         for mode in [OutputMode::Json, OutputMode::StreamJson] {
-            let command = build_command(Path::new("/x/claude"), &task(), Path::new("/w"), mode);
+            let command = build_command(
+                Path::new("/x/claude"),
+                &task(),
+                Path::new("/w"),
+                &test_config(),
+                mode,
+            );
             assert!(!args_of(&command).iter().any(|a| a == "--bare"));
         }
     }
@@ -547,6 +574,7 @@ mod tests {
             Path::new("/x/claude"),
             &task(),
             Path::new("/w"),
+            &test_config(),
             OutputMode::StreamJson,
         );
         let args = args_of(&command);
@@ -563,6 +591,7 @@ mod tests {
             Path::new("/x/claude"),
             &t,
             Path::new("/w"),
+            &test_config(),
             OutputMode::Json,
         );
         let args = args_of(&command);
@@ -578,6 +607,7 @@ mod tests {
             Path::new("/x/claude"),
             &task(),
             Path::new("/w"),
+            &test_config(),
             OutputMode::Json,
         );
         let key = command
@@ -776,6 +806,7 @@ mod tests {
             &program,
             &task(),
             &runs(),
+            &test_config(),
             &CancelToken::default(),
             Some(&sink),
         )
@@ -787,7 +818,7 @@ mod tests {
     #[test]
     fn the_usage_claude_runner_panics_in_a_test() {
         let sink: UsageSink = std::sync::Arc::new(|_| {});
-        let runner = UsageClaudeRunner::new(Some(std::env::temp_dir()), sink);
+        let runner = UsageClaudeRunner::new(Some(std::env::temp_dir()), Some(test_config()), sink);
         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             runner.run_task(&task(), &CancelToken::default())
         }));
@@ -860,14 +891,27 @@ mod tests {
     #[test]
     fn a_stand_in_claude_that_prints_a_result_gives_the_answer() {
         let program = stand_in("ok", &format!("cat <<'EOF'\n{}\nEOF", result_object()));
-        let got = run_claude(&program, &task(), &runs(), &CancelToken::default()).unwrap();
+        let got = run_claude(
+            &program,
+            &task(),
+            &runs(),
+            &test_config(),
+            &CancelToken::default(),
+        )
+        .unwrap();
         assert_eq!(got.structured_output, r#"{"greeting":"Hi!"}"#);
     }
 
     #[test]
     fn a_stand_in_claude_with_a_failing_exit_gives_an_exit_error() {
         let program = stand_in("fail", &format!("echo '{}'; exit 1", result_object()));
-        let got = run_claude(&program, &task(), &runs(), &CancelToken::default());
+        let got = run_claude(
+            &program,
+            &task(),
+            &runs(),
+            &test_config(),
+            &CancelToken::default(),
+        );
         assert_eq!(got, Err(AiError::ExitError { code: Some(1) }));
     }
 
@@ -882,7 +926,13 @@ mod tests {
         let mut t = task();
         t.timeout = Duration::from_secs(1);
         let started = Instant::now();
-        let got = run_claude(&program, &t, &runs(), &CancelToken::default());
+        let got = run_claude(
+            &program,
+            &t,
+            &runs(),
+            &test_config(),
+            &CancelToken::default(),
+        );
         assert_eq!(got, Err(AiError::Timeout));
         assert!(started.elapsed() < Duration::from_secs(5));
         let pid = std::fs::read_to_string(&marker).unwrap().trim().to_string();
@@ -914,7 +964,14 @@ mod tests {
                 result_object()
             ),
         );
-        run_claude(&program, &task(), &runs, &CancelToken::default()).unwrap();
+        run_claude(
+            &program,
+            &task(),
+            &runs,
+            &test_config(),
+            &CancelToken::default(),
+        )
+        .unwrap();
         let cwd = PathBuf::from(std::fs::read_to_string(&seen).unwrap().trim());
         let _ = std::fs::remove_file(&seen);
         let runs_real = std::fs::canonicalize(&runs).unwrap();
@@ -933,7 +990,13 @@ mod tests {
         std::fs::write(&file, "not a folder").unwrap();
         let marker = std::env::temp_dir().join(format!("mnemo-ran-{}", uuid::Uuid::new_v4()));
         let program = stand_in("noruns", &format!("touch '{}'", marker.display()));
-        let got = run_claude(&program, &task(), &file, &CancelToken::default());
+        let got = run_claude(
+            &program,
+            &task(),
+            &file,
+            &test_config(),
+            &CancelToken::default(),
+        );
         let ran = marker.exists();
         let _ = std::fs::remove_file(&file);
         let _ = std::fs::remove_file(&marker);
@@ -947,6 +1010,7 @@ mod tests {
             Path::new("/x/claude"),
             &task(),
             Path::new("/w"),
+            &test_config(),
             OutputMode::Json,
         );
         for name in ROUTING_ENV {
@@ -966,7 +1030,14 @@ mod tests {
                 result_object()
             ),
         );
-        run_claude(&program, &task(), &runs(), &CancelToken::default()).unwrap();
+        run_claude(
+            &program,
+            &task(),
+            &runs(),
+            &test_config(),
+            &CancelToken::default(),
+        )
+        .unwrap();
         let input = std::fs::read_to_string(format!("{}.in", seen.display())).unwrap();
         let args = std::fs::read_to_string(format!("{}.args", seen.display())).unwrap();
         let _ = std::fs::remove_file(format!("{}.in", seen.display()));
@@ -982,7 +1053,13 @@ mod tests {
             "echo 'Claude AI usage limit reached|1700000000' >&2; exit 1",
         );
         assert_eq!(
-            run_claude(&program, &task(), &runs(), &CancelToken::default()),
+            run_claude(
+                &program,
+                &task(),
+                &runs(),
+                &test_config(),
+                &CancelToken::default()
+            ),
             Err(AiError::UsageLimit)
         );
     }
@@ -999,7 +1076,13 @@ mod tests {
             &format!("cat <<'EOF'\n{events}\nEOF\nexit 1"),
         );
         assert_eq!(
-            run_claude(&program, &task(), &runs(), &CancelToken::default()),
+            run_claude(
+                &program,
+                &task(),
+                &runs(),
+                &test_config(),
+                &CancelToken::default()
+            ),
             Err(AiError::ExitError { code: Some(1) })
         );
     }
@@ -1014,7 +1097,14 @@ mod tests {
                 result_object()
             ),
         );
-        let got = run_claude(&program, &task(), &runs(), &CancelToken::default()).unwrap();
+        let got = run_claude(
+            &program,
+            &task(),
+            &runs(),
+            &test_config(),
+            &CancelToken::default(),
+        )
+        .unwrap();
         assert_eq!(got.structured_output, r#"{"greeting":"Hi!"}"#);
     }
 
@@ -1025,7 +1115,13 @@ mod tests {
             "echo 'Claude AI usage limit reached'; exit 1",
         );
         assert_eq!(
-            run_claude(&program, &task(), &runs(), &CancelToken::default()),
+            run_claude(
+                &program,
+                &task(),
+                &runs(),
+                &test_config(),
+                &CancelToken::default()
+            ),
             Err(AiError::UsageLimit)
         );
     }
@@ -1070,8 +1166,57 @@ mod tests {
             Path::new("/nonexistent/claude"),
             &task(),
             &runs(),
+            &test_config(),
             &CancelToken::default(),
         );
         assert_eq!(got, Err(AiError::Unavailable));
+    }
+
+    #[test]
+    fn the_config_args_come_in_json_and_stream_mode_each() {
+        let dir = std::env::temp_dir().join(format!("mnemo-args-config-{}", uuid::Uuid::new_v4()));
+        let config = ensure_config(&dir).unwrap();
+        for mode in [OutputMode::Json, OutputMode::StreamJson] {
+            let command = build_command(
+                Path::new("/x/claude"),
+                &task(),
+                Path::new("/w"),
+                &config,
+                mode,
+            );
+            let args = args_of(&command);
+            let mcp = dir.join("mcp.json").display().to_string();
+            let settings = dir.join("settings.json").display().to_string();
+            assert!(has_pair(&args, "--mcp-config", &mcp), "{mode:?}");
+            assert!(has_pair(&args, "--settings", &settings), "{mode:?}");
+            assert!(has_pair(&args, "--setting-sources", "project"), "{mode:?}");
+            assert!(
+                args.contains(&"--strict-mcp-config".to_string()),
+                "{mode:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_run_folder_is_never_the_config_dir_and_the_config_files_stay() {
+        let runs = std::env::temp_dir().join(format!("mnemo-runs-{}", uuid::Uuid::new_v4()));
+        let seen = std::env::temp_dir().join(format!("mnemo-cwd-{}", uuid::Uuid::new_v4()));
+        let config = test_config();
+        let program = stand_in(
+            "cwdconfig",
+            &format!(
+                "pwd > '{}'\ncat <<'EOF'\n{}\nEOF",
+                seen.display(),
+                result_object()
+            ),
+        );
+        run_claude(&program, &task(), &runs, &config, &CancelToken::default()).unwrap();
+        let cwd = PathBuf::from(std::fs::read_to_string(&seen).unwrap().trim());
+        let _ = std::fs::remove_file(&seen);
+        assert!(!cwd.starts_with(std::fs::canonicalize(config.dir()).unwrap()));
+        assert!(!cwd.starts_with(std::env::temp_dir().join("mnemo-test-config")));
+        assert!(config.is_ready());
+        let _ = std::fs::remove_dir_all(&runs);
     }
 }
