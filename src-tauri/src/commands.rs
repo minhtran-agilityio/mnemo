@@ -1,27 +1,29 @@
 // Commands the UI can call through Tauri's invoke bridge, and the state they share.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
 use crate::ai::claude::error_kind;
 use crate::ai::health::{self, AiHealth};
-use crate::ai::runner::{AiError, AiRunner};
+use crate::ai::runner::AiError;
 use crate::ai::test_prompt;
+use crate::scheduler::queue::{CancelOutcome, Priority, RunLog, RunLogError, RunQueue};
 use crate::storage::export::{ExportError, ExportSummary, FolderState};
 use crate::storage::files::OrphanReport;
 use crate::storage::ideas::{Idea, IdeaInput, IdeaProject};
 use crate::storage::items::{
     Bookmark, BookmarkInput, Event, EventInput, Memory, MemoryInput, Note, NoteInput, Project,
-    ProjectInput, Run, RunInput, Task, TaskInput,
+    ProjectInput, Run, Task, TaskInput,
 };
 use crate::storage::labels::{
     ChangePage, ChangePageRequest, DeleteLabelOutcome, Label, LabelledNote,
 };
 use crate::storage::links::Link;
-use crate::storage::record::{Cursor, Page};
+use crate::storage::record::{now_iso, Cursor, Page};
+use crate::storage::runs::RunEnd;
 use crate::storage::{FileRecord, Item, ItemRef, PageRequest, Storage, StorageError};
 
 /// The one error shape every command returns: a stable machine `code` and a plain
@@ -136,10 +138,9 @@ pub enum AiMode {
     Fake,
 }
 
-/// The runner every AI feature uses, and which kind it is. Chosen once at start from
-/// `MNEMO_FAKE_AI`.
+/// Which kind of runner the app uses, chosen once at start from `MNEMO_FAKE_AI`. Every AI
+/// run goes through the `RunQueue`, which holds the runner itself.
 pub struct AiRunnerState {
-    pub runner: Arc<dyn AiRunner>,
     pub fake: bool,
 }
 
@@ -177,6 +178,7 @@ fn ai_failed(error: &AiError) -> AppError {
         AiError::SchemaMismatch => "Claude answered, but not in the shape Mnemo asked for.",
         AiError::ExitError { .. } => "Claude Code stopped with an error.",
         AiError::Unavailable => "Claude Code could not be started.",
+        AiError::Cancelled => "The run was cancelled.",
     };
     AppError {
         code: error_kind(error),
@@ -184,30 +186,140 @@ fn ai_failed(error: &AiError) -> AppError {
     }
 }
 
-/// Runs the test prompt on this thread and times it. The command calls this on a blocking thread.
-fn run_test_prompt_with(runner: &dyn AiRunner) -> Result<TestPromptResult, AppError> {
+fn test_prompt_unfinished() -> AppError {
+    AppError {
+        code: "task_failed",
+        message: "The test prompt did not finish.".to_string(),
+    }
+}
+
+/// Runs the test prompt through the queue as an owner task, waits for it on this thread and
+/// times it. The command calls this on a blocking thread.
+fn run_test_prompt_with(queue: &RunQueue) -> Result<TestPromptResult, AppError> {
     let started = std::time::Instant::now();
-    let answer = test_prompt::run(runner).map_err(|e| ai_failed(&e))?;
+    let ticket = queue
+        .submit(Priority::Owner, test_prompt::task())
+        .map_err(|e| {
+            log::error!("the test prompt could not be queued: {e}");
+            AppError {
+                code: "storage_unavailable",
+                message: "Mnemo could not record the run in its data file, so it did not start. Nothing was changed.".to_string(),
+            }
+        })?;
+    // The queue always answers, unless the runner stopped without a result.
+    let output = ticket.done.recv().map_err(|_| {
+        log::error!("the test prompt run {} stopped without a result", ticket.id);
+        test_prompt_unfinished()
+    })?;
+    let answer = output
+        .and_then(|o| test_prompt::answer(&o))
+        .map_err(|e| ai_failed(&e))?;
     Ok(TestPromptResult {
         answer,
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     })
 }
 
-/// Sends one tiny fixed prompt through the selected runner (the fake with `MNEMO_FAKE_AI=1`).
-/// A real run uses Claude usage. It runs on a blocking thread, never on the main thread.
+/// Sends one tiny fixed prompt through the run queue and the selected runner (the fake with
+/// `MNEMO_FAKE_AI=1`). A real run uses Claude usage. It runs on a blocking thread, never on
+/// the main thread.
 #[tauri::command]
 pub async fn run_test_prompt(app: tauri::AppHandle) -> Result<TestPromptResult, AppError> {
-    let runner = app.state::<AiRunnerState>().runner.clone();
-    tauri::async_runtime::spawn_blocking(move || run_test_prompt_with(runner.as_ref()))
+    let queue = app.state::<RunQueue>().inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_test_prompt_with(&queue))
         .await
         .unwrap_or_else(|e| {
             log::error!("the test prompt did not finish: {e}");
+            Err(test_prompt_unfinished())
+        })
+}
+
+/// The longest run id the cancel command takes. Run ids are UUIDs (36 characters).
+const MAX_RUN_ID_LEN: usize = 100;
+
+fn cancel_run_with(queue: &RunQueue, id: &str) -> Result<(), AppError> {
+    if id.trim().is_empty() || id.len() > MAX_RUN_ID_LEN {
+        return Err(AppError {
+            code: "invalid_input",
+            message: "The run id must be 1 to 100 characters.".to_string(),
+        });
+    }
+    match queue.cancel(id) {
+        CancelOutcome::Removed | CancelOutcome::Signalled => Ok(()),
+        CancelOutcome::NotActive => Err(AppError {
+            code: "run_not_active",
+            message: "This run is not waiting or running, so there is nothing to cancel."
+                .to_string(),
+        }),
+    }
+}
+
+/// Cancels a waiting or running AI run. A waiting run leaves the queue; a running run's
+/// process is stopped. The run's row ends as cancelled.
+#[tauri::command]
+pub async fn cancel_run(app: tauri::AppHandle, id: String) -> Result<(), AppError> {
+    let queue = app.state::<RunQueue>().inner().clone();
+    cancel_run_blocking(queue, id).await
+}
+
+/// Cancelling a waiting run writes its row, so it runs on a blocking thread.
+async fn cancel_run_blocking(queue: RunQueue, id: String) -> Result<(), AppError> {
+    tauri::async_runtime::spawn_blocking(move || cancel_run_with(&queue, &id))
+        .await
+        .unwrap_or_else(|e| {
+            log::error!("the cancel did not finish: {e}");
             Err(AppError {
                 code: "task_failed",
-                message: "The test prompt did not finish.".to_string(),
+                message: "The cancel did not finish.".to_string(),
             })
         })
+}
+
+fn run_log_failed(e: StorageError) -> RunLogError {
+    RunLogError(e.to_string())
+}
+
+// The run log writes through the one storage the commands use. Each call locks it briefly.
+fn log_enqueue(storage: &AppStorage, task_type: &str) -> Result<String, RunLogError> {
+    let storage = storage.get().map_err(|e| RunLogError(e.message))?;
+    let run = storage
+        .enqueue_run(task_type, &now_iso())
+        .map_err(run_log_failed)?;
+    Ok(run.base.id)
+}
+
+fn log_start(storage: &AppStorage, id: &str) -> Result<(), RunLogError> {
+    let storage = storage.get().map_err(|e| RunLogError(e.message))?;
+    storage.start_run(id, &now_iso()).map_err(run_log_failed)
+}
+
+fn log_finish(
+    storage: &AppStorage,
+    id: &str,
+    end: &RunEnd,
+    duration_ms: Option<i64>,
+) -> Result<(), RunLogError> {
+    let storage = storage.get().map_err(|e| RunLogError(e.message))?;
+    storage
+        .finish_run(id, end, duration_ms, &now_iso())
+        .map_err(run_log_failed)
+}
+
+/// The run queue's log in the app: the `run` table behind the managed `AppStorage`.
+pub struct AppRunLog(pub tauri::AppHandle);
+
+impl RunLog for AppRunLog {
+    fn enqueue(&self, task_type: &str) -> Result<String, RunLogError> {
+        log_enqueue(&self.0.state::<AppStorage>(), task_type)
+    }
+
+    fn start(&self, id: &str) -> Result<(), RunLogError> {
+        log_start(&self.0.state::<AppStorage>(), id)
+    }
+
+    fn finish(&self, id: &str, end: &RunEnd, duration_ms: Option<i64>) -> Result<(), RunLogError> {
+        log_finish(&self.0.state::<AppStorage>(), id, end, duration_ms)
+    }
 }
 
 /// Returns a fixed reply so the UI can prove the Rust core is reachable.
@@ -863,7 +975,20 @@ item_commands!(
     update_event,
     delete_event
 );
-item_commands!(Run, RunInput, add_run, get_run, list_runs, update_run, delete_run);
+// Run rows belong to the run queue (it adds them, moves them through their states and ends
+// them), so the UI can only read them. Cancelling goes through `cancel_run`.
+
+/// The live run with this id.
+#[tauri::command]
+pub async fn get_run(app: tauri::AppHandle, id: String) -> Result<Run, AppError> {
+    off_main_thread(app, move |s| get_item::<Run>(s, &id)).await
+}
+
+/// One page of runs, newest first.
+#[tauri::command]
+pub async fn list_runs(app: tauri::AppHandle, args: ListArgs) -> Result<Page<Run>, AppError> {
+    off_main_thread(app, move |s| list_items::<Run>(s, &args)).await
+}
 item_commands!(
     Memory,
     MemoryInput,
@@ -1055,6 +1180,7 @@ pub async fn list_labelled_notes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn ping_returns_pong() {
@@ -1435,25 +1561,153 @@ mod tests {
     fn ai_mode_serialises_as_fake_or_real_and_follows_the_state() {
         assert_eq!(serde_json::to_string(&AiMode::Fake).unwrap(), "\"fake\"");
         assert_eq!(serde_json::to_string(&AiMode::Real).unwrap(), "\"real\"");
-        let fake = AiRunnerState {
-            runner: crate::ai::runner::select_runner(true, None, None),
-            fake: true,
-        };
-        let real = AiRunnerState {
-            runner: crate::ai::runner::select_runner(false, None, None),
-            fake: false,
-        };
+        let fake = AiRunnerState { fake: true };
+        let real = AiRunnerState { fake: false };
         assert_eq!(fake.mode(), AiMode::Fake);
         assert_eq!(real.mode(), AiMode::Real);
     }
 
+    /// The run log of the tests: the same functions as the app's, on a temporary storage.
+    struct StorageLog(AppStorage);
+
+    impl RunLog for StorageLog {
+        fn enqueue(&self, task_type: &str) -> Result<String, RunLogError> {
+            log_enqueue(&self.0, task_type)
+        }
+        fn start(&self, id: &str) -> Result<(), RunLogError> {
+            log_start(&self.0, id)
+        }
+        fn finish(
+            &self,
+            id: &str,
+            end: &RunEnd,
+            duration_ms: Option<i64>,
+        ) -> Result<(), RunLogError> {
+            log_finish(&self.0, id, end, duration_ms)
+        }
+    }
+
+    /// A queue on `runner` and a temporary storage, as the app builds it.
+    fn test_queue(
+        runner: Arc<dyn crate::ai::runner::AiRunner>,
+    ) -> (RunQueue, Arc<StorageLog>, std::path::PathBuf) {
+        let (storage, dir) = app_storage();
+        let log = Arc::new(StorageLog(storage));
+        let notify: crate::scheduler::queue::Notifier = Arc::new(|_| {});
+        (RunQueue::new(runner, log.clone(), notify), log, dir)
+    }
+
     #[test]
     fn test_prompt_command_with_the_fake_gives_the_fake_answer() {
-        let runner = crate::ai::runner::select_runner(true, None, None);
-        let got = run_test_prompt_with(runner.as_ref()).unwrap();
+        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None, None));
+        let got = run_test_prompt_with(&queue).unwrap();
         assert_eq!(got.answer, "Fake answer: AI is in test mode.");
         let json = serde_json::to_value(&got).unwrap();
         assert!(json.get("durationMs").is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_prompt_through_the_queue_leaves_one_done_run_row() {
+        let (queue, log, dir) = test_queue(crate::ai::runner::select_runner(true, None, None));
+        run_test_prompt_with(&queue).unwrap();
+        let storage = log.0.get().unwrap();
+        let rows = storage
+            .list::<Run>(
+                &PageRequest {
+                    limit: 10,
+                    after: None,
+                },
+                true,
+            )
+            .unwrap()
+            .items;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].task_type, "test_prompt");
+        assert_eq!(rows[0].state, crate::storage::items::RunState::Done);
+        assert!(rows[0].ended_at.is_some());
+        drop(storage);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_prompt_gives_the_runner_error_and_writes_it_to_the_row() {
+        let fake = Arc::new(crate::ai::fake::FakeRunner::new(
+            crate::ai::fake::FakeResult::Timeout,
+        ));
+        let (queue, log, dir) = test_queue(fake);
+        let err = run_test_prompt_with(&queue).unwrap_err();
+        assert_eq!(err.code, "timeout");
+        let storage = log.0.get().unwrap();
+        let page = PageRequest {
+            limit: 10,
+            after: None,
+        };
+        let rows = storage.list::<Run>(&page, true).unwrap().items;
+        assert_eq!(rows[0].error.as_deref(), Some("the AI run timed out"));
+        drop(storage);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_prompt_reports_storage_unavailable_and_starts_no_run() {
+        let fake = Arc::new(crate::ai::fake::FakeRunner::new(
+            crate::ai::fake::FakeResult::Timeout,
+        ));
+        let log = Arc::new(StorageLog(AppStorage::new(Err(StartupError {
+            code: "open",
+            detail: "x".into(),
+        }))));
+        let notify: crate::scheduler::queue::Notifier = Arc::new(|_| {});
+        let queue = RunQueue::new(fake.clone(), log, notify);
+        let err = run_test_prompt_with(&queue).unwrap_err();
+        assert_eq!(err.code, "storage_unavailable");
+        assert!(fake.requests().is_empty());
+    }
+
+    #[test]
+    fn cancel_run_checks_the_id_and_says_when_the_run_is_not_active() {
+        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None, None));
+        assert_eq!(
+            cancel_run_with(&queue, " ").unwrap_err().code,
+            "invalid_input"
+        );
+        assert_eq!(
+            cancel_run_with(&queue, &"x".repeat(101)).unwrap_err().code,
+            "invalid_input"
+        );
+        assert_eq!(
+            cancel_run_with(&queue, "no-such-run").unwrap_err().code,
+            "run_not_active"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cancel_run_blocking_runs_the_cancel_on_a_blocking_thread() {
+        let (queue, _log, dir) = test_queue(crate::ai::runner::select_runner(true, None, None));
+        let err = tauri::async_runtime::block_on(cancel_run_blocking(queue, "no-such-run".into()))
+            .unwrap_err();
+        assert_eq!(err.code, "run_not_active");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cancel_run_stops_a_running_run() {
+        let fake = Arc::new(crate::ai::fake::FakeRunner::new(
+            crate::ai::fake::FakeResult::BlockUntilCancelled,
+        ));
+        let (queue, _log, dir) = test_queue(fake);
+        let ticket = queue.submit(Priority::Owner, test_prompt::task()).unwrap();
+        cancel_run_with(&queue, &ticket.id).unwrap();
+        assert_eq!(
+            ticket
+                .done
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap(),
+            Err(AiError::Cancelled)
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1465,6 +1719,7 @@ mod tests {
             AiError::ExitError { code: Some(1) },
             AiError::ExitError { code: None },
             AiError::Unavailable,
+            AiError::Cancelled,
         ];
         let mut codes = Vec::new();
         for e in &errors {
@@ -1482,7 +1737,8 @@ mod tests {
         );
         codes.sort_unstable();
         codes.dedup();
-        assert_eq!(codes.len(), 5);
+        assert_eq!(codes.len(), 6);
+        assert_eq!(ai_failed(&AiError::Cancelled).code, "cancelled");
     }
 
     #[test]

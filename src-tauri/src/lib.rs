@@ -5,11 +5,18 @@ mod scheduler;
 mod storage;
 mod system;
 
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use std::sync::Arc;
+
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_window_state::StateFlags;
 
-use commands::{AiHealthState, AiRunnerState, AppStorage, StartupError};
+use commands::{AiHealthState, AiRunnerState, AppRunLog, AppStorage, StartupError};
+use scheduler::queue::{Notifier, RunEvent, RunQueue};
 use storage::StorageError;
+
+/// The event the UI gets on every AI run state change. Its payload is a `RunEvent`: the run
+/// id, the task name and the state, nothing else.
+const RUN_STATE_EVENT: &str = "run-state";
 
 /// The stable code for a storage error. Only this code reaches the UI; the full
 /// reason, which can name file paths, goes to the terminal.
@@ -114,17 +121,32 @@ pub fn run() {
                     })
                     .ok()
             });
-            app.manage(AiRunnerState {
-                runner: ai::runner::select_runner(
-                    fake,
-                    paths
-                        .as_ref()
-                        .ok()
-                        .map(|p| ai::runner::runs_dir(&p.data_dir)),
-                    claude_config,
-                ),
+            let runner = ai::runner::select_runner(
                 fake,
+                paths
+                    .as_ref()
+                    .ok()
+                    .map(|p| ai::runner::runs_dir(&p.data_dir)),
+                claude_config,
+            );
+            app.manage(AiRunnerState { fake });
+
+            // Every AI run goes through this queue: at most 2 at once, owner tasks first. Its
+            // rows go to the one managed storage, and each state change goes to the UI.
+            let handle = app.handle().clone();
+            let notify: Notifier = Arc::new(move |event: &RunEvent| {
+                if let Err(e) = handle.emit(RUN_STATE_EVENT, event) {
+                    log::error!(
+                        "could not send the run-state event of run {}: {e}",
+                        event.id
+                    );
+                }
             });
+            app.manage(RunQueue::new(
+                runner,
+                Arc::new(AppRunLog(app.handle().clone())),
+                notify,
+            ));
 
             // The Claude Code check runs off the main thread, so the window never waits for
             // it. Saving and reading do not depend on its result.
@@ -200,6 +222,7 @@ pub fn run() {
             commands::check_ai_health,
             commands::get_ai_mode,
             commands::run_test_prompt,
+            commands::cancel_run,
             commands::add_bookmark,
             commands::get_bookmark,
             commands::list_bookmarks,
@@ -231,11 +254,8 @@ pub fn run() {
             commands::list_events,
             commands::update_event,
             commands::delete_event,
-            commands::add_run,
             commands::get_run,
             commands::list_runs,
-            commands::update_run,
-            commands::delete_run,
             commands::add_memory,
             commands::get_memory,
             commands::list_memories,

@@ -201,12 +201,16 @@ test('AC6: only the storage module names SQLite', () => {
 const COMMAND_NAMES = () => {
   const out = [];
   const plural = (k) => (k === 'memory' ? 'memories' : `${k}s`);
-  for (const k of KINDS) out.push(`add_${k}`, `get_${k}`, `list_${plural(k)}`, `update_${k}`, `delete_${k}`);
+  for (const k of KINDS) {
+    // Run rows belong to the run queue, so the UI gets only the read commands for them.
+    if (k === 'run') out.push('get_run', 'list_runs');
+    else out.push(`add_${k}`, `get_${k}`, `list_${plural(k)}`, `update_${k}`, `delete_${k}`);
+  }
   out.push('add_link', 'list_links', 'remove_link');
   return out;
 };
 
-test('AC5: all 43 commands are registered in lib.rs', () => {
+test('AC5: all 40 commands are registered in lib.rs', () => {
   const lib = readFileSync(p('src-tauri', 'src', 'lib.rs'), 'utf8');
   const handler = lib.slice(lib.indexOf('generate_handler!'));
   assert.ok(lib.includes('generate_handler!'), 'no generate_handler! in lib.rs');

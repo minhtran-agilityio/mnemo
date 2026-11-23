@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::cancel::CancelToken;
 use super::claude;
 use super::config::ClaudeConfig;
 use super::fake::{FakeResult, FakeRunner};
@@ -76,6 +77,8 @@ pub enum AiError {
     UsageLimit,
     /// No runner could start: Claude Code is missing, signed out, or not built yet.
     Unavailable,
+    /// The run was cancelled (by the owner or the queue) before it gave an answer.
+    Cancelled,
 }
 
 impl fmt::Display for AiError {
@@ -87,6 +90,7 @@ impl fmt::Display for AiError {
             AiError::Timeout => write!(f, "the AI run timed out"),
             AiError::UsageLimit => write!(f, "the AI usage limit was reached"),
             AiError::Unavailable => write!(f, "AI is not available"),
+            AiError::Cancelled => write!(f, "the AI run was cancelled"),
         }
     }
 }
@@ -95,8 +99,9 @@ impl std::error::Error for AiError {}
 
 /// Runs one AI task. The real runner starts `claude -p`; the fake returns fixed results.
 pub trait AiRunner: Send + Sync {
-    /// Runs `task` and returns its structured output, or why there is none.
-    fn run_task(&self, task: &AiTask) -> Result<AiOutput, AiError>;
+    /// Runs `task` and returns its structured output, or why there is none. When `cancel` is
+    /// set, the run stops as soon as it can and gives `AiError::Cancelled`.
+    fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError>;
 }
 
 /// The real runner: one `claude -p` process per task.
@@ -134,13 +139,13 @@ fn guard_against_test_use() {
 }
 
 impl AiRunner for ClaudeRunner {
-    fn run_task(&self, task: &AiTask) -> Result<AiOutput, AiError> {
+    fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
         guard_against_test_use();
         let (runs_dir, config) = prepare(self.runs_dir.as_ref(), self.config.as_ref())?;
         let Some(program) = SystemClaude::from_env().locate() else {
             return Err(AiError::Unavailable);
         };
-        claude::run_claude(&program, task, runs_dir, config)
+        claude::run_claude(&program, task, runs_dir, config, cancel)
     }
 }
 
@@ -190,7 +195,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "the real AI runner was used in a test")]
     fn the_real_runner_panics_in_a_test() {
-        let _ = ClaudeRunner::new(Some(std::env::temp_dir()), None).run_task(&task());
+        let _ = ClaudeRunner::new(Some(std::env::temp_dir()), None)
+            .run_task(&task(), &CancelToken::default());
     }
 
     #[test]
@@ -209,7 +215,9 @@ mod tests {
 
     #[test]
     fn select_runner_gives_the_fake_answer_when_fake() {
-        let out = select_runner(true, None, None).run_task(&task()).unwrap();
+        let out = select_runner(true, None, None)
+            .run_task(&task(), &CancelToken::default())
+            .unwrap();
         assert_eq!(
             out.structured_output,
             r#"{"answer":"Fake answer: AI is in test mode.","fake":true}"#
