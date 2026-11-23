@@ -105,7 +105,8 @@ pub trait AiRunner: Send + Sync {
 
     /// The task as this runner would run it (with the owner's model and effort set). A way to
     /// run a task that skips `run_task`, such as stream mode, must call this first on the app's
-    /// `Arc<dyn AiRunner>`. The default returns the task as built.
+    /// runner. Only the run queue holds that runner, so the first such caller (none exists yet)
+    /// must add a way to reach it. The default returns the task as built.
     fn configure(&self, task: &AiTask) -> AiTask {
         task.clone()
     }

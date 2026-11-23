@@ -1,6 +1,7 @@
 // The developer test prompt of Settings > AI: one tiny fixed task that proves the runner works.
-// It follows the feature pattern of `sample.rs`: take `&dyn AiRunner`, build an `AiTask`, parse
-// `structured_output` into a typed struct, and invent nothing on an error.
+// The app sends `task()` through the run queue (`commands::run_test_prompt`), whose runner sets
+// the owner's model and effort, and reads the result with `answer()`, inventing nothing on an
+// error. `run` calls a runner directly and is for tests only.
 
 use std::time::Duration;
 

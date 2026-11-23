@@ -132,14 +132,16 @@ pub fn default_row(task: &str) -> Option<ModelRow> {
     DEFAULTS.iter().find(|r| r.feature == task).copied()
 }
 
-/// The default model and effort of a task name, as the `AiTask` fields. Panics for a name with
-/// no row, which a test makes impossible for every name in code.
+/// The default model and effort of a task name, as the `AiTask` fields. A test makes sure every
+/// name in code has a row; a name without one gets the smallest model with no effort set.
 pub fn default_choice(task: &str) -> (String, Option<String>) {
-    let row = default_row(task).expect("every AI task name has a row in DEFAULTS");
-    (
-        row.model.value().to_string(),
-        Some(row.effort.value().to_string()),
-    )
+    match default_row(task) {
+        Some(row) => (
+            row.model.value().to_string(),
+            Some(row.effort.value().to_string()),
+        ),
+        None => (AiModel::Haiku.value().to_string(), None),
+    }
 }
 
 fn key(task: &str) -> String {
@@ -271,11 +273,7 @@ pub fn set_row(
     let model = AiModel::parse(model).ok_or_else(|| ModelError::UnknownModel(model.to_string()))?;
     let effort =
         AiEffort::parse(effort).ok_or_else(|| ModelError::UnknownEffort(effort.to_string()))?;
-    let value = serde_json::to_string(&Stored {
-        model: model.value().to_string(),
-        effort: effort.value().to_string(),
-    })
-    .expect("two strings always serialise");
+    let value = serde_json::json!({ "model": model.value(), "effort": effort.value() }).to_string();
     storage.set_setting(&key(feature), &value)?;
     Ok(table(storage))
 }
@@ -311,15 +309,26 @@ impl ConfiguredRunner {
     }
 }
 
+/// The runner the app gives its run queue: `inner` with each task's model and effort from
+/// `choices`. lib.rs and the command tests both build the queue runner with this.
+pub fn app_runner(inner: Arc<dyn AiRunner>, choices: Arc<dyn ModelChoices>) -> Arc<dyn AiRunner> {
+    Arc::new(ConfiguredRunner::new(inner, choices))
+}
+
 impl AiRunner for ConfiguredRunner {
     fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
-        self.inner.run_task(&self.configure(task), cancel)
+        let task = self.configure(task);
+        // Reading the row can wait for the storage lock; a cancel in that time starts no process.
+        if cancel.is_cancelled() {
+            return Err(AiError::Cancelled);
+        }
+        self.inner.run_task(&task, cancel)
     }
 
     /// The task with the model and effort of its row. A task without a row is returned as built.
-    /// Stream mode takes an `AiTask` directly, so it calls this through the trait object.
+    /// Stream mode takes an `AiTask` directly, so it must call this on the queue's runner.
     fn configure(&self, task: &AiTask) -> AiTask {
-        let mut task = task.clone();
+        let mut task = self.inner.configure(task);
         if let Some(row) = self.choices.row(&task.name) {
             task.model = row.model.value().to_string();
             task.effort = Some(row.effort.value().to_string());
@@ -581,6 +590,42 @@ mod tests {
         let seen = fake.requests();
         assert_eq!(seen[0].model, "literal");
         assert_eq!(seen[0].effort, None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_cancel_token_reaches_the_inner_runner() {
+        let (s, dir) = open();
+        let storage = Arc::new(std::sync::Mutex::new(s));
+        let fake = Arc::new(FakeRunner::new(FakeResult::BlockUntilCancelled));
+        let runner = Arc::new(ConfiguredRunner::new(fake, Arc::new(TestChoices(storage))));
+        let token = CancelToken::default();
+        let (run_token, run) = (token.clone(), runner.clone());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(run.run_task(&save_task(), &run_token));
+        });
+        token.cancel();
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Err(AiError::Cancelled)
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_run_cancelled_before_it_starts_never_reaches_the_inner_runner() {
+        let (s, dir) = open();
+        let storage = Arc::new(std::sync::Mutex::new(s));
+        let fake = Arc::new(FakeRunner::new(FakeResult::Valid("{}".into())));
+        let runner = ConfiguredRunner::new(fake.clone(), Arc::new(TestChoices(storage)));
+        let token = CancelToken::default();
+        token.cancel();
+        assert_eq!(
+            runner.run_task(&save_task(), &token),
+            Err(AiError::Cancelled)
+        );
+        assert!(fake.requests().is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

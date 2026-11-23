@@ -424,8 +424,9 @@ pub async fn set_setting(
     off_main_thread(app, move |storage| write_setting(storage, &key, &value)).await
 }
 
-/// Gives the runner the owner's model row for a task from the app storage. When the storage is
-/// not available it gives the code default, so AI keeps working (shared rule 3).
+/// Gives the runner the owner's model row for a task from the app storage. A run starts only
+/// after the queue wrote its row, so storage was open then; if it is lost before the run starts,
+/// the run uses the code default instead of failing.
 pub struct StoredChoices(pub tauri::AppHandle);
 
 impl ModelChoices for StoredChoices {
@@ -1761,6 +1762,32 @@ mod tests {
         let err = tauri::async_runtime::block_on(cancel_run_blocking(queue, "no-such-run".into()))
             .unwrap_err();
         assert_eq!(err.code, "run_not_active");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Every task gets the same fixed row, standing in for the owner's Settings choice.
+    struct FixedChoice(ModelRow);
+
+    impl ModelChoices for FixedChoice {
+        fn row(&self, _task: &str) -> Option<ModelRow> {
+            Some(self.0)
+        }
+    }
+
+    #[test]
+    fn the_app_queue_runs_the_test_prompt_with_the_owners_model_and_effort() {
+        let fake = Arc::new(crate::ai::fake::FakeRunner::new(
+            crate::ai::fake::FakeResult::Valid(r#"{"answer":"Hi"}"#.into()),
+        ));
+        let mut row = models::default_row("test_prompt").unwrap();
+        row.model = models::AiModel::Opus;
+        row.effort = models::AiEffort::High;
+        let (queue, _log, dir) =
+            test_queue(models::app_runner(fake.clone(), Arc::new(FixedChoice(row))));
+        run_test_prompt_with(&queue).unwrap();
+        let seen = fake.requests();
+        assert_eq!(seen[0].model, "opus");
+        assert_eq!(seen[0].effort.as_deref(), Some("high"));
         let _ = std::fs::remove_dir_all(dir);
     }
 

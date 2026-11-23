@@ -123,18 +123,17 @@ pub fn run() {
             });
             // Every run reads its feature's model and effort from the settings table (#24),
             // so the queue gets the runner wrapped in `ConfiguredRunner`.
-            let runner: Arc<dyn ai::runner::AiRunner> =
-                Arc::new(ai::models::ConfiguredRunner::new(
-                    ai::runner::select_runner(
-                        fake,
-                        paths
-                            .as_ref()
-                            .ok()
-                            .map(|p| ai::runner::runs_dir(&p.data_dir)),
-                        claude_config,
-                    ),
-                    Arc::new(commands::StoredChoices(app.handle().clone())),
-                ));
+            let runner = ai::models::app_runner(
+                ai::runner::select_runner(
+                    fake,
+                    paths
+                        .as_ref()
+                        .ok()
+                        .map(|p| ai::runner::runs_dir(&p.data_dir)),
+                    claude_config,
+                ),
+                Arc::new(commands::StoredChoices(app.handle().clone())),
+            );
             app.manage(AiRunnerState { fake });
 
             // Every AI run goes through this queue: at most 2 at once, owner tasks first. Its
