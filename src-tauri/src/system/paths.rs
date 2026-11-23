@@ -35,6 +35,44 @@ pub fn db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(DB_FILE_NAME)
 }
 
+/// Opens `dir` in the system file manager. The opener plugin is used from Rust only; the UI
+/// has no opener permission, so it cannot open any other path.
+pub fn open_folder(app: &AppHandle, dir: &Path) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// The one-line backup commands the Data section shows, one per system.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupCommands {
+    pub macos: String,
+    pub ubuntu: String,
+}
+
+/// Puts `path` in double quotes for a shell, so a space or `$` in it stays text.
+fn shell_quoted(path: &Path) -> String {
+    let mut out = String::from("\"");
+    for c in path.to_string_lossy().chars() {
+        if matches!(c, '"' | '\\' | '$' | '`') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('"');
+    out
+}
+
+/// The copy commands for a backup of the data folder. The owner closes Mnemo first.
+pub fn backup_commands(data_dir: &Path) -> BackupCommands {
+    let from = shell_quoted(data_dir);
+    BackupCommands {
+        macos: format!("cp -Rp {from} ~/mnemo-backup-$(date +%Y-%m-%d-%H%M%S)"),
+        ubuntu: format!("cp -a {from} ~/mnemo-backup-$(date +%Y-%m-%d-%H%M%S)"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,5 +99,28 @@ mod tests {
     fn db_path_is_inside_the_data_folder() {
         let p = db_path(Path::new("/tmp/mnemo-data"));
         assert_eq!(p, Path::new("/tmp/mnemo-data/mnemo.db"));
+    }
+
+    #[test]
+    fn backup_commands_copy_the_quoted_data_folder() {
+        let c = backup_commands(Path::new("/home/ana/.local/share/io.mnemo.desktop"));
+        assert_eq!(
+            c.ubuntu,
+            "cp -a \"/home/ana/.local/share/io.mnemo.desktop\" ~/mnemo-backup-$(date +%Y-%m-%d-%H%M%S)"
+        );
+        assert_eq!(
+            c.macos,
+            "cp -Rp \"/home/ana/.local/share/io.mnemo.desktop\" ~/mnemo-backup-$(date +%Y-%m-%d-%H%M%S)"
+        );
+    }
+
+    #[test]
+    fn backup_commands_quote_a_path_with_spaces_and_shell_marks() {
+        let c = backup_commands(Path::new("/Users/Ana B/Library/Application Support/x$y"));
+        assert_eq!(
+            c.macos,
+            "cp -Rp \"/Users/Ana B/Library/Application Support/x\\$y\" ~/mnemo-backup-$(date +%Y-%m-%d-%H%M%S)"
+        );
+        assert!(c.ubuntu.starts_with("cp -a \"/Users/Ana B/"));
     }
 }

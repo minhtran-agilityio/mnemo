@@ -323,7 +323,10 @@ test('AC1: section content is on the right of the section list', UI, () =>
     assert.ok(r.choice >= r.rowRight - 1, `the content (${r.choice}) is not right of the section list (${r.rowRight})`);
   }));
 
-test('AC1: the AI and Data sections open and are empty', UI, () =>
+// AC1 (#12 owner decision 3): "Sections: Appearance, AI (empty), Data (empty)."
+// #17 changes the Data part: "A "Data" section in Settings with three actions: Export, Open data folder, Reset."
+// So both sections still open and leave the theme choices, and only AI must stay empty.
+test('AC1: Sections: Appearance, AI (empty), Data (filled by #17)', UI, () =>
   withApp('ok', async (app) => {
     await openSettings(app);
     for (const n of ['AI', 'Data']) {
@@ -331,7 +334,7 @@ test('AC1: the AI and Data sections open and are empty', UI, () =>
       await sleep(200);
       const r = await HS(app, `({ choice: !!__s.choice('Dark') || !!__s.choice('Light'), controls: __s.main().querySelectorAll('button, input, select, textarea').length, rows: 3 })`);
       assert.equal(r.choice, false, `${n} still shows the theme choices`);
-      assert.ok(r.controls <= 3 + 1, `${n} is not empty: ${r.controls} controls in the screen`);
+      if (n === 'AI') assert.ok(r.controls <= 3 + 1, `${n} is not empty: ${r.controls} controls in the screen`);
     }
   }));
 

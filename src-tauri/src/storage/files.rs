@@ -231,7 +231,7 @@ impl Storage {
     /// The path of a stored name inside the files folder. A name with a separator, a
     /// parent step, a root or a NUL is refused, and the real path (after links are
     /// followed) must still be inside the folder.
-    fn resolve(&self, stored_name: &str) -> Result<PathBuf, StorageError> {
+    pub(super) fn resolve(&self, stored_name: &str) -> Result<PathBuf, StorageError> {
         if stored_name.is_empty()
             || stored_name == "."
             || stored_name == ".."
