@@ -10,7 +10,7 @@
 // app made up and never the model's free text. Output can hold account data, so no error value
 // and no log line carries any of it.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -19,10 +19,10 @@ use serde_json::Value;
 
 use super::cancel::CancelToken;
 use super::config::ClaudeConfig;
-use super::health::{ClaudeCli, SystemClaude};
+
 use super::process::{self, Limits, ProcessError};
 use super::run_dir::RunDir;
-use super::runner::{AiError, AiOutput, AiRunner, AiTask};
+use super::runner::{AiError, AiOutput, AiTask};
 use super::usage::{UsageReading, UsageSink};
 
 /// The most output read from one run. A structured answer is small; this is a safety cap.
@@ -393,6 +393,9 @@ pub(super) fn process_error(error: ProcessError) -> AiError {
 /// `run_dir`). This does not check for a test: the guard lives in `ClaudeRunner::run_task`, so
 /// unit tests pass a stand-in program here.
 /// When `cancel` is set, the process group is killed and the result is `AiError::Cancelled`.
+/// No usage reading goes anywhere. The app's runner (`runner::ClaudeRunner`) calls
+/// `run_claude_with_usage`; only tests and the real-run proof call this.
+#[cfg(test)]
 pub fn run_claude(
     program: &Path,
     task: &AiTask,
@@ -431,46 +434,6 @@ pub fn run_claude_with_usage(
     });
     log::info!("{}", outcome_line(&task.name, &result, started.elapsed()));
     result
-}
-
-/// The real runner with a usage sink: one `claude -p` process per task, like
-/// `runner::ClaudeRunner`, and every usage reading of a run goes to the sink (the app's AI
-/// control stores it). The app uses this runner when AI is real.
-pub struct UsageClaudeRunner {
-    /// Mnemo's folder for per-run folders; `None` when the data folder could not be found.
-    runs_dir: Option<PathBuf>,
-    /// Mnemo's own Claude config files; `None` when they could not be made. Either `None`
-    /// starts no run (see `runner::prepare`).
-    config: Option<ClaudeConfig>,
-    usage: UsageSink,
-}
-
-impl UsageClaudeRunner {
-    pub fn new(runs_dir: Option<PathBuf>, config: Option<ClaudeConfig>, usage: UsageSink) -> Self {
-        UsageClaudeRunner {
-            runs_dir,
-            config,
-            usage,
-        }
-    }
-}
-
-/// Stops a test that reaches the real runner. Tests never call the real Claude.
-fn guard_against_test_use() {
-    #[cfg(test)]
-    panic!("the real AI runner was used in a test");
-}
-
-impl AiRunner for UsageClaudeRunner {
-    fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
-        guard_against_test_use();
-        let (runs_dir, config) =
-            super::runner::prepare(self.runs_dir.as_ref(), self.config.as_ref())?;
-        let Some(program) = SystemClaude::from_env().locate() else {
-            return Err(AiError::Unavailable);
-        };
-        run_claude_with_usage(&program, task, runs_dir, config, cancel, Some(&self.usage))
-    }
 }
 
 #[cfg(test)]
@@ -813,22 +776,6 @@ mod tests {
         .unwrap();
         assert_eq!(got.structured_output, r#"{"greeting":"Hi!"}"#);
         assert_eq!(seen.lock().unwrap().len(), 1);
-    }
-
-    #[test]
-    fn the_usage_claude_runner_panics_in_a_test() {
-        let sink: UsageSink = std::sync::Arc::new(|_| {});
-        let runner = UsageClaudeRunner::new(Some(std::env::temp_dir()), Some(test_config()), sink);
-        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            runner.run_task(&task(), &CancelToken::default())
-        }));
-        let payload = caught.expect_err("the real runner must refuse to run in a test");
-        let text = payload
-            .downcast_ref::<&str>()
-            .map(|s| s.to_string())
-            .or_else(|| payload.downcast_ref::<String>().cloned())
-            .unwrap_or_default();
-        assert_eq!(text, "the real AI runner was used in a test");
     }
 
     #[test]

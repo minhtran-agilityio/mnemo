@@ -19,6 +19,7 @@ use super::claude;
 use super::config::ClaudeConfig;
 use super::fake::{FakeResult, FakeRunner};
 use super::health::{ClaudeCli, SystemClaude};
+use super::usage::UsageSink;
 
 /// The environment variable that starts the whole app with the fake runner.
 pub const FAKE_AI_ENV: &str = "MNEMO_FAKE_AI";
@@ -112,7 +113,9 @@ pub trait AiRunner: Send + Sync {
     }
 }
 
-/// The real runner: one `claude -p` process per task.
+/// The real runner: one `claude -p` process per task. It is the only `AiRunner` that starts
+/// `claude`. With a usage sink (`with_usage`), every usage reading of a run goes to the sink (the
+/// app's AI control stores it); without one, no reading goes anywhere.
 pub struct ClaudeRunner {
     /// The folder inside Mnemo's data folder that holds one new owner-only folder per run (see
     /// `run_dir`). `None` when the data folder could not be found: then no run starts.
@@ -120,11 +123,45 @@ pub struct ClaudeRunner {
     /// Mnemo's own Claude config files (see `config`). `None` when they could not be made: then
     /// no run starts, so a run never falls back to the owner's personal Claude setup.
     config: Option<ClaudeConfig>,
+    /// Gets each usage reading of a run. `None` sends no reading.
+    usage: Option<UsageSink>,
+    /// A stand-in `claude` program for tests. When set, the run uses it instead of the real one.
+    #[cfg(test)]
+    stand_in: Option<PathBuf>,
 }
 
 impl ClaudeRunner {
     pub fn new(runs_dir: Option<PathBuf>, config: Option<ClaudeConfig>) -> Self {
-        ClaudeRunner { runs_dir, config }
+        ClaudeRunner {
+            runs_dir,
+            config,
+            usage: None,
+            #[cfg(test)]
+            stand_in: None,
+        }
+    }
+
+    /// The same runner, and each usage reading of a run goes to `usage`.
+    pub fn with_usage(mut self, usage: UsageSink) -> Self {
+        self.usage = Some(usage);
+        self
+    }
+
+    /// The same runner, and each run starts `program` (a stand-in script) instead of `claude`.
+    #[cfg(test)]
+    pub fn with_stand_in(mut self, program: PathBuf) -> Self {
+        self.stand_in = Some(program);
+        self
+    }
+
+    #[cfg(test)]
+    fn stand_in(&self) -> Option<PathBuf> {
+        self.stand_in.clone()
+    }
+
+    #[cfg(not(test))]
+    fn stand_in(&self) -> Option<PathBuf> {
+        None
     }
 }
 
@@ -148,12 +185,22 @@ fn guard_against_test_use() {
 
 impl AiRunner for ClaudeRunner {
     fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
-        guard_against_test_use();
+        let stand_in = self.stand_in();
+        if stand_in.is_none() {
+            guard_against_test_use();
+        }
         let (runs_dir, config) = prepare(self.runs_dir.as_ref(), self.config.as_ref())?;
-        let Some(program) = SystemClaude::from_env().locate() else {
+        let Some(program) = stand_in.or_else(|| SystemClaude::from_env().locate()) else {
             return Err(AiError::Unavailable);
         };
-        claude::run_claude(&program, task, runs_dir, config, cancel)
+        claude::run_claude_with_usage(
+            &program,
+            task,
+            runs_dir,
+            config,
+            cancel,
+            self.usage.as_ref(),
+        )
     }
 }
 
@@ -261,6 +308,41 @@ mod tests {
             prepare(None, Some(&config)).err(),
             Some(AiError::Unavailable)
         );
+        let _ = std::fs::remove_dir_all(config.dir());
+    }
+
+    // #166: one runner type. Without a sink it runs like the old `ClaudeRunner` and no reading
+    // goes anywhere; with a sink, the same run hands the reading to it.
+    #[test]
+    fn a_runner_without_a_sink_gives_the_answer_and_a_sink_gets_the_reading() {
+        use std::os::unix::fs::PermissionsExt;
+        let output = r#"[{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":0.57,"resetsAt":1794999600,"status":"allowed"}}}},{"type":"result","is_error":false,"structured_output":{"answer":"Hi"}}]"#;
+        let dir = std::env::temp_dir().join(format!("mnemo-runner-sink-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = dir.join("claude");
+        std::fs::write(&program, format!("#!/bin/sh\ncat <<'EOF'\n{output}\nEOF\n")).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let config = test_config();
+        let mut task = task();
+        task.schema = r#"{"type":"object","required":["answer"]}"#.into();
+
+        let plain = ClaudeRunner::new(Some(dir.join("runs")), Some(config.clone()))
+            .with_stand_in(program.clone());
+        let got = plain.run_task(&task, &CancelToken::default()).unwrap();
+        assert_eq!(got.structured_output, r#"{"answer":"Hi"}"#);
+        assert!(plain.usage.is_none());
+
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = seen.clone();
+        let sink: UsageSink = Arc::new(move |r| kept.lock().unwrap().push(r));
+        let with_sink = ClaudeRunner::new(Some(dir.join("runs")), Some(config.clone()))
+            .with_usage(sink)
+            .with_stand_in(program);
+        let got = with_sink.run_task(&task, &CancelToken::default()).unwrap();
+        assert_eq!(got.structured_output, r#"{"answer":"Hi"}"#);
+        assert_eq!(seen.lock().unwrap().len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(config.dir());
     }
 
