@@ -863,7 +863,20 @@ fn reset_item(storage: &AppStorage, confirm: &str) -> Result<(), AppError> {
 /// Deletes all data and the files folder when `confirm` is exactly `RESET`.
 #[tauri::command]
 pub async fn reset_data(app: tauri::AppHandle, confirm: String) -> Result<(), AppError> {
-    off_main_thread(app, move |storage| reset_item(storage, &confirm)).await
+    let control = app.state::<RunQueue>().control();
+    off_main_thread(app, move |storage| {
+        let result = reset_item(storage, &confirm);
+        // A reset that ran, in full or part way, deleted the `ai_*` keys: the AI control reads
+        // the fresh storage, so it does not keep (or write back) the old switch, pause and
+        // reading. `reset_item` has let go of the storage lock here (lock order: control, then
+        // storage).
+        if !matches!(&result, Err(e) if e.code == "export_running" || e.code == "reset_not_confirmed")
+        {
+            control.reload();
+        }
+        result
+    })
+    .await
 }
 
 /// Where the data lives and the one-line copy commands that back it up.

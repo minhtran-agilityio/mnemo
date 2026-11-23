@@ -852,6 +852,7 @@ test("turning the AI switch off shows AI is off, and the test prompt shows why i
   await openAi();
   await tick();
   expect(sendButton()).toBeDefined();
+  expect(aiBody()).not.toContain("AI is off now.");
   aiSwitch()?.click();
   await tick();
   await tick();
@@ -859,6 +860,8 @@ test("turning the AI switch off shows AI is off, and the test prompt shows why i
   expect(aiBody()).toContain("AI is off");
   expect(aiBody()).toContain("The test prompt does not run while AI is off.");
   expect(sendButton()).toBeUndefined();
+  // The model table below agrees: its off note shows too (#24).
+  expect(aiBody()).toContain("AI is off now.");
 });
 
 test("with background work paused by the owner, the pause banner shows and the test prompt is still offered", async () => {

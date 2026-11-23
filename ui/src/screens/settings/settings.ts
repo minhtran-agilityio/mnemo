@@ -329,9 +329,10 @@ export function renderSettings(
     } else body.replaceChildren(dataSection());
   }
 
-  // AI is off when the check is known (or failed) and Claude Code is not ready. The fake runner
-  // counts as on.
+  // AI is off when the owner turned the AI control's switch off (#23), or when the check is known
+  // (or failed) and Claude Code is not ready. The fake runner counts as on for the check.
   function aiIsOff(): boolean {
+    if (control.view()?.enabled === false) return true;
     if (aiMode === "fake" || ai.kind === "checking") return false;
     return !(ai.kind === "known" && ai.health.state === "ready");
   }

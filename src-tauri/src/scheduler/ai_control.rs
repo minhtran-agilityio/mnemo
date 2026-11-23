@@ -311,6 +311,63 @@ fn merge_window(
     }
 }
 
+/// The state stored in `store`. When it cannot be read, the gate fails closed: every task
+/// gets Off, because the owner may have turned AI off before.
+fn load_state(store: &dyn ControlStore) -> State {
+    match store.load() {
+        Ok(stored) => {
+            let (warn_at, pause_at) = match (stored.warn_at, stored.pause_at) {
+                (None, None) => (DEFAULT_WARN_AT, DEFAULT_PAUSE_AT),
+                (w, p) => {
+                    let (w, p) = (w.unwrap_or(DEFAULT_WARN_AT), p.unwrap_or(DEFAULT_PAUSE_AT));
+                    if thresholds_valid(w, p) {
+                        (w, p)
+                    } else {
+                        log::warn!(
+                            "the stored AI thresholds break the rule; the defaults are used"
+                        );
+                        (DEFAULT_WARN_AT, DEFAULT_PAUSE_AT)
+                    }
+                }
+            };
+            State {
+                available: true,
+                enabled: stored.enabled,
+                warn_at,
+                pause_at,
+                pause: stored.pause,
+                reading: stored.usage_last,
+                reading_seq: 0,
+                last_reading: None,
+                timer_gen: 0,
+                owner_held: false,
+                usage_gen: 0,
+                usage_armed: None,
+            }
+        }
+        Err(e) => {
+            log::error!(
+                "could not read the AI control settings; AI stays off: {}",
+                e.0
+            );
+            State {
+                available: false,
+                enabled: false,
+                warn_at: DEFAULT_WARN_AT,
+                pause_at: DEFAULT_PAUSE_AT,
+                pause: None,
+                reading: None,
+                reading_seq: 0,
+                last_reading: None,
+                timer_gen: 0,
+                owner_held: false,
+                usage_gen: 0,
+                usage_armed: None,
+            }
+        }
+    }
+}
+
 impl AiControl {
     /// Reads the stored state and builds the gate. When the state cannot be read, the gate
     /// fails closed: every task gets Off, because the owner may have turned AI off before.
@@ -324,58 +381,7 @@ impl AiControl {
         clock: Clock,
         timer_step: Duration,
     ) -> Arc<AiControl> {
-        let state = match store.load() {
-            Ok(stored) => {
-                let (warn_at, pause_at) = match (stored.warn_at, stored.pause_at) {
-                    (None, None) => (DEFAULT_WARN_AT, DEFAULT_PAUSE_AT),
-                    (w, p) => {
-                        let (w, p) = (w.unwrap_or(DEFAULT_WARN_AT), p.unwrap_or(DEFAULT_PAUSE_AT));
-                        if thresholds_valid(w, p) {
-                            (w, p)
-                        } else {
-                            log::warn!(
-                                "the stored AI thresholds break the rule; the defaults are used"
-                            );
-                            (DEFAULT_WARN_AT, DEFAULT_PAUSE_AT)
-                        }
-                    }
-                };
-                State {
-                    available: true,
-                    enabled: stored.enabled,
-                    warn_at,
-                    pause_at,
-                    pause: stored.pause,
-                    reading: stored.usage_last,
-                    reading_seq: 0,
-                    last_reading: None,
-                    timer_gen: 0,
-                    owner_held: false,
-                    usage_gen: 0,
-                    usage_armed: None,
-                }
-            }
-            Err(e) => {
-                log::error!(
-                    "could not read the AI control settings; AI stays off: {}",
-                    e.0
-                );
-                State {
-                    available: false,
-                    enabled: false,
-                    warn_at: DEFAULT_WARN_AT,
-                    pause_at: DEFAULT_PAUSE_AT,
-                    pause: None,
-                    reading: None,
-                    reading_seq: 0,
-                    last_reading: None,
-                    timer_gen: 0,
-                    owner_held: false,
-                    usage_gen: 0,
-                    usage_armed: None,
-                }
-            }
-        };
+        let state = load_state(store.as_ref());
         let control = Arc::new_cyclic(|me| AiControl {
             store,
             clock,
@@ -384,28 +390,60 @@ impl AiControl {
             timer_step,
             me: me.clone(),
         });
+        control.arm_after_load();
+        control
+    }
+
+    /// Lifts a stored limit pause whose time passed, and starts the timers for the pause and
+    /// the usage windows of the state just read.
+    fn arm_after_load(&self) {
         // A limit pause stored by an earlier start: lift it now when its time passed, else wait
         // for its time.
-        let now = control.now();
+        let now = self.now();
         let timer = {
-            let mut st = control.lock();
-            control.settle(&mut st, now);
+            let mut st = self.lock();
+            self.settle(&mut st, now);
             st.pause
                 .filter(|p| p.reason == StoredPauseReason::Limit)
                 .and_then(|p| p.until)
                 .map(|until| (st.timer_gen, until))
         };
         if let Some((generation, until)) = timer {
-            control.arm_timer(generation, until);
+            self.arm_timer(generation, until);
         }
         let usage = {
-            let mut st = control.lock();
-            control.rearm_usage(&mut st, now)
+            let mut st = self.lock();
+            self.rearm_usage(&mut st, now)
         };
         if let Some((generation, until)) = usage {
-            control.arm_usage_timer(generation, until);
+            self.arm_usage_timer(generation, until);
         }
-        control
+    }
+
+    /// Reads the stored state again, as at start. Used after a Reset deleted the `ai_*` keys,
+    /// so the gate and Settings show the fresh state (AI on, default lines, no pause, no
+    /// reading). Older timers do nothing afterwards. The caller must not hold the storage lock
+    /// (lock order: control, then storage). Listeners hear the change.
+    pub fn reload(&self) {
+        let fresh = load_state(self.store.as_ref());
+        {
+            let mut st = self.lock();
+            let State {
+                reading_seq,
+                timer_gen,
+                usage_gen,
+                ..
+            } = *st;
+            *st = State {
+                // Kept counting, so a run in flight and an older timer stay ignored.
+                reading_seq,
+                timer_gen: timer_gen + 1,
+                usage_gen: usage_gen + 1,
+                ..fresh
+            };
+        }
+        self.arm_after_load();
+        self.notify();
     }
 
     /// The time now on the control's clock.
@@ -946,6 +984,38 @@ mod tests {
         assert_eq!(again.may_run(OWNER, NOW), deny(DenyReason::Off));
         c.set_enabled(true).unwrap();
         assert_eq!(c.may_run(OWNER, NOW), ALLOW);
+    }
+
+    #[test]
+    fn ai_control_reload_after_a_reset_shows_the_fresh_state_and_tells_the_listeners() {
+        let (c, store, _at) = control();
+        c.set_enabled(false).unwrap();
+        c.set_thresholds(40, 80).unwrap();
+        c.pause().unwrap();
+        c.on_usage_reading(reading(Some((50.0, Some(NOW + HOUR))), None), NOW);
+        let heard = Arc::new(AtomicUsize::new(0));
+        let count = heard.clone();
+        c.subscribe(Arc::new(move || {
+            count.fetch_add(1, Ordering::SeqCst);
+        }));
+        // The owner's Reset deletes every `ai_*` key with the rest of the data.
+        store.storage().reset("RESET").unwrap();
+        // Before the reload the control still holds the old state in memory.
+        assert_eq!(c.may_run(OWNER, NOW), deny(DenyReason::Off));
+        c.reload();
+        let s = c.snapshot(NOW);
+        assert!(s.enabled);
+        assert_eq!((s.warn_at, s.pause_at), (60, 95));
+        assert_eq!(s.pause, None);
+        assert_eq!(s.read_at, None);
+        assert_eq!(c.may_run(OWNER, NOW), ALLOW);
+        assert_eq!(c.may_run(BACKGROUND, NOW), ALLOW);
+        assert_eq!(heard.load(Ordering::SeqCst), 1);
+        // Nothing old was written back to the fresh storage.
+        let stored = store.load().unwrap();
+        assert!(stored.enabled);
+        assert_eq!(stored.pause, None);
+        assert_eq!(stored.usage_last, None);
     }
 
     #[test]
