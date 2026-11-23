@@ -148,21 +148,11 @@ pub fn run() {
             let inner: Arc<dyn ai::runner::AiRunner> = if fake {
                 ai::runner::select_runner(true, runs_dir, claude_config)
             } else {
-                // The real runner hands each usage reading of a run to the control.
-                let sink_control = control.clone();
-                let sink: ai::usage::UsageSink = Arc::new(move |reading| {
-                    let now = sink_control.now();
-                    sink_control.on_usage_reading(reading, now);
-                });
-                Arc::new(ai::claude::UsageClaudeRunner::new(
-                    runs_dir,
-                    claude_config,
-                    sink,
-                ))
+                Arc::new(real_runner(runs_dir, claude_config, control.clone()))
             };
             // Every run reads its feature's model and effort from the settings table (#24),
             // so the queue gets the runner wrapped in `ConfiguredRunner`.
-            let runner = ai::models::app_runner(
+            let runner = crate::ai::models::app_runner(
                 inner,
                 Arc::new(commands::StoredChoices(app.handle().clone())),
             );
@@ -335,6 +325,19 @@ pub fn run() {
         });
 }
 
+/// The real runner of the app's queue: it hands each usage reading of a run to the AI control.
+fn real_runner(
+    runs_dir: Option<std::path::PathBuf>,
+    config: Option<ai::config::ClaudeConfig>,
+    control: Arc<AiControl>,
+) -> ai::runner::ClaudeRunner {
+    let sink: ai::usage::UsageSink = Arc::new(move |reading| {
+        let now = control.now();
+        control.on_usage_reading(reading, now);
+    });
+    ai::runner::ClaudeRunner::new(runs_dir, config).with_usage(sink)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{keeps_running_in_tray, start_url, startup_code, StorageError};
@@ -403,5 +406,65 @@ mod tests {
             "database"
         );
         assert_eq!(startup_code(&StorageError::Invalid("x".into())), "database");
+    }
+    /// Leaves every task as built (no Settings row).
+    struct NoChoice;
+
+    impl crate::ai::models::ModelChoices for NoChoice {
+        fn row(&self, _task: &str) -> Option<crate::ai::models::ModelRow> {
+            None
+        }
+    }
+
+    // #166: the queue's real runner (the `ClaudeRunner` from `real_runner`, wrapped like lib.rs
+    // wraps it) hands the usage reading of a run to the AI control. A stand-in `claude` prints
+    // the run output, so no real Claude starts.
+    #[test]
+    fn the_app_queue_runner_sends_each_usage_reading_to_the_ai_control() {
+        use crate::ai::cancel::CancelToken;
+        use crate::ai::runner::AiTask;
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::Arc;
+
+        const NOW: i64 = 1_794_990_000;
+        let output = r#"[{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1794999600,"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":0.57,"resetsAt":1794999600,"status":"allowed"},"seven_day":{"utilization":0.18,"resetsAt":1795557600,"status":"allowed"}}}},{"type":"result","subtype":"success","is_error":false,"structured_output":{"greeting":"Hi!"}}]"#;
+        let dir = std::env::temp_dir().join(format!("mnemo-lib-usage-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = dir.join("claude");
+        std::fs::write(&program, format!("#!/bin/sh\ncat <<'EOF'\n{output}\nEOF\n")).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let control = crate::scheduler::ai_control::testing::open_control_at(Arc::new(|| NOW));
+        let config = crate::ai::config::test_config();
+        let runner = crate::ai::models::app_runner(
+            Arc::new(
+                super::real_runner(
+                    Some(dir.join("runs")),
+                    Some(config.clone()),
+                    control.clone(),
+                )
+                .with_stand_in(program),
+            ),
+            Arc::new(NoChoice),
+        );
+        let task = AiTask {
+            name: "test_prompt".into(),
+            prompt: "hi".into(),
+            schema: r#"{"type":"object","properties":{"greeting":{"type":"string"}},"required":["greeting"]}"#.into(),
+            tools: vec![],
+            model: "sonnet".into(),
+            effort: None,
+            timeout: std::time::Duration::from_secs(10),
+        };
+        let before = control.reading_seq();
+        let got = runner.run_task(&task, &CancelToken::default()).unwrap();
+
+        assert_eq!(got.structured_output, r#"{"greeting":"Hi!"}"#);
+        assert_eq!(control.reading_seq(), before + 1);
+        let snap = control.snapshot(NOW);
+        assert_eq!(snap.level, Some(57));
+        assert_eq!(snap.five_hour.and_then(|w| w.percent), Some(57));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(config.dir());
     }
 }
