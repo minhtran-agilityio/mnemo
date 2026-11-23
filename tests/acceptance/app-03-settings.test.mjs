@@ -323,7 +323,7 @@ test('AC1: section content is on the right of the section list', UI, () =>
     assert.ok(r.choice >= r.rowRight - 1, `the content (${r.choice}) is not right of the section list (${r.rowRight})`);
   }));
 
-test('AC1: the AI and Data sections open and are empty', UI, () =>
+test('AC1: the AI and Data sections open; Data is empty', UI, () =>
   withApp('ok', async (app) => {
     await openSettings(app);
     for (const n of ['AI', 'Data']) {
@@ -331,7 +331,9 @@ test('AC1: the AI and Data sections open and are empty', UI, () =>
       await sleep(200);
       const r = await HS(app, `({ choice: !!__s.choice('Dark') || !!__s.choice('Light'), controls: __s.main().querySelectorAll('button, input, select, textarea').length, rows: 3 })`);
       assert.equal(r.choice, false, `${n} still shows the theme choices`);
-      assert.ok(r.controls <= 3 + 1, `${n} is not empty: ${r.controls} controls in the screen`);
+      // Since #24 the AI section holds the AI status and the "Model and effort per feature" card,
+      // so only Data must still be empty (its three section rows plus at most one control).
+      if (n === 'Data') assert.ok(r.controls <= 3 + 1, `${n} is not empty: ${r.controls} controls in the screen`);
     }
   }));
 
