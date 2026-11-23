@@ -471,7 +471,7 @@ pub(crate) mod tests {
     use super::super::items::ItemKind;
     use super::super::items::{
         BookmarkInput, EventInput, MemoryInput, NoteInput, ProjectInput, RunInput, RunOutcome,
-        TaskInput,
+        RunState, TaskInput,
     };
     use super::super::links::ItemRef;
     use super::super::testing::{open_temp, TempDir};
@@ -519,7 +519,9 @@ pub(crate) mod tests {
             let r = s
                 .add::<Run>(&RunInput {
                     task_type: format!("summary{i}"),
-                    started_at: "2026-11-21T10:00:00Z".into(),
+                    state: RunState::Done,
+                    started_at: Some("2026-11-21T10:00:00Z".into()),
+                    ended_at: Some("2026-11-21T10:00:01Z".into()),
                     duration_ms: Some(5),
                     outcome: Some(RunOutcome::Ok),
                     error: None,

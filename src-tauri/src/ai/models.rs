@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use super::cancel::CancelToken;
 use super::runner::{AiError, AiOutput, AiRunner, AiTask};
 use crate::storage::{Storage, StorageError};
 
@@ -311,8 +312,8 @@ impl ConfiguredRunner {
 }
 
 impl AiRunner for ConfiguredRunner {
-    fn run_task(&self, task: &AiTask) -> Result<AiOutput, AiError> {
-        self.inner.run_task(&self.configure(task))
+    fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
+        self.inner.run_task(&self.configure(task), cancel)
     }
 
     /// The task with the model and effort of its row. A task without a row is returned as built.
@@ -535,9 +536,13 @@ mod tests {
         let fake = Arc::new(FakeRunner::new(FakeResult::Valid("{}".into())));
         let runner = ConfiguredRunner::new(fake.clone(), Arc::new(TestChoices(storage.clone())));
 
-        runner.run_task(&save_task()).unwrap();
+        runner
+            .run_task(&save_task(), &CancelToken::default())
+            .unwrap();
         set_row(&storage.lock().unwrap(), "save", "sonnet", "high").unwrap();
-        runner.run_task(&save_task()).unwrap();
+        runner
+            .run_task(&save_task(), &CancelToken::default())
+            .unwrap();
 
         let seen = fake.requests();
         assert_eq!(seen.len(), 2);
@@ -572,7 +577,7 @@ mod tests {
         let runner = ConfiguredRunner::new(fake.clone(), Arc::new(TestChoices(storage)));
         let mut task = save_task();
         task.name = "no_such_task".into();
-        runner.run_task(&task).unwrap();
+        runner.run_task(&task, &CancelToken::default()).unwrap();
         let seen = fake.requests();
         assert_eq!(seen[0].model, "literal");
         assert_eq!(seen[0].effort, None);

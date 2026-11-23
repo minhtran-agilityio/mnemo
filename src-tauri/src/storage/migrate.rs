@@ -41,6 +41,10 @@ pub const MIGRATIONS: &[Migration] = &[
         number: 7,
         sql: include_str!("../../migrations/0007_ideas.sql"),
     },
+    Migration {
+        number: 8,
+        sql: include_str!("../../migrations/0008_run_state.sql"),
+    },
 ];
 
 /// Reads the schema version stored in the database (0 for a new file).
@@ -99,7 +103,7 @@ mod tests {
     fn real_migrations_set_the_version() {
         let mut c = mem();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 7);
+        assert_eq!(current_version(&c).unwrap(), 8);
     }
 
     /// `run` skips every number at or below the stored version, so a gap that is filled
@@ -179,7 +183,7 @@ mod tests {
             err,
             StorageError::SchemaTooNew {
                 found: 99,
-                supported: 7
+                supported: 8
             }
         );
     }
@@ -373,7 +377,7 @@ mod tests {
         )
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 7);
+        assert_eq!(current_version(&c).unwrap(), 8);
         for t in KINDS.iter().chain(["item_link", "settings"].iter()) {
             assert!(table_exists(&c, t), "table {t} missing");
         }
@@ -387,8 +391,7 @@ mod tests {
     fn migration_7_adds_idea_fields_and_idea_tag_and_keeps_ideas_projects_and_links() {
         let mut c = mem();
         // The database of the version before: every migration up to the one before ideas.
-        let before = MIGRATIONS.len() - 1;
-        run(&mut c, &MIGRATIONS[..before]).unwrap();
+        run(&mut c, &MIGRATIONS[..6]).unwrap();
         c.execute_batch(&format!(
             "INSERT INTO idea (id, created_at, updated_at, title, stage) VALUES ('i1', '{T}', '{T}', 'Garden robot', 'ready');
              INSERT INTO project (id, created_at, updated_at, title, status) VALUES ('p1', '{T}', '{T}', 'Old', 'active');
@@ -396,7 +399,7 @@ mod tests {
         ))
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 7);
+        assert_eq!(current_version(&c).unwrap(), 8);
         let cols = columns(&c, "idea");
         for col in [
             "body",
@@ -458,8 +461,10 @@ mod tests {
         run(&mut c, MIGRATIONS).unwrap();
         let bad = [
             "INSERT INTO idea (id, created_at, updated_at, title, stage) VALUES ('i', ?1, ?1, 't', 'nonsense')",
-            "INSERT INTO run (id, created_at, updated_at, task_type, started_at, outcome) VALUES ('r', ?1, ?1, 'x', ?1, 'weird')",
-            "INSERT INTO run (id, created_at, updated_at, task_type, started_at, duration_ms) VALUES ('r', ?1, ?1, 'x', ?1, -1)",
+            "INSERT INTO run (id, created_at, updated_at, task_type, state, started_at, outcome) VALUES ('r', ?1, ?1, 'x', 'running', ?1, 'weird')",
+            "INSERT INTO run (id, created_at, updated_at, task_type, state, started_at, duration_ms) VALUES ('r', ?1, ?1, 'x', 'running', ?1, -1)",
+            "INSERT INTO run (id, created_at, updated_at, task_type, state, started_at) VALUES ('r', ?1, ?1, 'x', 'paused', ?1)",
+            "INSERT INTO run (id, created_at, updated_at, task_type, started_at) VALUES ('r', ?1, ?1, 'x', ?1)",
             "INSERT INTO bookmark (id, created_at, updated_at, url, reason_is_guess) VALUES ('b', ?1, ?1, 'https://a.b', 2)",
             "INSERT INTO item_link (id, a_kind, a_id, b_kind, b_id, created_at, updated_at) VALUES ('l', 'folder', 'f', 'note', 'n', ?1, ?1)",
             "INSERT INTO item_link (id, a_kind, a_id, b_kind, b_id, created_at, updated_at) VALUES ('l', 'note', 'n', 'note', 'n', ?1, ?1)",
@@ -470,12 +475,114 @@ mod tests {
         // The same rows with good values are accepted.
         let good = [
             "INSERT INTO idea (id, created_at, updated_at, title, stage) VALUES ('i', ?1, ?1, 't', 'ready')",
-            "INSERT INTO run (id, created_at, updated_at, task_type, started_at, duration_ms, outcome) VALUES ('r', ?1, ?1, 'x', ?1, 0, 'ok')",
+            "INSERT INTO run (id, created_at, updated_at, task_type, state, started_at, ended_at, duration_ms, outcome) VALUES ('r', ?1, ?1, 'x', 'done', ?1, ?1, 0, 'ok')",
             "INSERT INTO bookmark (id, created_at, updated_at, url, reason_is_guess) VALUES ('b', ?1, ?1, 'https://a.b', 1)",
             "INSERT INTO item_link (id, a_kind, a_id, b_kind, b_id, created_at, updated_at) VALUES ('l', 'note', 'n', 'task', 'n', ?1, ?1)",
         ];
         for sql in good {
             c.execute(sql, [T]).unwrap();
         }
+    }
+
+    #[test]
+    fn migration_8_rebuilds_run_with_state_on_a_database_built_by_migration_7() {
+        let mut c = mem();
+        run(&mut c, &MIGRATIONS[..7]).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 7);
+        const U: &str = "2026-01-01T00:00:05Z";
+        c.execute_batch(&format!(
+            "INSERT INTO run (id, created_at, updated_at, task_type, started_at, duration_ms, outcome, error) VALUES ('r-ok', '{T}', '{U}', 'summary', '{T}', 1200, 'ok', NULL);
+             INSERT INTO run (id, created_at, updated_at, task_type, started_at, duration_ms, outcome, error) VALUES ('r-failed', '{T}', '{U}', 'summary', '{T}', 900, 'failed', 'the AI run timed out');
+             INSERT INTO run (id, created_at, updated_at, task_type, started_at, duration_ms, outcome, error) VALUES ('r-cancelled', '{T}', '{U}', 'summary', '{T}', 10, 'cancelled', NULL);
+             INSERT INTO run (id, created_at, updated_at, task_type, started_at) VALUES ('r-going', '{T}', '{U}', 'summary', '{T}');"
+        ))
+        .unwrap();
+        run(&mut c, MIGRATIONS).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 8);
+        let cols = columns(&c, "run");
+        for col in [
+            "id",
+            "created_at",
+            "updated_at",
+            "deleted_at",
+            "task_type",
+            "state",
+            "started_at",
+            "ended_at",
+            "duration_ms",
+            "outcome",
+            "error",
+        ] {
+            assert!(cols.iter().any(|n| n == col), "run lacks {col}");
+        }
+        type Row = (
+            String,
+            Option<String>,
+            Option<String>,
+            Option<i64>,
+            Option<String>,
+            Option<String>,
+        );
+        let row = |id: &str| -> Row {
+            c.query_row(
+                "SELECT state, started_at, ended_at, duration_ms, outcome, error FROM run WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            )
+            .unwrap()
+        };
+        let s = |v: &str| Some(v.to_string());
+        assert_eq!(
+            row("r-ok"),
+            ("done".into(), s(T), s(U), Some(1200), s("ok"), None)
+        );
+        assert_eq!(
+            row("r-failed"),
+            (
+                "failed".into(),
+                s(T),
+                s(U),
+                Some(900),
+                s("failed"),
+                s("the AI run timed out")
+            )
+        );
+        assert_eq!(
+            row("r-cancelled"),
+            (
+                "cancelled".into(),
+                s(T),
+                s(U),
+                Some(10),
+                s("cancelled"),
+                None
+            )
+        );
+        // A row with no outcome was going when the app stopped; opening storage fails it later.
+        assert_eq!(
+            row("r-going"),
+            ("running".into(), s(T), None, None, None, None)
+        );
+        // The new state check refuses a value outside the five states, and a waiting row has
+        // no start time yet.
+        assert!(c
+            .execute(
+                "INSERT INTO run (id, created_at, updated_at, task_type, state) VALUES ('x', ?1, ?1, 'x', 'ok')",
+                [T],
+            )
+            .is_err());
+        c.execute(
+            "INSERT INTO run (id, created_at, updated_at, task_type, state) VALUES ('w', ?1, ?1, 'x', 'waiting')",
+            [T],
+        )
+        .unwrap();
+        let indexes: i64 = c
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name IN ('idx_run_list', 'idx_run_state')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(indexes, 2);
     }
 }

@@ -18,7 +18,6 @@ const TYPES: [string, string, string][] = [
   ["Project", "project", "Projects"],
   ["Task", "task", "Tasks"],
   ["Event", "event", "Events"],
-  ["Run", "run", "Runs"],
   ["Memory", "memory", "Memories"],
 ];
 
@@ -59,4 +58,19 @@ test("AC5: a command error reaches the caller as the AppError it was", async () 
   const api = await load();
   invoke.mockRejectedValueOnce({ code: "not_found", message: "No such bookmark." });
   await expect(api.getBookmark("missing")).rejects.toMatchObject({ code: "not_found" });
+});
+
+test("Run rows belong to the run queue: the client reads them and has no add, update or delete", async () => {
+  const api = await load();
+  for (const [fn, cmd, args] of [
+    ["getRun", "get_run", ["id-1"]],
+    ["listRuns", "list_runs", [{ limit: 10, after: null, includeDeleted: false }]],
+  ] as [string, string, unknown[]][]) {
+    invoke.mockClear();
+    await api[fn](...args);
+    expect(invoke.mock.calls[0][0]).toBe(cmd);
+  }
+  for (const fn of ["addRun", "updateRun", "deleteRun"]) {
+    expect(api[fn], `${fn} must not be exported`).toBeUndefined();
+  }
 });

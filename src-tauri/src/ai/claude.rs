@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 use serde_json::Value;
 
+use super::cancel::CancelToken;
 use super::config::ClaudeConfig;
 use super::process::{self, Limits, ProcessError};
 use super::run_dir::RunDir;
@@ -326,6 +327,7 @@ pub fn error_kind(error: &AiError) -> &'static str {
         AiError::Timeout => "timeout",
         AiError::UsageLimit => "usage_limit",
         AiError::Unavailable => "unavailable",
+        AiError::Cancelled => "cancelled",
     }
 }
 
@@ -355,17 +357,20 @@ pub(super) fn process_error(error: ProcessError) -> AiError {
         ProcessError::Spawn => AiError::Unavailable,
         ProcessError::TooLarge => AiError::SchemaMismatch,
         ProcessError::Read => AiError::ExitError { code: None },
+        ProcessError::Cancelled => AiError::Cancelled,
     }
 }
 
 /// Runs one task with `claude` at `program`, in a new owner-only folder inside `runs_dir` (see
 /// `run_dir`). This does not check for a test: the guard lives in `ClaudeRunner::run_task`, so
 /// unit tests pass a stand-in program here.
+/// When `cancel` is set, the process group is killed and the result is `AiError::Cancelled`.
 pub fn run_claude(
     program: &Path,
     task: &AiTask,
     runs_dir: &Path,
     config: &ClaudeConfig,
+    cancel: &CancelToken,
 ) -> Result<AiOutput, AiError> {
     let started = Instant::now();
     let run_dir = RunDir::create(runs_dir).map_err(|_| AiError::Unavailable)?;
@@ -374,6 +379,7 @@ pub fn run_claude(
         command,
         limits_for(task),
         Some(task.prompt.as_bytes()),
+        cancel,
         &mut |_| {},
     )
     .map_err(process_error)
@@ -713,14 +719,27 @@ mod tests {
     #[test]
     fn a_stand_in_claude_that_prints_a_result_gives_the_answer() {
         let program = stand_in("ok", &format!("cat <<'EOF'\n{}\nEOF", result_object()));
-        let got = run_claude(&program, &task(), &runs(), &test_config()).unwrap();
+        let got = run_claude(
+            &program,
+            &task(),
+            &runs(),
+            &test_config(),
+            &CancelToken::default(),
+        )
+        .unwrap();
         assert_eq!(got.structured_output, r#"{"greeting":"Hi!"}"#);
     }
 
     #[test]
     fn a_stand_in_claude_with_a_failing_exit_gives_an_exit_error() {
         let program = stand_in("fail", &format!("echo '{}'; exit 1", result_object()));
-        let got = run_claude(&program, &task(), &runs(), &test_config());
+        let got = run_claude(
+            &program,
+            &task(),
+            &runs(),
+            &test_config(),
+            &CancelToken::default(),
+        );
         assert_eq!(got, Err(AiError::ExitError { code: Some(1) }));
     }
 
@@ -735,7 +754,13 @@ mod tests {
         let mut t = task();
         t.timeout = Duration::from_secs(1);
         let started = Instant::now();
-        let got = run_claude(&program, &t, &runs(), &test_config());
+        let got = run_claude(
+            &program,
+            &t,
+            &runs(),
+            &test_config(),
+            &CancelToken::default(),
+        );
         assert_eq!(got, Err(AiError::Timeout));
         assert!(started.elapsed() < Duration::from_secs(5));
         let pid = std::fs::read_to_string(&marker).unwrap().trim().to_string();
@@ -767,7 +792,14 @@ mod tests {
                 result_object()
             ),
         );
-        run_claude(&program, &task(), &runs, &test_config()).unwrap();
+        run_claude(
+            &program,
+            &task(),
+            &runs,
+            &test_config(),
+            &CancelToken::default(),
+        )
+        .unwrap();
         let cwd = PathBuf::from(std::fs::read_to_string(&seen).unwrap().trim());
         let _ = std::fs::remove_file(&seen);
         let runs_real = std::fs::canonicalize(&runs).unwrap();
@@ -786,7 +818,13 @@ mod tests {
         std::fs::write(&file, "not a folder").unwrap();
         let marker = std::env::temp_dir().join(format!("mnemo-ran-{}", uuid::Uuid::new_v4()));
         let program = stand_in("noruns", &format!("touch '{}'", marker.display()));
-        let got = run_claude(&program, &task(), &file, &test_config());
+        let got = run_claude(
+            &program,
+            &task(),
+            &file,
+            &test_config(),
+            &CancelToken::default(),
+        );
         let ran = marker.exists();
         let _ = std::fs::remove_file(&file);
         let _ = std::fs::remove_file(&marker);
@@ -820,7 +858,14 @@ mod tests {
                 result_object()
             ),
         );
-        run_claude(&program, &task(), &runs(), &test_config()).unwrap();
+        run_claude(
+            &program,
+            &task(),
+            &runs(),
+            &test_config(),
+            &CancelToken::default(),
+        )
+        .unwrap();
         let input = std::fs::read_to_string(format!("{}.in", seen.display())).unwrap();
         let args = std::fs::read_to_string(format!("{}.args", seen.display())).unwrap();
         let _ = std::fs::remove_file(format!("{}.in", seen.display()));
@@ -836,7 +881,13 @@ mod tests {
             "echo 'Claude AI usage limit reached|1700000000' >&2; exit 1",
         );
         assert_eq!(
-            run_claude(&program, &task(), &runs(), &test_config()),
+            run_claude(
+                &program,
+                &task(),
+                &runs(),
+                &test_config(),
+                &CancelToken::default()
+            ),
             Err(AiError::UsageLimit)
         );
     }
@@ -853,7 +904,13 @@ mod tests {
             &format!("cat <<'EOF'\n{events}\nEOF\nexit 1"),
         );
         assert_eq!(
-            run_claude(&program, &task(), &runs(), &test_config()),
+            run_claude(
+                &program,
+                &task(),
+                &runs(),
+                &test_config(),
+                &CancelToken::default()
+            ),
             Err(AiError::ExitError { code: Some(1) })
         );
     }
@@ -868,7 +925,14 @@ mod tests {
                 result_object()
             ),
         );
-        let got = run_claude(&program, &task(), &runs(), &test_config()).unwrap();
+        let got = run_claude(
+            &program,
+            &task(),
+            &runs(),
+            &test_config(),
+            &CancelToken::default(),
+        )
+        .unwrap();
         assert_eq!(got.structured_output, r#"{"greeting":"Hi!"}"#);
     }
 
@@ -879,7 +943,13 @@ mod tests {
             "echo 'Claude AI usage limit reached'; exit 1",
         );
         assert_eq!(
-            run_claude(&program, &task(), &runs(), &test_config()),
+            run_claude(
+                &program,
+                &task(),
+                &runs(),
+                &test_config(),
+                &CancelToken::default()
+            ),
             Err(AiError::UsageLimit)
         );
     }
@@ -925,6 +995,7 @@ mod tests {
             &task(),
             &runs(),
             &test_config(),
+            &CancelToken::default(),
         );
         assert_eq!(got, Err(AiError::Unavailable));
     }
@@ -968,7 +1039,7 @@ mod tests {
                 result_object()
             ),
         );
-        run_claude(&program, &task(), &runs, &config).unwrap();
+        run_claude(&program, &task(), &runs, &config, &CancelToken::default()).unwrap();
         let cwd = PathBuf::from(std::fs::read_to_string(&seen).unwrap().trim());
         let _ = std::fs::remove_file(&seen);
         assert!(!cwd.starts_with(std::fs::canonicalize(config.dir()).unwrap()));

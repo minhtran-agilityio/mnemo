@@ -11,6 +11,7 @@ pub mod links;
 mod migrate;
 pub mod record;
 mod reset;
+pub mod runs;
 mod settings;
 
 use std::fs;
@@ -44,7 +45,8 @@ pub struct Storage {
 impl Storage {
     /// Opens (or creates) the database at `path`, turns on WAL mode and the busy
     /// timeout, and runs pending migrations. A file that is not a database gives
-    /// `StorageError::Open`; it is never deleted or replaced.
+    /// `StorageError::Open`; it is never deleted or replaced. Runs left in running or
+    /// waiting by an app that closed are then marked failed ("app closed").
     pub fn open(path: &Path) -> Result<Storage, StorageError> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| StorageError::Open(e.to_string()))?;
@@ -76,12 +78,21 @@ impl Storage {
             .parent()
             .unwrap_or_else(|| Path::new(""))
             .join(files::FILES_DIR);
-        Ok(Storage {
+        let storage = Storage {
             conn,
             files_dir,
             db_path: path.to_path_buf(),
             unavailable: false,
-        })
+        };
+        // The app holds one storage, opened before any run is queued, so a run still in
+        // running or waiting here was left by an app that closed. A failure is logged and
+        // does not stop the app: the rows stay as they are until the next start.
+        match storage.fail_interrupted_runs(&record::now_iso()) {
+            Ok(0) => {}
+            Ok(n) => log::info!("marked {n} interrupted AI runs as failed (app closed)"),
+            Err(e) => log::error!("could not mark interrupted AI runs as failed: {e}"),
+        }
+        Ok(storage)
     }
 
     /// True after a failed Reset left no usable database. The app must be restarted.
@@ -181,7 +192,7 @@ mod tests {
         assert_eq!(s.journal_mode().unwrap(), "wal");
         assert_eq!(s.busy_timeout_ms().unwrap(), 5000);
         assert_eq!(s.synchronous_level().unwrap(), 1, "NORMAL");
-        assert_eq!(s.schema_version().unwrap(), 7);
+        assert_eq!(s.schema_version().unwrap(), 8);
     }
 
     #[test]
@@ -189,7 +200,7 @@ mod tests {
         let (_d, p) = temp_db();
         drop(Storage::open(&p).unwrap());
         let s = Storage::open(&p).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 7);
+        assert_eq!(s.schema_version().unwrap(), 8);
     }
 
     #[test]

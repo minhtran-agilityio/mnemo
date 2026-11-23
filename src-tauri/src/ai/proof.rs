@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use super::cancel::CancelToken;
 use super::claude::{build_command, run_claude, OutputMode};
 use super::config::ensure_config;
 use super::health::{ClaudeCli, SystemClaude};
@@ -107,6 +108,7 @@ fn real_run_gives_an_answer() {
         &test_prompt::task(),
         &proof_runs_dir(),
         &proof_config(),
+        &CancelToken::default(),
     )
     .expect("the real test prompt gave no answer");
     let answer: Value = serde_json::from_str(&out.structured_output).unwrap();
@@ -137,8 +139,14 @@ fn real_run_refuses_a_tool_not_in_the_allowed_list() {
         max_output: 4 * 1024 * 1024,
         drain: Duration::from_secs(2),
     };
-    let out = process::run_bounded_with(command, limits, Some(task.prompt.as_bytes()), &mut |_| {})
-        .expect("the real run did not finish");
+    let out = process::run_bounded_with(
+        command,
+        limits,
+        Some(task.prompt.as_bytes()),
+        &CancelToken::default(),
+        &mut |_| {},
+    )
+    .expect("the real run did not finish");
     let refused = refused_tools(&out.stdout);
     let written = dir.join("mnemo-proof-file").exists();
     drop(run_dir);

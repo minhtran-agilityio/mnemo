@@ -14,6 +14,7 @@ use std::time::Instant;
 
 use serde::Deserialize;
 
+use super::cancel::CancelToken;
 use super::claude::{
     self, build_command, failure, limit_from_raw, limits_for, outcome_line, process_error, Event,
     ExitInfo, OutputMode,
@@ -114,6 +115,7 @@ pub fn run_stream(
     task: &AiTask,
     runs_dir: &Path,
     config: &ClaudeConfig,
+    cancel: &CancelToken,
     on_text: &mut dyn FnMut(&str),
 ) -> Result<AiOutput, AiError> {
     let started = Instant::now();
@@ -130,6 +132,7 @@ pub fn run_stream(
         command,
         limits_for(task),
         Some(task.prompt.as_bytes()),
+        cancel,
         &mut |chunk| reader.push(chunk),
     );
     let result = match ran {
@@ -292,6 +295,7 @@ mod tests {
             &task(),
             &runs(),
             &crate::ai::config::test_config(),
+            &CancelToken::default(),
             &mut |t| pieces.push(t.to_string()),
         );
         assert_eq!(pieces, vec!["Hel", "lo", " there"]);
@@ -309,6 +313,7 @@ mod tests {
             &task(),
             &runs(),
             &crate::ai::config::test_config(),
+            &CancelToken::default(),
             &mut |_| {},
         );
         assert_eq!(got, Err(AiError::UsageLimit));
@@ -325,6 +330,7 @@ mod tests {
             &t,
             &runs(),
             &crate::ai::config::test_config(),
+            &CancelToken::default(),
             &mut |_| {},
         );
         assert_eq!(got, Err(AiError::Timeout));

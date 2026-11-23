@@ -8,6 +8,7 @@
 
 use serde::Deserialize;
 
+use super::cancel::CancelToken;
 use super::fake::{FakeResult, FakeRunner};
 use super::models::default_choice;
 use super::runner::{AiRunner, AiTask};
@@ -35,7 +36,7 @@ pub(super) fn task(text: &str) -> AiTask {
 
 /// Asks the model for a short title. `None` when the run failed or the answer is unusable.
 fn suggest_title(runner: &dyn AiRunner, text: &str) -> Option<String> {
-    let output = runner.run_task(&task(text)).ok()?;
+    let output = runner.run_task(&task(text), &CancelToken::default()).ok()?;
     let answer: TitleAnswer = serde_json::from_str(&output.structured_output).ok()?;
     Some(answer.title).filter(|t| !t.trim().is_empty())
 }

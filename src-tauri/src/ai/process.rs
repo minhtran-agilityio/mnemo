@@ -15,6 +15,8 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
+use super::cancel::CancelToken;
+
 /// The OS error "text file busy" (the same number on Linux and macOS).
 const ETXTBSY: i32 = 26;
 /// How often the loop looks at the child and the clock.
@@ -76,6 +78,8 @@ pub enum ProcessError {
     TooLarge,
     /// The output or the child state could not be read.
     Read,
+    /// The run was cancelled; the child and its process group were killed.
+    Cancelled,
 }
 
 impl fmt::Display for ProcessError {
@@ -85,6 +89,7 @@ impl fmt::Display for ProcessError {
             ProcessError::Timeout => write!(f, "the process timed out"),
             ProcessError::TooLarge => write!(f, "the process output was too large"),
             ProcessError::Read => write!(f, "the process output could not be read"),
+            ProcessError::Cancelled => write!(f, "the process was cancelled"),
         }
     }
 }
@@ -145,16 +150,19 @@ pub fn complete_text(bytes: Vec<u8>, finished: bool, max_output: u64) -> Result<
 /// Runs `command` with its output bounded by `limits`. Stdout and stderr are piped by this
 /// function; stdin is as the command set it.
 pub fn run_bounded(command: Command, limits: Limits) -> Result<ProcessOutput, ProcessError> {
-    run_bounded_with(command, limits, None, &mut |_| {})
+    run_bounded_with(command, limits, None, &CancelToken::default(), &mut |_| {})
 }
 
 /// Like `run_bounded`. When `input` is given it is written to the child's stdin, which is then
 /// closed (so a prompt never shows on the command line). `on_chunk` gets each piece of output
-/// as it arrives (stream mode); the pieces are cut at any byte, not at line breaks.
+/// as it arrives (stream mode); the pieces are cut at any byte, not at line breaks. When
+/// `cancel` is set, the wait loop kills the child and its process group within one poll (20 ms)
+/// and returns `ProcessError::Cancelled`.
 pub fn run_bounded_with(
     mut command: Command,
     limits: Limits,
     input: Option<&[u8]>,
+    cancel: &CancelToken,
     on_chunk: &mut dyn FnMut(&[u8]),
 ) -> Result<ProcessOutput, ProcessError> {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -241,6 +249,10 @@ pub fn run_bounded_with(
         if bytes.len() as u64 >= limits.max_output {
             kill_tree(&mut child);
             return Err(ProcessError::TooLarge);
+        }
+        if cancel.is_cancelled() {
+            kill_tree(&mut child);
+            return Err(ProcessError::Cancelled);
         }
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -395,9 +407,13 @@ mod tests {
     #[test]
     fn chunks_reach_the_callback_in_order() {
         let mut seen: Vec<u8> = Vec::new();
-        let got = run_bounded_with(sh("echo one; echo two"), limits(5000), None, &mut |c| {
-            seen.extend_from_slice(c)
-        })
+        let got = run_bounded_with(
+            sh("echo one; echo two"),
+            limits(5000),
+            None,
+            &CancelToken::default(),
+            &mut |c| seen.extend_from_slice(c),
+        )
         .unwrap();
         assert_eq!(seen, b"one\ntwo\n");
         assert_eq!(got.stdout, seen);
@@ -421,5 +437,64 @@ mod tests {
         assert_eq!(complete_text(b"hi".to_vec(), false, 100), Err(()));
         assert_eq!(complete_text(vec![0xE2, 0x82], true, 100), Err(()));
         assert_eq!(complete_text(vec![b'a'; 100], true, 100), Err(()));
+    }
+
+    /// Runs `script` on this thread and cancels its token from another thread after 100 ms.
+    fn run_and_cancel_after_100_ms(
+        script: &str,
+    ) -> (Result<ProcessOutput, ProcessError>, Duration) {
+        let token = CancelToken::default();
+        let canceller = token.clone();
+        let started = Instant::now();
+        let handle = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            canceller.cancel();
+        });
+        let got = run_bounded_with(sh(script), limits(30_000), None, &token, &mut |_| {});
+        let elapsed = started.elapsed();
+        handle.join().unwrap();
+        (got, elapsed)
+    }
+
+    #[test]
+    fn cancel_kills_a_sleeping_child_within_two_seconds() {
+        let (got, elapsed) = run_and_cancel_after_100_ms("sleep 30");
+        assert_eq!(got.unwrap_err(), ProcessError::Cancelled);
+        assert!(elapsed < Duration::from_secs(2), "took {elapsed:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_kills_the_childs_background_descendants() {
+        let file = temp_file("cancel-grandchild");
+        let script = format!("sleep 30 & echo $! > '{}'; wait", file.display());
+        let (got, elapsed) = run_and_cancel_after_100_ms(&script);
+        assert_eq!(got.unwrap_err(), ProcessError::Cancelled);
+        assert!(elapsed < Duration::from_secs(2), "took {elapsed:?}");
+        let pid = std::fs::read_to_string(&file).unwrap().trim().to_string();
+        let _ = std::fs::remove_file(&file);
+        let alive = || {
+            Command::new("kill")
+                .args(["-0", &pid])
+                .stderr(Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        };
+        let end = Instant::now() + Duration::from_secs(3);
+        while alive() && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(!alive(), "the grandchild {pid} is still running");
+    }
+
+    #[test]
+    fn a_token_cancelled_before_the_start_kills_the_child_at_once() {
+        let token = CancelToken::default();
+        token.cancel();
+        let started = Instant::now();
+        let got = run_bounded_with(sh("sleep 30"), limits(30_000), None, &token, &mut |_| {});
+        assert_eq!(got.unwrap_err(), ProcessError::Cancelled);
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 }
