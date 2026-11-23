@@ -18,6 +18,7 @@ use super::claude::{
     self, build_command, failure, limit_from_raw, limits_for, outcome_line, process_error, Event,
     ExitInfo, OutputMode,
 };
+use super::config::ClaudeConfig;
 use super::process;
 use super::run_dir::RunDir;
 use super::runner::{AiError, AiOutput, AiTask};
@@ -112,11 +113,18 @@ pub fn run_stream(
     program: &Path,
     task: &AiTask,
     runs_dir: &Path,
+    config: &ClaudeConfig,
     on_text: &mut dyn FnMut(&str),
 ) -> Result<AiOutput, AiError> {
     let started = Instant::now();
     let run_dir = RunDir::create(runs_dir).map_err(|_| AiError::Unavailable)?;
-    let command = build_command(program, task, run_dir.path(), OutputMode::StreamJson);
+    let command = build_command(
+        program,
+        task,
+        run_dir.path(),
+        config,
+        OutputMode::StreamJson,
+    );
     let mut reader = StreamReader::new(on_text);
     let ran = process::run_bounded_with(
         command,
@@ -279,9 +287,13 @@ mod tests {
     fn a_stand_in_claude_that_prints_a_stream_works_end_to_end() {
         let program = stand_in(&format!("cat <<'EOF'\n{STREAM}EOF"));
         let mut pieces: Vec<String> = Vec::new();
-        let got = run_stream(&program, &task(), &runs(), &mut |t| {
-            pieces.push(t.to_string())
-        });
+        let got = run_stream(
+            &program,
+            &task(),
+            &runs(),
+            &crate::ai::config::test_config(),
+            &mut |t| pieces.push(t.to_string()),
+        );
         assert_eq!(pieces, vec!["Hel", "lo", " there"]);
         assert_eq!(
             got.unwrap().structured_output,
@@ -292,7 +304,13 @@ mod tests {
     #[test]
     fn a_failed_stream_with_a_plain_limit_line_on_stdout_is_the_usage_limit() {
         let program = stand_in("echo 'Claude AI usage limit reached'; exit 1");
-        let got = run_stream(&program, &task(), &runs(), &mut |_| {});
+        let got = run_stream(
+            &program,
+            &task(),
+            &runs(),
+            &crate::ai::config::test_config(),
+            &mut |_| {},
+        );
         assert_eq!(got, Err(AiError::UsageLimit));
     }
 
@@ -302,7 +320,13 @@ mod tests {
         let mut t = task();
         t.timeout = Duration::from_secs(1);
         let started = Instant::now();
-        let got = run_stream(&program, &t, &runs(), &mut |_| {});
+        let got = run_stream(
+            &program,
+            &t,
+            &runs(),
+            &crate::ai::config::test_config(),
+            &mut |_| {},
+        );
         assert_eq!(got, Err(AiError::Timeout));
         assert!(started.elapsed() < Duration::from_secs(5));
     }

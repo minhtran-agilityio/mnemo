@@ -104,6 +104,16 @@ pub fn run() {
             let fake =
                 ai::runner::fake_requested(std::env::var_os(ai::runner::FAKE_AI_ENV).as_deref());
             log::info!("AI runner: {}", if fake { "fake" } else { "real" });
+            // Mnemo's own Claude config files are made once and never rewritten. If they cannot be
+            // made, no AI run starts; saving and reading still work. The log holds the error
+            // kind only: no path, no file text.
+            let claude_config = paths.as_ref().ok().and_then(|p| {
+                ai::config::ensure_config(&p.config_dir)
+                    .map_err(|e| {
+                        log::error!("could not create Mnemo's Claude config: {:?}", e.kind())
+                    })
+                    .ok()
+            });
             app.manage(AiRunnerState {
                 runner: ai::runner::select_runner(
                     fake,
@@ -111,6 +121,7 @@ pub fn run() {
                         .as_ref()
                         .ok()
                         .map(|p| ai::runner::runs_dir(&p.data_dir)),
+                    claude_config,
                 ),
                 fake,
             });
