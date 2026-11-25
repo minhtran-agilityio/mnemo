@@ -19,3 +19,14 @@ pub const MIN_TEXT_CHARS: usize = 200;
 pub const MAX_TAG_ATTRIBUTES: usize = 1_000;
 /// How long one summary run may take.
 pub const SUMMARY_TIMEOUT: Duration = Duration::from_secs(120);
+/// How much decoded HTML the tokenizer gets between two deadline checks. Small, so one chunk
+/// of a hostile page (for example a tag with a huge number of attributes, whose duplicate
+/// check is quadratic) cannot run long past the deadline.
+pub const HTML_CHUNK_BYTES: usize = 4 * 1024;
+/// Longest title kept while reading a page (the stored title is cut to 500 characters later).
+pub const TITLE_BUFFER_BYTES: usize = 8 * 1024;
+/// How many first bytes of an HTML page are searched for a `<meta charset>` when the server
+/// names no charset (the HTML standard's prescan uses 1024).
+pub const CHARSET_PRESCAN_BYTES: usize = 1024;
+/// How often a run waiting in the queue looks at its cancel token.
+pub const QUEUED_CANCEL_POLL: Duration = Duration::from_millis(50);

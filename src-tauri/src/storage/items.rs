@@ -494,11 +494,15 @@ impl sealed::Sealed for Bookmark {}
 impl Item for Bookmark {
     type Input = BookmarkInput;
     const KIND: ItemKind = ItemKind::Bookmark;
+    // The site (?8) follows the link. A bookmark with a summary is done, so no AI run takes an
+    // owner's summary over; a removed summary is no longer done; any other status stays.
     item_sql!(
         table: "bookmark",
-        columns: "url, title, summary, reason, reason_is_guess",
-        insert: "?3, ?4, ?5, ?6, ?7",
-        set: "url = ?3, title = ?4, summary = ?5, reason = ?6, reason_is_guess = ?7"
+        columns: "url, title, summary, reason, reason_is_guess, site, summary_status",
+        insert: "?3, ?4, ?5, ?6, ?7, ?8, CASE WHEN ?5 IS NULL THEN 'pending' ELSE 'done' END",
+        set: "url = ?3, title = ?4, summary = ?5, reason = ?6, reason_is_guess = ?7, site = ?8,
+            summary_status = CASE WHEN ?5 IS NOT NULL THEN 'done'
+                WHEN summary_status = 'done' THEN 'pending' ELSE summary_status END"
     );
 
     fn validate(i: &BookmarkInput) -> Result<(), StorageError> {
@@ -521,6 +525,11 @@ impl Item for Bookmark {
             opt_text(&i.summary),
             opt_text(&i.reason),
             Value::Integer(i64::from(i.reason_is_guess)),
+            opt_text(
+                &url::Url::parse(i.url.trim())
+                    .ok()
+                    .and_then(|u| super::bookmarks::site_of(&u)),
+            ),
         ]
     }
 

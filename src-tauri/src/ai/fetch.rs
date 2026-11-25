@@ -126,6 +126,25 @@ impl fmt::Display for FetchError {
 
 impl std::error::Error for FetchError {}
 
+impl FetchError {
+    /// True when the same read may work later: the site was down, slow, busy or not reached.
+    /// Such a bookmark is link only for now, and the owner can ask for a new read. Every other
+    /// error is a lasting answer about the page (not text, too little text, refused, a login
+    /// wall or a missing page): the page is unreadable.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            FetchError::Timeout | FetchError::Network => true,
+            FetchError::Status(code) => *code >= 500 || *code == 429 || *code == 408,
+            FetchError::NotWebLink
+            | FetchError::Refused
+            | FetchError::TooManyRedirects
+            | FetchError::NotText
+            | FetchError::TooLittleText
+            | FetchError::TooComplex => false,
+        }
+    }
+}
+
 /// Reads the text of a page. The app uses `HttpReader`; tests pass a fake.
 pub trait PageReader: Send + Sync {
     fn read(&self, url: &str) -> Result<PageText, FetchError>;
@@ -436,6 +455,56 @@ fn charset(content_type: &str) -> Option<&'static encoding_rs::Encoding> {
     })
 }
 
+/// The charset named by a `<meta charset>` or `<meta http-equiv="Content-Type">` tag in the
+/// first bytes of an HTML page, as the HTML standard's prescan finds it. A UTF-16 label means
+/// UTF-8 (the bytes were read as ASCII to find it). A byte order mark still wins when decoding.
+fn meta_charset(body: &[u8]) -> Option<&'static encoding_rs::Encoding> {
+    let head = &body[..body.len().min(limits::CHARSET_PRESCAN_BYTES)];
+    let lower = head.to_ascii_lowercase();
+    let mut at = 0;
+    while let Some(start) = find(&lower[at..], b"<meta").map(|i| at + i) {
+        let end = find(&lower[start..], b">").map_or(lower.len(), |i| start + i);
+        let tag = &lower[start..end];
+        if let Some(enc) = find(tag, b"charset")
+            .and_then(|i| charset_value(&head[start + i + 7..end]))
+            .and_then(|v| encoding_rs::Encoding::for_label(v))
+        {
+            return Some(
+                if enc == encoding_rs::UTF_16LE || enc == encoding_rs::UTF_16BE {
+                    encoding_rs::UTF_8
+                } else {
+                    enc
+                },
+            );
+        }
+        at = end;
+    }
+    None
+}
+
+/// The value after `charset` in a meta tag: `= "x"`, `='x'` or `=x`, up to a quote, space,
+/// `;` or the end.
+fn charset_value(rest: &[u8]) -> Option<&[u8]> {
+    let skip_space =
+        |b: &[u8]| -> usize { b.iter().take_while(|c| c.is_ascii_whitespace()).count() };
+    let rest = rest[skip_space(rest)..].strip_prefix(b"=")?;
+    let rest = &rest[skip_space(rest)..];
+    let rest = rest
+        .strip_prefix(b"\"")
+        .or_else(|| rest.strip_prefix(b"'"))
+        .unwrap_or(rest);
+    let len = rest
+        .iter()
+        .position(|&c| c == b'"' || c == b'\'' || c == b';' || c.is_ascii_whitespace() || c == b'/')
+        .unwrap_or(rest.len());
+    (len > 0).then(|| &rest[..len])
+}
+
+/// Where `needle` first starts in `hay`.
+fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    hay.windows(needle.len()).position(|w| w == needle)
+}
+
 /// `page_text_until` with the whole read time as its deadline. Tests use it; the reader calls
 /// `page_text_until` with the deadline of the read.
 #[cfg(test)]
@@ -456,7 +525,13 @@ fn page_text_until(
     deadline: Instant,
 ) -> Result<PageText, FetchError> {
     let kind = text_kind(content_type).ok_or(FetchError::NotText)?;
-    let encoding = charset(content_type).unwrap_or(encoding_rs::UTF_8);
+    let encoding = charset(content_type)
+        .or_else(|| {
+            (kind == TextKind::Html)
+                .then(|| meta_charset(body))
+                .flatten()
+        })
+        .unwrap_or(encoding_rs::UTF_8);
     let (decoded, _, _) = encoding.decode(body);
     let (title, text) = match kind {
         TextKind::Html => {
@@ -540,15 +615,18 @@ fn too_many_attributes(html: &str, max: usize) -> bool {
     false
 }
 
-/// How much decoded HTML the tokenizer gets between two deadline checks. Small, so one chunk
-/// of a hostile page (for example a tag with a huge number of attributes, whose duplicate
-/// check is quadratic) cannot run long past the deadline.
-const HTML_CHUNK_BYTES: usize = 4 * 1024;
-
 /// Elements whose content is not page text: the site's own navigation and furniture. A `<main>`
 /// or `<article>` start ends any of them left open, so an unclosed `<nav>` cannot hide the page.
-const SKIP: [&str; 9] = [
-    "nav", "header", "footer", "aside", "form", "svg", "template", "select", "button",
+/// `<form>` is not here: some sites wrap the whole page in one form (ASP.NET WebForms).
+const SKIP: [&str; 8] = [
+    "nav", "header", "footer", "aside", "svg", "template", "select", "button",
+];
+
+/// The start tags that may stand in `<head>`. Any other start tag ends the head, as in a
+/// browser, because `</head>` and `<body>` are both optional.
+const IN_HEAD: [&str; 12] = [
+    "html", "head", "title", "meta", "link", "base", "basefont", "bgsound", "style", "script",
+    "noscript", "template",
 ];
 
 /// Raw-text elements: their content is not markup and not page text (title aside). The tree
@@ -587,9 +665,6 @@ const BLOCK: [&str; 21] = [
     "dd",
 ];
 
-/// Longest title kept while reading (the stored title is cut to 500 characters later).
-const TITLE_BUFFER_BYTES: usize = 8 * 1024;
-
 /// Collects the title and the visible text from the tokens, in one forward pass with no tree:
 /// every token costs the same however the page nests, so the walk is linear in the page size.
 #[derive(Default)]
@@ -601,10 +676,16 @@ struct TextSink {
     /// True inside the first `<title>`.
     in_title: Cell<bool>,
     title_done: Cell<bool>,
-    /// True inside `<head>` (ended by `</head>` or `<body>`).
+    /// True inside `<head>` (ended by `</head>`, `<body>`, any start tag that cannot be in the
+    /// head, or text).
     in_head: Cell<bool>,
     /// How many `SKIP` elements are open.
     skip: Cell<usize>,
+    /// How many `<main>` and `<article>` elements are open. A `<header>` inside one holds the
+    /// heading of the content, so it is not skipped.
+    content: Cell<usize>,
+    /// How many open `<header>` elements were not counted in `skip` (inside content).
+    kept_headers: Cell<usize>,
 }
 
 impl TextSink {
@@ -618,11 +699,19 @@ impl TextSink {
             TagKind::StartTag => {
                 match name {
                     "head" => self.in_head.set(true),
-                    "body" => self.in_head.set(false),
-                    "main" | "article" => self.skip.set(0),
+                    "main" | "article" => {
+                        self.skip.set(0);
+                        self.content.set(self.content.get().saturating_add(1));
+                    }
                     _ => {}
                 }
-                if SKIP.contains(&name) && !tag.self_closing {
+                if !IN_HEAD.contains(&name) {
+                    self.in_head.set(false);
+                }
+                if name == "header" && self.content.get() > 0 && !tag.self_closing {
+                    self.kept_headers
+                        .set(self.kept_headers.get().saturating_add(1));
+                } else if SKIP.contains(&name) && !tag.self_closing {
                     self.skip.set(self.skip.get().saturating_add(1));
                 }
                 if self.shown() && BLOCK.contains(&name) {
@@ -653,7 +742,12 @@ impl TextSink {
                 if name == "head" {
                     self.in_head.set(false);
                 }
-                if SKIP.contains(&name) {
+                if name == "main" || name == "article" {
+                    self.content.set(self.content.get().saturating_sub(1));
+                }
+                if name == "header" && self.kept_headers.get() > 0 {
+                    self.kept_headers.set(self.kept_headers.get() - 1);
+                } else if SKIP.contains(&name) {
                     self.skip.set(self.skip.get().saturating_sub(1));
                 }
                 if self.shown() && BLOCK.contains(&name) {
@@ -674,11 +768,17 @@ impl TokenSink for TextSink {
             Token::CharacterTokens(t) => {
                 if self.in_title.get() {
                     let mut title = self.title.borrow_mut();
-                    if title.len() < TITLE_BUFFER_BYTES {
+                    if title.len() < limits::TITLE_BUFFER_BYTES {
                         title.push_str(&t);
                     }
-                } else if self.shown() {
-                    self.text.borrow_mut().push_str(&t);
+                } else {
+                    // Text outside a raw-text element ends the head, as in a browser.
+                    if self.in_head.get() && self.raw.borrow().is_none() && !t.trim().is_empty() {
+                        self.in_head.set(false);
+                    }
+                    if self.shown() {
+                        self.text.borrow_mut().push_str(&t);
+                    }
                 }
                 TokenSinkResult::Continue
             }
@@ -695,7 +795,7 @@ fn html_text(source: &str, deadline: Instant) -> Result<(Option<String>, String)
     let mut rest = source;
     while !rest.is_empty() {
         remaining(deadline)?;
-        let mut cut = rest.len().min(HTML_CHUNK_BYTES);
+        let mut cut = rest.len().min(limits::HTML_CHUNK_BYTES);
         while !rest.is_char_boundary(cut) {
             cut += 1;
         }
@@ -1258,6 +1358,103 @@ mod tests {
             let got = page_text(html.as_bytes(), "text/html", &DEFAULT_LIMITS).unwrap();
             assert!(got.text.contains("Rust ownership means"), "{html:.80}");
             assert!(!got.text.contains("Home"));
+        }
+    }
+
+    #[test]
+    fn a_head_with_no_end_tag_ends_at_the_first_body_tag_or_text() {
+        // Both </head> and <body> are optional in HTML: a browser ends the head at the first
+        // tag (or text) that cannot be in it.
+        let body = long_text();
+        for html in [
+            format!("<html><head><title>T</title><meta charset=utf-8><p>{body}</p></html>"),
+            format!("<head><title>T</title><div><p>{body}</p></div>"),
+            format!("<head><title>T</title><link rel=x>{body}"),
+        ] {
+            let got = page_text(html.as_bytes(), "text/html", &DEFAULT_LIMITS).unwrap();
+            assert!(got.text.contains("Rust ownership means"), "{html:.80}");
+            assert_eq!(got.title.as_deref(), Some("T"));
+        }
+    }
+
+    #[test]
+    fn a_page_inside_one_form_and_a_header_inside_an_article_are_read() {
+        let body = long_text();
+        // ASP.NET WebForms wraps the whole body in one <form>.
+        let webforms = format!(
+            "<body><form method=post action=./><nav>Home</nav><p>{body}</p><button>Go</button></form></body>"
+        );
+        let got = page_text(webforms.as_bytes(), "text/html", &DEFAULT_LIMITS).unwrap();
+        assert!(got.text.contains("Rust ownership means"));
+        assert!(!got.text.contains("Home"));
+        assert!(!got.text.contains("Go"));
+        let article = format!(
+            "<body><header>Site menu</header><article><header><h1>Ownership</h1></header><p>{body}</p></article><footer>Copyright</footer></body>"
+        );
+        let got = page_text(article.as_bytes(), "text/html", &DEFAULT_LIMITS).unwrap();
+        assert!(got.text.starts_with("Ownership\n"), "{:.40}", got.text);
+        assert!(got.text.contains("Rust ownership means"));
+        assert!(!got.text.contains("Site menu"));
+        assert!(!got.text.contains("Copyright"));
+    }
+
+    #[test]
+    fn the_charset_of_a_meta_tag_is_used_when_the_server_names_none() {
+        let text = "日本語のページです。所有権はRustの中心的な機能です。".repeat(10);
+        for (label, meta) in [
+            ("Shift_JIS", "<meta charset=\"Shift_JIS\">"),
+            (
+                "GBK",
+                "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=gbk\">",
+            ),
+        ] {
+            let enc = encoding_rs::Encoding::for_label(label.as_bytes()).unwrap();
+            let mut html = format!("<html><head>{meta}<title>").into_bytes();
+            html.extend_from_slice(&enc.encode("所有権").0);
+            html.extend_from_slice(b"</title></head><body><p>");
+            html.extend_from_slice(&enc.encode(&text).0);
+            html.extend_from_slice(b"</p></body></html>");
+            let got = page_text(&html, "text/html", &DEFAULT_LIMITS).unwrap();
+            assert_eq!(got.title.as_deref(), Some("所有権"), "{label}");
+            assert!(got.text.starts_with("日本語のページです。"), "{label}");
+        }
+        // The server's charset wins over the meta tag.
+        let mut html = b"<meta charset=\"Shift_JIS\"><p>".to_vec();
+        html.extend_from_slice("Caf\u{e9} au lait. ".repeat(30).as_bytes());
+        let got = page_text(&html, "text/html; charset=utf-8", &DEFAULT_LIMITS).unwrap();
+        assert!(got.text.starts_with("Café au lait."));
+        // cp1251 named by a meta tag.
+        let cyr = "Владение — главная идея Rust. ".repeat(10);
+        let mut html = b"<meta charset=windows-1251><p>".to_vec();
+        html.extend_from_slice(&encoding_rs::WINDOWS_1251.encode(&cyr).0);
+        let got = page_text(&html, "text/html", &DEFAULT_LIMITS).unwrap();
+        assert!(got.text.starts_with("Владение"));
+    }
+
+    #[test]
+    fn a_failed_read_that_may_pass_later_is_transient() {
+        for e in [
+            FetchError::Timeout,
+            FetchError::Network,
+            FetchError::Status(500),
+            FetchError::Status(503),
+            FetchError::Status(429),
+            FetchError::Status(408),
+        ] {
+            assert!(e.is_transient(), "{e:?}");
+        }
+        for e in [
+            FetchError::NotWebLink,
+            FetchError::Refused,
+            FetchError::TooManyRedirects,
+            FetchError::Status(401),
+            FetchError::Status(403),
+            FetchError::Status(404),
+            FetchError::NotText,
+            FetchError::TooLittleText,
+            FetchError::TooComplex,
+        ] {
+            assert!(!e.is_transient(), "{e:?}");
         }
     }
 

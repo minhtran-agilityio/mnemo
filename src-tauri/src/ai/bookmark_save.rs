@@ -1,16 +1,19 @@
 // Save a link with a summary and tags (#25, BM-01): the steps of a save and of a later summary.
 //
-// 1. The link is stored at once (status `pending`), before any page read or AI work, so it is
-//    never lost.
+// 1. The link is stored at once, before any page read or AI work, so it is never lost. It is
+//    stored and claimed (`reading`) in one storage call, so "Summarize later" cannot start a
+//    second read of it.
 // 2. With AI off or at the limit, the bookmark stays link only (`ai_off`, "no summary yet").
-// 3. The core reads the page (`fetch`). A page it cannot read stays link only (`unreadable`),
-//    with a null summary: nothing is made up from the link or the title.
+// 3. The core reads the page (`fetch`). A page it cannot read stays link only, with a null
+//    summary: nothing is made up from the link or the title. A lasting answer (not text, too
+//    little text, refused, a login wall, a missing page) is `unreadable` ("Paste the text"). A
+//    site that was down, slow or busy is `pending` ("no summary yet", "Summarize later").
 // 4. Claude gets only the page text (or the text the owner pasted), with no tools, and must
 //    answer in the JSON schema below. A good answer stores the summary, the tags and the reason
 //    (always a guess) together (`done`). A failed run stores nothing (`pending`, or `ai_off`
 //    when AI went off or reached the limit).
 // Every step sends the bookmark to `emit`, so the screen can show it as it changes. Storage is
-// never locked while the page is read or Claude runs.
+// never locked while the page is read or Claude runs. No exit leaves a bookmark `reading`.
 
 use std::sync::Mutex;
 
@@ -21,13 +24,16 @@ use super::fetch::{cut_chars, PageReader};
 use super::limits::{MAX_TEXT_CHARS, SUMMARY_TIMEOUT};
 use super::models::default_choice;
 use super::runner::{AiError, AiOutput, AiRunner, AiTask};
-use crate::storage::bookmarks::{check_summary, BookmarkSummary, SavedBookmark, SummaryStatus};
+use crate::storage::bookmarks::{
+    check_summary, BookmarkSummary, SavedBookmark, SummaryStatus, MAX_TAGS,
+};
 use crate::storage::{Storage, StorageError};
 
 /// The task name: its model and effort come from the "save" row of `models::DEFAULTS`.
 pub const TASK_NAME: &str = "save";
 
-/// The answer shape Claude must give.
+/// The answer shape Claude must give. `maxItems` is `storage::bookmarks::MAX_TAGS` (a test
+/// checks that they agree).
 pub const SCHEMA: &str = r#"{"type":"object","properties":{"summary":{"type":"string","minLength":1,"maxLength":2000},"tags":{"type":"array","items":{"type":"string","minLength":1,"maxLength":80},"minItems":1,"maxItems":6},"reason":{"type":"string","minLength":1,"maxLength":500}},"required":["summary","tags","reason"],"additionalProperties":false}"#;
 
 #[derive(Deserialize)]
@@ -52,7 +58,7 @@ pub fn task(title: Option<&str>, text: &str) -> AiTask {
          or from your own knowledge. If the text does not say something, leave it out.\n\
          Answer in the JSON schema with:\n\
          - summary: 2 to 4 plain sentences about what the page says, at most 600 characters.\n\
-         - tags: 1 to 5 short topic words or phrases, lower case.\n\
+         - tags: 1 to {MAX_TAGS} short topic words or phrases, lower case.\n\
          - reason: one sentence on why the owner may want this page later. It is shown as a guess.\n\
          <{marker}>\n{title_line}{text}\n</{marker}>"
     );
@@ -178,7 +184,11 @@ impl SaveContext<'_> {
 /// Saves a link: stores it at once, then reads the page and asks Claude for the summary.
 /// A link that is not an http or https web address is refused and nothing is stored.
 pub fn save_link(ctx: &SaveContext<'_>, url: &str) -> Result<SaveResult, SaveError> {
-    let b = ctx.store.with_storage(&mut |s| s.save_link(url))?;
+    // Stored and claimed under one lock: no other call can start a summary in between.
+    let b = ctx.store.with_storage(&mut |s| {
+        let b = s.save_link(url)?;
+        s.claim_bookmark_for_summary(&b.base.id)
+    })?;
     log::info!("bookmark {} saved, reading the page", b.base.id);
     (ctx.emit)(&b);
     summarize_from(ctx, b, Source::Page)
@@ -210,9 +220,32 @@ pub fn summarize(
     summarize_from(ctx, b, source)
 }
 
+/// Makes the summary of `b`, which the caller has claimed (`reading`). When any step fails
+/// with an error, the bookmark is set back to `pending` before the error is returned, so a
+/// new summary can start without a restart.
 fn summarize_from(
     ctx: &SaveContext<'_>,
     b: SavedBookmark,
+    source: Source,
+) -> Result<SaveResult, SaveError> {
+    let id = b.base.id.clone();
+    let result = summarize_claimed(ctx, b, source);
+    if result.is_err() {
+        match ctx
+            .store
+            .with_storage(&mut |s| s.set_bookmark_status(&id, SummaryStatus::Pending))
+        {
+            Ok(b) => (ctx.emit)(&b),
+            // Storage opens the next time with this row back to pending.
+            Err(e) => log::error!("bookmark {id} is left reading: {e:?}"),
+        }
+    }
+    result
+}
+
+fn summarize_claimed(
+    ctx: &SaveContext<'_>,
+    mut b: SavedBookmark,
     source: Source,
 ) -> Result<SaveResult, SaveError> {
     let id = b.base.id.clone();
@@ -220,7 +253,6 @@ fn summarize_from(
         let b = ctx.status(&id, SummaryStatus::AiOff)?;
         return ctx.done(b, None);
     }
-    let mut b = ctx.status(&id, SummaryStatus::Reading)?;
     let text = match source {
         Source::Pasted(text) => cut_chars(&text, MAX_TEXT_CHARS).0,
         Source::Page => match ctx.reader.read(&b.url) {
@@ -233,8 +265,13 @@ fn summarize_from(
                 }
                 page.text
             }
+            Err(e) if e.is_transient() => {
+                // The link is user content and is not logged.
+                log::info!("bookmark {id}: the page could not be reached ({e}), no summary yet");
+                let b = ctx.status(&id, SummaryStatus::Pending)?;
+                return ctx.done(b, Some(not_reached()));
+            }
             Err(e) => {
-                // The reason goes to the log only; the link is user content and is not logged.
                 log::info!("bookmark {id}: the page could not be read ({e})");
                 let b = ctx.status(&id, SummaryStatus::Unreadable)?;
                 return ctx.done(b, None);
@@ -265,6 +302,16 @@ fn summarize_from(
             let b = ctx.status(&id, status)?;
             ctx.done(b, Some(problem(&e)))
         }
+    }
+}
+
+/// Why a page that may read later gave no summary, and what the owner can do.
+fn not_reached() -> Problem {
+    Problem {
+        code: "page_not_reached",
+        message: "Mnemo could not reach the page: the site was down, slow or busy. No summary \
+                  was saved. You can summarize it later."
+            .to_string(),
     }
 }
 
@@ -407,7 +454,8 @@ mod tests {
         assert_eq!(got.ai_error, None);
         assert_eq!(&w.stored(&b.base.id), b);
         // Stored first, then reading, then done.
-        assert_eq!(w.seen(), vec![Pending, Reading, Reading, Done]);
+        // Stored and claimed in one step (reading), then the title, then done.
+        assert_eq!(w.seen(), vec![Reading, Reading, Done]);
     }
 
     #[test]
@@ -440,7 +488,8 @@ mod tests {
             FetchError::Status(401),
             FetchError::NotText,
             FetchError::Refused,
-            FetchError::Timeout,
+            FetchError::Status(404),
+            FetchError::TooComplex,
         ] {
             let w = World::new(
                 FakeReader::failing(e.clone()),
@@ -459,8 +508,111 @@ mod tests {
             // Nothing is made up from the link: Claude is never asked.
             assert!(w.runner.requests().is_empty());
             assert_eq!(w.stored(&b.base.id).summary_status, Unreadable);
-            assert_eq!(w.seen(), vec![Pending, Reading, Unreadable]);
+            assert_eq!(w.seen(), vec![Reading, Unreadable]);
         }
+    }
+
+    #[test]
+    fn a_page_that_may_read_later_stays_no_summary_yet_and_can_be_read_again() {
+        for e in [
+            FetchError::Timeout,
+            FetchError::Network,
+            FetchError::Status(503),
+            FetchError::Status(429),
+        ] {
+            let w = World::new(
+                FakeReader::failing(e.clone()),
+                FakeResult::Valid(GOOD.into()),
+            );
+            let got = w.run(|c| save_link(c, "https://example.org/")).unwrap();
+            let b = &got.bookmark;
+            // Honest failure: link only, no summary, Claude never asked.
+            assert_eq!(b.summary_status, Pending, "{e:?}");
+            assert_eq!((b.summary.clone(), b.reason.clone()), (None, None));
+            assert!(w.runner.requests().is_empty());
+            let problem = got.ai_error.clone().unwrap();
+            assert_eq!(problem.code, "page_not_reached");
+            assert!(
+                problem.message.contains("summarize it later"),
+                "{problem:?}"
+            );
+            // A new read is allowed ("Summarize later").
+            let again = w.run(|c| summarize(c, &b.base.id, None)).unwrap();
+            assert_eq!(again.bookmark.summary_status, Pending);
+            assert_eq!(w.reader.calls(), 2);
+        }
+    }
+
+    /// A store that fails once, at the first call that leaves a title on the bookmark: a
+    /// storage error in the middle of a save.
+    struct FailingStore {
+        inner: Mutex<Storage>,
+        failed: Mutex<bool>,
+    }
+
+    impl BookmarkStore for FailingStore {
+        fn with_storage(
+            &self,
+            call: &mut dyn FnMut(&mut Storage) -> Result<SavedBookmark, StorageError>,
+        ) -> Result<SavedBookmark, SaveError> {
+            let b = self.inner.with_storage(call)?;
+            let mut failed = self.failed.lock().unwrap();
+            if b.title.is_some() && !*failed {
+                *failed = true;
+                return Err(SaveError::Storage("disk I/O error".into()));
+            }
+            Ok(b)
+        }
+    }
+
+    #[test]
+    fn a_storage_error_during_a_save_never_leaves_the_bookmark_reading() {
+        let (s, _dir) = open_temp();
+        let store = FailingStore {
+            inner: Mutex::new(s),
+            failed: Mutex::new(false),
+        };
+        let reader = FakeReader::page();
+        let runner = FakeRunner::new(FakeResult::Valid(GOOD.into()));
+        let ai_on = || true;
+        let emit = |_: &SavedBookmark| {};
+        let ctx = SaveContext {
+            store: &store,
+            reader: &reader,
+            runner: &runner,
+            ai_on: &ai_on,
+            emit: &emit,
+        };
+        assert!(matches!(
+            save_link(&ctx, "https://example.org/"),
+            Err(SaveError::Storage(_))
+        ));
+        let id = {
+            let s = store.inner.lock().unwrap();
+            let page = s
+                .list_bookmark_cards(&crate::storage::PageRequest::first(10))
+                .unwrap();
+            assert_eq!(page.items.len(), 1);
+            assert_eq!(page.items[0].summary_status, Pending);
+            page.items[0].base.id.clone()
+        };
+        // So a new summary can start at once, without a restart.
+        let got = summarize(&ctx, &id, None).unwrap();
+        assert_eq!(got.bookmark.summary_status, Done);
+    }
+
+    #[test]
+    fn the_prompt_schema_and_storage_agree_on_the_number_of_tags() {
+        use crate::storage::bookmarks::MAX_TAGS;
+        let t = task(None, "text");
+        assert!(
+            t.prompt.contains(&format!("tags: 1 to {MAX_TAGS} ")),
+            "{}",
+            t.prompt
+        );
+        let schema: serde_json::Value = serde_json::from_str(SCHEMA).unwrap();
+        assert_eq!(schema["properties"]["tags"]["maxItems"], MAX_TAGS);
+        assert_eq!(schema["properties"]["tags"]["minItems"], 1);
     }
 
     #[test]
@@ -512,7 +664,7 @@ mod tests {
         assert_eq!(w.reader.calls(), 0);
         assert!(w.runner.requests().is_empty());
         assert_eq!(w.stored(&b.base.id).summary_status, AiOff);
-        assert_eq!(w.seen(), vec![Pending, AiOff]);
+        assert_eq!(w.seen(), vec![Reading, AiOff]);
     }
 
     #[test]

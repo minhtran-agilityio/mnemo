@@ -4,7 +4,8 @@
 //! A save stores the link at once (status `pending`), before any page read or AI work, so
 //! nothing is lost when that work fails. The summary, the reason (always a guess) and the
 //! tags are written together in one transaction, and only then is the status `done`. A tag is
-//! a top label (`label.parent_id` NULL), found by name ignoring case or created.
+//! a label found by name ignoring case (a top label first, else one the owner moved under a
+//! parent), or a new top label (`label.parent_id` NULL).
 
 use std::collections::HashSet;
 
@@ -30,7 +31,8 @@ const BOOKMARK_NOT_FOUND: StorageError = StorageError::NotFound { kind: "bookmar
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SummaryStatus {
-    /// Stored, no summary yet: the save is starting, or the AI run gave no answer.
+    /// Stored, no summary yet: the save is starting, the site could not be reached for now, or
+    /// the AI run gave no answer.
     Pending,
     /// Mnemo is reading the page or waiting on the AI run.
     Reading,
@@ -143,8 +145,11 @@ const SET_SUMMARY_SQL: &str = "UPDATE bookmark
 const RESET_READING_SQL: &str = "UPDATE bookmark SET summary_status = 'pending', updated_at = ?1
      WHERE summary_status = 'reading' AND deleted_at IS NULL";
 
-const FIND_TOP_LABEL_SQL: &str = "SELECT id FROM label
-     WHERE deleted_at IS NULL AND parent_id IS NULL AND name = ?1 COLLATE NOCASE LIMIT 1";
+// A live label named ?1 (ignoring case): a top label first, else the oldest one the owner moved
+// under a parent, so a moved tag is not made again at the top.
+const FIND_TAG_LABEL_SQL: &str = "SELECT id FROM label
+     WHERE deleted_at IS NULL AND name = ?1 COLLATE NOCASE
+     ORDER BY parent_id IS NOT NULL, created_at, id LIMIT 1";
 
 const COUNT_LABELS_SQL: &str = "SELECT count(*) FROM label WHERE deleted_at IS NULL";
 
@@ -268,11 +273,12 @@ pub fn check_summary(s: &BookmarkSummary) -> Result<(), StorageError> {
     checked_tags(s).map(|_| ())
 }
 
-/// The id of the live top label named `name` (ignoring case), created when missing. `None`
+/// The id of the live label named `name` (ignoring case): the top label, else one the owner
+/// moved under a parent; a new top label when there is none. `None`
 /// when a new label would pass the label limit: that tag is left out, the rest is saved.
 fn top_label(tx: &Transaction<'_>, now: &str, name: &str) -> Result<Option<String>, StorageError> {
     if let Some(id) = tx
-        .query_row(FIND_TOP_LABEL_SQL, [name], |r| r.get(0))
+        .query_row(FIND_TAG_LABEL_SQL, [name], |r| r.get(0))
         .optional()?
     {
         return Ok(Some(id));
@@ -493,7 +499,7 @@ impl Storage {
 mod tests {
     use super::*;
     use crate::storage::items::tests::{bookmark, T1};
-    use crate::storage::items::Bookmark;
+    use crate::storage::items::{Bookmark, BookmarkInput};
     use crate::storage::testing::open_temp;
 
     const T2: &str = "2026-01-02T00:00:00Z";
@@ -835,6 +841,77 @@ mod tests {
             s.get_saved_bookmark(&off.base.id).unwrap().summary_status,
             SummaryStatus::AiOff
         );
+    }
+
+    #[test]
+    fn a_tag_the_owner_moved_under_a_parent_is_reused_not_made_again() {
+        let (mut s, _d) = open_temp();
+        let b = s.save_link_at(T1, "https://a.example").unwrap();
+        s.set_bookmark_summary_at(T1, &b.base.id, &summary(&["rust"]))
+            .unwrap();
+        let rust = s.list_labels().unwrap()[0].clone();
+        let parent = s.create_label_at(T1, None, "Languages").unwrap();
+        s.move_label_at(T2, &rust.base.id, Some(&parent.base.id))
+            .unwrap();
+        let c = s.save_link_at(T2, "https://c.example").unwrap();
+        let done = s
+            .set_bookmark_summary_at(T3, &c.base.id, &summary(&["Rust"]))
+            .unwrap();
+        assert_eq!(done.labels[0].id, rust.base.id);
+        assert_eq!(s.list_labels().unwrap().len(), 2);
+        // A top label of that name still wins over a child one.
+        let top = s.create_label_at(T3, None, "rust").unwrap();
+        let d = s.save_link_at(T3, "https://d.example").unwrap();
+        let done = s
+            .set_bookmark_summary_at(T3, &d.base.id, &summary(&["rust"]))
+            .unwrap();
+        assert_eq!(done.labels[0].id, top.base.id);
+    }
+
+    #[test]
+    fn the_item_path_keeps_the_site_and_the_summary_status_true() {
+        let (s, _d) = open_temp();
+        // Added with no summary: pending, with its site.
+        let plain: Bookmark = s.add_at(T1, &bookmark("https://www.a.example/x")).unwrap();
+        let card = s.get_saved_bookmark(&plain.base.id).unwrap();
+        assert_eq!(card.site.as_deref(), Some("a.example"));
+        assert_eq!(card.summary_status, SummaryStatus::Pending);
+        // The owner writes a summary: done, so no AI run takes it over.
+        let owned = BookmarkInput {
+            url: "https://b.example/y".into(),
+            summary: Some("My own summary.".into()),
+            ..bookmark("https://b.example/y")
+        };
+        let b: Bookmark = s.update_at(T2, &plain.base.id, &owned).unwrap();
+        let card = s.get_saved_bookmark(&b.base.id).unwrap();
+        assert_eq!(card.site.as_deref(), Some("b.example"));
+        assert_eq!(card.summary_status, SummaryStatus::Done);
+        assert!(s.claim_bookmark_for_summary_at(T2, &b.base.id).is_err());
+        // The summary removed: no longer done.
+        let _: Bookmark = s
+            .update_at(T3, &b.base.id, &bookmark("https://b.example/y"))
+            .unwrap();
+        let card = s.get_saved_bookmark(&b.base.id).unwrap();
+        assert_eq!(card.summary_status, SummaryStatus::Pending);
+        // Unreadable stays unreadable when only the title changes.
+        s.set_bookmark_status_at(T3, &b.base.id, SummaryStatus::Unreadable)
+            .unwrap();
+        let titled = BookmarkInput {
+            title: Some("B".into()),
+            ..bookmark("https://b.example/y")
+        };
+        let _: Bookmark = s.update_at(T3, &b.base.id, &titled).unwrap();
+        let card = s.get_saved_bookmark(&b.base.id).unwrap();
+        assert_eq!(card.summary_status, SummaryStatus::Unreadable);
+        // Added with a summary: done.
+        let with = BookmarkInput {
+            summary: Some("Text.".into()),
+            ..bookmark("https://c.example")
+        };
+        let c: Bookmark = s.add_at(T3, &with).unwrap();
+        let card = s.get_saved_bookmark(&c.base.id).unwrap();
+        assert_eq!(card.summary_status, SummaryStatus::Done);
+        assert_eq!(card.site.as_deref(), Some("c.example"));
     }
 
     #[test]

@@ -211,9 +211,6 @@ impl RunQueue {
     }
 }
 
-/// How often a waiting `QueuedRunner` looks at its cancel token.
-const QUEUED_CANCEL_POLL: std::time::Duration = std::time::Duration::from_millis(50);
-
 /// An `AiRunner` that sends each task through the queue as an owner task and waits for its
 /// result, so a feature written against `AiRunner` (such as save a link) gets the run row, the
 /// two-run limit and the AI control of the queue. A set cancel token cancels the queued run.
@@ -227,7 +224,10 @@ impl AiRunner for QueuedRunner {
         })?;
         let mut cancelled = false;
         loop {
-            match ticket.done.recv_timeout(QUEUED_CANCEL_POLL) {
+            match ticket
+                .done
+                .recv_timeout(crate::ai::limits::QUEUED_CANCEL_POLL)
+            {
                 Ok(result) => return result,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     if cancel.is_cancelled() && !cancelled {
