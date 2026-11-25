@@ -12,8 +12,10 @@ import {
   createAppBadge,
   createButton,
   createCite,
+  createCompactRow,
   createKanbanCard,
   createLinkCard,
+  createLinkRow,
   createLinkView,
   createList,
   createMarkdownView,
@@ -25,6 +27,7 @@ import {
   createTagList,
   createTaskRow,
   type LinkItem,
+  type LinkRowOptions,
   type LinkView,
 } from "../../../ds/index";
 import {
@@ -198,7 +201,100 @@ function linkCardRow(ctx: TabContext) {
       "long title and URL",
     ),
   );
-  return { nodes: [sw, out, states], column: true };
+  return {
+    nodes: [sw, out, states, ...linkRowStates(doc, pasted)],
+    column: true,
+  };
+}
+
+/**
+ * The List and Compact rows in each state (issue 171): the List row labels its summary, and both
+ * rows leave out tags and the reason.
+ */
+function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
+  const unread = { summary: undefined, tags: undefined, reason: undefined };
+  const overflow: LinkItem = {
+    ...pasted,
+    title:
+      "Hướng dẫn đầy đủ về quyền và khả năng trong Tauri 2 — Ở ĐÂU, KHI NÀO, VÌ SAO cần giới hạn lệnh?",
+    site: "rất-nhiều-tên-miền-con.tài-liệu.v2.tauri.app",
+    summary:
+      "Mỗi cửa sổ chỉ gọi được những lệnh đã khai báo trong tệp capabilities; lệnh nào không có trong danh sách sẽ bị lõi từ chối.",
+    tags: ["tauri", "security", "rust", "ipc", "capabilities", "đặc-tả"],
+    reason:
+      "Có thể liên quan đến danh sách lệnh được phép của Mnemo, vì mỗi cửa sổ chỉ gọi được những lệnh đã khai báo.",
+  };
+  type Case = [LinkItem, string, LinkRowOptions?];
+  const listCases: Case[] = [
+    [pasted, "done: summary Written by AI; tags and reason left out"],
+    [
+      {
+        ...pasted,
+        summaryKind: "guess",
+        summary: "Probably a guide to window permissions.",
+      },
+      "done: guessed summary, labelled Guess",
+    ],
+    [{ ...pasted, ...unread, status: "pending" }, "pending: no label"],
+    [{ ...pasted, ...unread, status: "reading" }, "reading: no label"],
+    [
+      { ...pasted, ...unread, status: "unreadable" },
+      "could not read: link only, no label",
+    ],
+    [
+      { ...pasted, ...unread, status: "ai-off" },
+      "AI off: no summary, no label",
+    ],
+    [
+      { ...pasted, tags: undefined, reason: undefined },
+      "partial: summary only",
+    ],
+    [
+      { ...pasted, tagsKind: "owner", reasonKind: "owner" },
+      "the owner's tags and reason: left out too",
+    ],
+    [
+      overflow,
+      "overflow: long title, summary and host; many tags and a long reason left out",
+    ],
+    [pasted, "hover", { forceState: "hover" }],
+    [pasted, "focus-visible", { forceState: "focus" }],
+    [pasted, "active", { forceState: "active" }],
+  ];
+  // The Compact row shows no summary, tags or reason, so it has no label in any status.
+  const compactCases: Case[] = [
+    [pasted, "done: title, site, date; nothing the app wrote, so no label"],
+    [{ ...pasted, ...unread, status: "pending" }, "pending"],
+    [{ ...pasted, ...unread, status: "reading" }, "reading"],
+    [{ ...pasted, ...unread, status: "unreadable" }, "could not read"],
+    [{ ...pasted, ...unread, status: "ai-off" }, "AI off"],
+    [overflow, "overflow: long Vietnamese title and host"],
+    [pasted, "hover", { forceState: "hover" }],
+    [pasted, "focus-visible", { forceState: "focus" }],
+    [pasted, "active", { forceState: "active" }],
+  ];
+  const block = (
+    label: string,
+    cases: Case[],
+    build: (item: LinkItem, options?: LinkRowOptions) => HTMLElement,
+  ) =>
+    // Each row at the full width of the example column, as in the Bookmarks list.
+    cases.map(([item, caption, options]) =>
+      state(
+        doc,
+        `${label}: ${caption}`,
+        createList(doc, `${label}, ${caption}`, [build(item, options)]),
+        { grow: true },
+      ),
+    );
+  return [
+    ...block("List row", listCases, (item, options) =>
+      createLinkRow(doc, item, options),
+    ),
+    ...block("Compact row", compactCases, (item, options) =>
+      createCompactRow(doc, item, options),
+    ),
+  ];
 }
 
 function noteRows(ctx: TabContext) {

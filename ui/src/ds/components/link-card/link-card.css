@@ -156,6 +156,24 @@
   min-width: 0;
 }
 
+/* The summary line of a List row and its trust label. The summary shrinks and is cut with its
+   ellipsis (full text in its tooltip); the label after it stays whole on the same line. */
+.link-row .link-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.link-row .link-sub > .row-sub {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.link-row .link-sub > .trust {
+  flex: none;
+}
+
 /* The meta line stays on one line at its own width, at most half the row. Only the site in it may
    shrink, so a long host is cut with its ellipsis and the badge, dots and date stay whole. */
 .link-row > .meta {
@@ -187,11 +205,21 @@
   border-top: var(--border-1) solid var(--line);
 }
 
-.compact-row:hover {
+.compact-row:hover,
+.compact-row.is-hover {
   background: var(--head);
 }
 
-.compact-row:focus-visible {
+/* Pressed: one step darker than hover, as a tree node. */
+.link-row:active,
+.link-row.is-active,
+.compact-row:active,
+.compact-row.is-active {
+  background: var(--line);
+}
+
+.compact-row:focus-visible,
+.compact-row.is-focus {
   outline: var(--focus-ring) solid var(--accent);
   outline-offset: calc(var(--focus-ring) * -1);
 }

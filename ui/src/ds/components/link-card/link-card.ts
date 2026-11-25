@@ -69,6 +69,12 @@ export interface LinkCardOptions {
   readonly action?: Node;
 }
 
+/** Options of a List or Compact row. */
+export interface LinkRowOptions {
+  /** Draws a state that cannot be live in a still view (the UI Catalog). */
+  readonly forceState?: "hover" | "focus" | "active";
+}
+
 /** Past this many tags the tag list shows one "+N" item. */
 const MAX_TAGS = 6;
 
@@ -221,23 +227,52 @@ export function createLinkCard(
   return card;
 }
 
-/** The List view: one row per link, with the summary (or why there is none) on a second line. */
-export function createLinkRow(doc: Document, item: LinkItem): HTMLLIElement {
+/**
+ * The List view: one row per link, with the summary (or why there is none) on a second line. A
+ * summary shows only on a `done` link and keeps its Written by AI (or Guess) label after the text:
+ * the summary is cut with its ellipsis, the label stays whole. Tags and the reason are left out of
+ * the two-line row (each needs its own label and line); the Cards view shows them (issue 171).
+ */
+export function createLinkRow(
+  doc: Document,
+  item: LinkItem,
+  options: LinkRowOptions = {},
+): HTMLLIElement {
+  const summary = shownSummary(item);
   const row = createListRow(doc, {
     title: item.title,
-    sub: shownSummary(item) ?? noSummaryText(item),
+    sub: summary ?? noSummaryText(item),
     icon: Link,
   });
   row.classList.add("link-row");
+  if (options.forceState) row.classList.add(`is-${options.forceState}`);
+  row.dataset.status = linkStatus(item);
+  const sub = row.querySelector(".row-sub");
+  if (summary && sub) {
+    const line = doc.createElement("span");
+    line.className = "link-sub";
+    sub.replaceWith(line);
+    line.append(sub, buildTrustLabel(item.summaryKind ?? "ai"));
+  }
   const meta = metaLine(doc, item);
   if (meta) row.append(meta);
   return row;
 }
 
-/** The Compact view: the title, the site and the age on one line. */
-export function createCompactRow(doc: Document, item: LinkItem): HTMLLIElement {
+/**
+ * The Compact view: the title, the site and the saved date on one line. It shows nothing the app
+ * wrote (no summary, tags or reason), so it needs no trust label; the List and Cards views show
+ * them, labelled (issue 171).
+ */
+export function createCompactRow(
+  doc: Document,
+  item: LinkItem,
+  options: LinkRowOptions = {},
+): HTMLLIElement {
   const li = doc.createElement("li");
   li.className = "compact-row";
+  if (options.forceState) li.classList.add(`is-${options.forceState}`);
+  li.dataset.status = linkStatus(item);
   li.tabIndex = 0;
   const title = textEl(doc, "span", "row-title", item.title);
   title.title = item.title;

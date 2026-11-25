@@ -557,3 +557,141 @@ test("a link with no app, site, saved date or age has no empty meta line", () =>
       ?.textContent,
   ).toBe("2 d");
 });
+
+// Issue 171: the List and Compact rows label what the app wrote, or leave it out.
+const ROW_STATUSES = ["pending", "reading", "unreadable", "ai-off"] as const;
+const rowCss = (sel: string) =>
+  cssRule(import.meta.dirname, "link-card.css", sel);
+
+test("done: the List row's summary is labelled Written by AI, after the summary on its line", () => {
+  const row = createLinkRow(document, pasted);
+  expect(row.dataset.status).toBe("done");
+  const line = row.querySelector(":scope > .row-body > .link-sub");
+  expect(line?.querySelector(":scope > .row-sub")?.textContent).toBe(
+    pasted.summary,
+  );
+  const label = line?.querySelector(":scope > .trust");
+  expect(label?.textContent).toBe("Written by AI");
+  expect(label?.classList.contains("trust-ai")).toBe(true);
+  expect(line?.lastElementChild).toBe(label);
+  expect(row.querySelectorAll(".trust")).toHaveLength(1);
+});
+
+test("a guessed summary in the List row is labelled Guess", () => {
+  const row = createLinkRow(document, { ...pasted, summaryKind: "guess" });
+  const labels = row.querySelectorAll(".trust");
+  expect(labels).toHaveLength(1);
+  expect(labels[0]?.textContent).toBe("Guess");
+  expect(row.textContent).not.toContain("Written by AI");
+});
+
+test("loading, error and AI off rows say why there is no summary, with no label", () => {
+  for (const status of ROW_STATUSES) {
+    const item: LinkItem = { ...pasted, status, summary: "Made-up text." };
+    const row = createLinkRow(document, item);
+    expect(row.dataset.status).toBe(status);
+    expect(row.querySelector(".link-sub")).toBeNull();
+    expect(row.querySelector(".trust")).toBeNull();
+    expect(row.querySelector(".row-sub")?.textContent).toBe(
+      noSummaryText(item),
+    );
+    expect(row.textContent).not.toContain("Made-up text.");
+    const compact = createCompactRow(document, item);
+    expect(compact.dataset.status).toBe(status);
+    expect(compact.querySelector(".trust")).toBeNull();
+  }
+});
+
+test("a done link with no summary has no label in the List row", () => {
+  const row = createLinkRow(document, { ...pasted, ...noSum });
+  expect(row.querySelector(".row-sub")?.textContent).toBe("No summary.");
+  expect(row.querySelector(".trust")).toBeNull();
+});
+
+test("the rows leave out tags and the reason, from the app or the owner, so nothing shows unlabelled", () => {
+  const owner = { tagsKind: "owner", reasonKind: "owner" } as const;
+  for (const item of [pasted, { ...pasted, ...owner }]) {
+    for (const row of [
+      createLinkRow(document, item),
+      createCompactRow(document, item),
+    ]) {
+      expect(row.querySelector(".tags")).toBeNull();
+      expect(row.querySelector(".reason")).toBeNull();
+      expect(row.textContent).not.toContain("security");
+      expect(row.textContent).not.toContain(pasted.reason);
+      expect(row.textContent).not.toContain("Guess");
+    }
+  }
+});
+
+test("partial: a summary without tags or reason keeps its label in the List row", () => {
+  const row = createLinkRow(document, {
+    ...pasted,
+    tags: undefined,
+    reason: undefined,
+  });
+  expect(row.querySelector(".link-sub .trust")?.textContent).toBe(
+    "Written by AI",
+  );
+});
+
+test("the Compact row shows no summary and so no label", () => {
+  const compact = createCompactRow(document, pasted);
+  expect(compact.textContent).toBe(
+    "Tauri 2 capabilitiesv2.tauri.app25 Nov 2026",
+  );
+  expect(compact.querySelector(".trust")).toBeNull();
+});
+
+test("the rows are reached by keyboard and named by their text, label included", () => {
+  const row = createLinkRow(document, pasted);
+  const compact = createCompactRow(document, pasted);
+  expect(row.tabIndex).toBe(0);
+  expect(compact.tabIndex).toBe(0);
+  expect(row.textContent).toContain(pasted.title);
+  expect(row.textContent).toContain(`${pasted.summary}Written by AI`);
+  document.body.replaceChildren(row, compact);
+  row.focus();
+  expect(document.activeElement).toBe(row);
+  compact.focus();
+  expect(document.activeElement).toBe(compact);
+  document.body.replaceChildren();
+});
+
+test("overflow: a long Vietnamese summary is cut with its ellipsis and the label stays whole", () => {
+  const summary = `${"Mỗi cửa sổ chỉ gọi được những lệnh đã khai báo. ".repeat(8)}ẪẬẲỖỮỰ`;
+  const row = createLinkRow(document, { ...pasted, summary });
+  const sub = row.querySelector<HTMLElement>(".link-sub > .row-sub");
+  expect(sub?.textContent).toBe(summary);
+  expect(sub?.title).toBe(summary);
+  expect(rowCss(".link-row .link-sub")).toMatchObject({
+    display: "flex",
+    "min-width": "0",
+  });
+  expect(rowCss(".link-row .link-sub > .row-sub")).toMatchObject({
+    flex: "0 1 auto",
+    "min-width": "0",
+  });
+  expect(rowCss(".link-row .link-sub > .trust").flex).toBe("none");
+  // The #170 layout still holds: the body gives way, the meta keeps at most half the row.
+  expect(rowCss(".link-row > .row-body").flex).toBe("1 1 0");
+  expect(rowCss(".link-row > .meta")["max-width"]).toBe("50%");
+  expect(row.querySelector(":scope > .meta > .site")?.textContent).toBe(
+    "v2.tauri.app",
+  );
+});
+
+test("hover, focus-visible and active can be drawn for a still view, and have a look", () => {
+  for (const state of ["hover", "focus", "active"] as const) {
+    const row = createLinkRow(document, pasted, { forceState: state });
+    expect(row.classList.contains(`is-${state}`)).toBe(true);
+    const compact = createCompactRow(document, pasted, { forceState: state });
+    expect(compact.classList.contains(`is-${state}`)).toBe(true);
+  }
+  expect(rowCss(".compact-row.is-active").background).toBe("var(--line)");
+  expect(rowCss(".link-row.is-active").background).toBe("var(--line)");
+  expect(rowCss(".compact-row.is-hover").background).toBe("var(--head)");
+  expect(rowCss(".compact-row.is-focus").outline).toBe(
+    "var(--focus-ring) solid var(--accent)",
+  );
+});
