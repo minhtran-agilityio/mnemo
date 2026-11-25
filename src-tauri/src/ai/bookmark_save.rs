@@ -13,12 +13,12 @@
 // never locked while the page is read or Claude runs.
 
 use std::sync::Mutex;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use super::cancel::CancelToken;
-use super::fetch::{cut_chars, PageReader, DEFAULT_LIMITS};
+use super::fetch::{cut_chars, PageReader};
+use super::limits::{MAX_TEXT_CHARS, SUMMARY_TIMEOUT};
 use super::models::default_choice;
 use super::runner::{AiError, AiOutput, AiRunner, AiTask};
 use crate::storage::bookmarks::{check_summary, BookmarkSummary, SavedBookmark, SummaryStatus};
@@ -26,8 +26,6 @@ use crate::storage::{Storage, StorageError};
 
 /// The task name: its model and effort come from the "save" row of `models::DEFAULTS`.
 pub const TASK_NAME: &str = "save";
-/// How long one summary run may take.
-pub const SUMMARY_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// The answer shape Claude must give.
 pub const SCHEMA: &str = r#"{"type":"object","properties":{"summary":{"type":"string","minLength":1,"maxLength":2000},"tags":{"type":"array","items":{"type":"string","minLength":1,"maxLength":80},"minItems":1,"maxItems":6},"reason":{"type":"string","minLength":1,"maxLength":500}},"required":["summary","tags","reason"],"additionalProperties":false}"#;
@@ -188,6 +186,7 @@ pub fn save_link(ctx: &SaveContext<'_>, url: &str) -> Result<SaveResult, SaveErr
 
 /// Makes the summary of a stored bookmark again: from `pasted` text when given ("Paste the
 /// text"), else by reading its page again ("Summarize later"). Pasted text must not be blank.
+/// A bookmark that already has its summary, or is being read, is refused and left as it is.
 pub fn summarize(
     ctx: &SaveContext<'_>,
     id: &str,
@@ -202,7 +201,12 @@ pub fn summarize(
         Some(text) => Source::Pasted(text.trim().to_string()),
         None => Source::Page,
     };
-    let b = ctx.store.with_storage(&mut |s| s.get_saved_bookmark(id))?;
+    // Refused when the bookmark is done or already being read: a done summary is never lost to
+    // a failed second run, and two runs never race on one bookmark.
+    let b = ctx
+        .store
+        .with_storage(&mut |s| s.claim_bookmark_for_summary(id))?;
+    (ctx.emit)(&b);
     summarize_from(ctx, b, source)
 }
 
@@ -218,7 +222,7 @@ fn summarize_from(
     }
     let mut b = ctx.status(&id, SummaryStatus::Reading)?;
     let text = match source {
-        Source::Pasted(text) => cut_chars(&text, DEFAULT_LIMITS.max_text_chars).0,
+        Source::Pasted(text) => cut_chars(&text, MAX_TEXT_CHARS).0,
         Source::Page => match ctx.reader.read(&b.url) {
             Ok(page) => {
                 if page.title.is_some() {
@@ -575,6 +579,23 @@ mod tests {
         let prompt = w.runner.requests().last().unwrap().prompt.clone();
         assert!(prompt.contains(&"z".repeat(20_000)));
         assert!(!prompt.contains(&"z".repeat(20_001)));
+    }
+
+    #[test]
+    fn summarize_a_done_or_reading_bookmark_is_refused_and_keeps_its_summary() {
+        let w = World::new(FakeReader::page(), FakeResult::Valid(GOOD.into()));
+        let saved = w.run(|c| save_link(c, "https://example.org/")).unwrap();
+        let id = saved.bookmark.base.id.clone();
+        assert_eq!(saved.bookmark.summary_status, Done);
+        w.runner.push(FakeResult::Timeout);
+        for pasted in [None, Some("Some pasted text.")] {
+            assert!(matches!(
+                w.run(|c| summarize(c, &id, pasted)),
+                Err(SaveError::Invalid(_))
+            ));
+        }
+        assert_eq!(w.stored(&id), saved.bookmark);
+        assert_eq!(w.runner.requests().len(), 1);
     }
 
     #[test]

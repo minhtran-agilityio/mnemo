@@ -27,6 +27,7 @@ use reqwest::redirect::Policy;
 use reqwest::Url;
 use scraper::{Html, Node};
 
+use super::limits;
 use crate::storage::items::MAX_TITLE_CHARS;
 
 /// The limits of one page read. All tunable values of the reader live here.
@@ -42,6 +43,8 @@ pub struct FetchLimits {
     pub max_text_chars: usize,
     /// Less text than this means the page could not be read.
     pub min_text_chars: usize,
+    /// Deepest element nesting parsed. A deeper page is too complex to read.
+    pub max_html_depth: usize,
     /// Tests only: lets the reader reach a loopback test server. Every other address is still
     /// checked. A release build has no such switch.
     #[cfg(test)]
@@ -51,13 +54,14 @@ pub struct FetchLimits {
     fake_dns: Option<(String, IpAddr)>,
 }
 
-/// The owner-confirmed limits (decision 5).
+/// The owner-confirmed limits (decision 5), from `ai::limits`.
 pub const DEFAULT_LIMITS: FetchLimits = FetchLimits {
-    timeout: Duration::from_secs(15),
-    max_redirects: 5,
-    max_body_bytes: 2 * 1024 * 1024,
-    max_text_chars: 20_000,
-    min_text_chars: 200,
+    timeout: limits::FETCH_TIMEOUT,
+    max_redirects: limits::MAX_REDIRECTS,
+    max_body_bytes: limits::MAX_BODY_BYTES,
+    max_text_chars: limits::MAX_TEXT_CHARS,
+    min_text_chars: limits::MIN_TEXT_CHARS,
+    max_html_depth: limits::MAX_HTML_DEPTH,
     #[cfg(test)]
     allow_loopback: false,
     #[cfg(test)]
@@ -93,6 +97,8 @@ pub enum FetchError {
     NotText,
     /// The page has under `min_text_chars` characters of text.
     TooLittleText,
+    /// The HTML nests deeper than `max_html_depth`: it is not parsed.
+    TooComplex,
     /// The host could not be found or reached.
     Network,
 }
@@ -107,6 +113,7 @@ impl fmt::Display for FetchError {
             FetchError::Status(code) => write!(f, "the server answered {code}"),
             FetchError::NotText => write!(f, "not an HTML or text page"),
             FetchError::TooLittleText => write!(f, "too little text on the page"),
+            FetchError::TooComplex => write!(f, "the page is too complex to read"),
             FetchError::Network => write!(f, "the site could not be reached"),
         }
     }
@@ -173,7 +180,10 @@ impl HttpReader {
     fn hop(&self, url: &Url, deadline: Instant) -> Result<Hop, FetchError> {
         let target = self.checked_target(url, deadline)?;
         let left = remaining(deadline)?;
+        // Every name is answered from the pinned, checked addresses only: a name that is not
+        // pinned gets no address at all, so the guard fails closed.
         let mut builder = Client::builder()
+            .dns_resolver(std::sync::Arc::new(NoDns))
             .redirect(Policy::none())
             .no_proxy()
             .timeout(left)
@@ -302,6 +312,17 @@ impl HttpReader {
     }
 }
 
+/// A resolver that answers no name. The client gets addresses only from `resolve_to_addrs`.
+struct NoDns;
+
+impl reqwest::dns::Resolve for NoDns {
+    fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        Box::pin(std::future::ready(Err(
+            "Mnemo resolves names itself; this name was not checked".into(),
+        )))
+    }
+}
+
 /// Where a request may connect: a literal IP (checked) or a name pinned to checked addresses.
 enum Target {
     Ip,
@@ -419,7 +440,12 @@ pub fn page_text(
     let encoding = charset(content_type).unwrap_or(encoding_rs::UTF_8);
     let (decoded, _, _) = encoding.decode(body);
     let (title, text) = match kind {
-        TextKind::Html => html_text(&decoded),
+        TextKind::Html => {
+            if too_deep(&decoded, limits.max_html_depth) {
+                return Err(FetchError::TooComplex);
+            }
+            html_text(&decoded)
+        }
         TextKind::Plain => (None, tidy(&decoded)),
     };
     if text.chars().count() < limits.min_text_chars {
@@ -438,6 +464,73 @@ pub fn cut_chars(text: &str, max: usize) -> (String, bool) {
         Some((at, _)) => (text[..at].to_string(), true),
         None => (text.to_string(), false),
     }
+}
+
+/// Elements that never hold others (void) or whose end tag may be left out: the parser closes
+/// them itself, so they do not add to the nesting.
+const NO_NESTING: [&str; 33] = [
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track",
+    "wbr", "param", "keygen", "p", "li", "dt", "dd", "option", "optgroup", "tr", "td", "th",
+    "thead", "tbody", "tfoot", "colgroup", "caption", "rt", "rp", "html", "head",
+];
+
+/// Raw text elements: their content is not markup.
+const RAW_TEXT: [&str; 6] = ["script", "style", "textarea", "title", "xmp", "noscript"];
+
+/// True when the markup nests deeper than `max`, by a quick scan of the tags before any parse.
+/// The scan is linear and its count is an upper bound for most pages: it counts each start tag
+/// that can hold others and each end tag. Very deep nesting makes the HTML parser slow, so such
+/// a page is not parsed at all.
+pub fn too_deep(html: &str, max: usize) -> bool {
+    let b = html.as_bytes();
+    let mut i = 0;
+    let mut depth = 0usize;
+    while let Some(off) = b[i..].iter().position(|&c| c == b'<') {
+        i += off + 1;
+        if b[i..].starts_with(b"!--") {
+            // A comment holds no markup: skip to its end.
+            match html[i..].find("-->") {
+                Some(at) => i += at + 3,
+                None => break,
+            }
+            continue;
+        }
+        match b.get(i) {
+            Some(b'/') => {
+                depth = depth.saturating_sub(1);
+                continue;
+            }
+            Some(c) if c.is_ascii_alphabetic() => {}
+            _ => continue,
+        }
+        let start = i;
+        while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'-') {
+            i += 1;
+        }
+        let name = html[start..i].to_ascii_lowercase();
+        let Some(close) = b[i..].iter().position(|&c| c == b'>') else {
+            break;
+        };
+        let self_closing = close > 0 && b[i + close - 1] == b'/';
+        i += close + 1;
+        if RAW_TEXT.contains(&name.as_str()) {
+            // Skip to the end tag, so "<" inside a script is not read as a tag.
+            let end = format!("</{name}");
+            match html[i..].to_ascii_lowercase().find(&end) {
+                Some(at) => i += at,
+                None => break,
+            }
+            continue;
+        }
+        if self_closing || NO_NESTING.contains(&name.as_str()) {
+            continue;
+        }
+        depth += 1;
+        if depth > max {
+            return true;
+        }
+    }
+    false
 }
 
 /// Elements whose content is not page text: code, styles, and the site's own navigation.
@@ -941,8 +1034,62 @@ mod tests {
     }
 
     #[test]
+    fn a_page_nested_deeper_than_the_limit_is_not_parsed_and_ends_at_once() {
+        // 40 000 nested divs took minutes to parse; the scan refuses them before the parse, on
+        // this thread, so no parse is left running.
+        let html = format!("{}{}", "<div>".repeat(40_000), long_text());
+        let started = Instant::now();
+        assert_eq!(
+            page_text(html.as_bytes(), "text/html", &DEFAULT_LIMITS),
+            Err(FetchError::TooComplex)
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
+        // The worst page under the cap: 2 MB nested to just under the depth limit, then flat.
+        let deep = "<span>".repeat(DEFAULT_LIMITS.max_html_depth - 10);
+        let flat = "<div>word word word</div>".repeat((2 * 1024 * 1024 - deep.len()) / 25);
+        let worst = format!("{deep}{flat}");
+        let started = Instant::now();
+        assert!(page_text(worst.as_bytes(), "text/html", &DEFAULT_LIMITS).is_ok());
+        // A debug build; a release build is many times faster. The point is that the parse
+        // ends by itself in a bounded time, so no thread is left busy.
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "a 2 MB page under the cap parsed in {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn the_depth_scan_skips_void_elements_optional_ends_and_script_text() {
+        let max = 3;
+        assert!(!too_deep(
+            "<div><p>a<p>b<p>c<p>d<br><img src=x><hr/></div>",
+            max
+        ));
+        assert!(!too_deep(
+            "<div><script>if (a<b) { x = '<div><div><div><div>'; }</script></div>",
+            max
+        ));
+        assert!(!too_deep(
+            "<div></div><div></div><div></div><div></div><div></div>",
+            max
+        ));
+        assert!(too_deep("<div><section><article><span>x", max));
+        assert!(!too_deep("<!-- <div><div><div><div> --> < not a tag", max));
+    }
+
+    #[test]
+    fn a_name_that_is_not_pinned_gets_no_address() {
+        use reqwest::dns::Resolve;
+        let name: reqwest::dns::Name = "example.org".parse().unwrap();
+        let resolving = NoDns.resolve(name);
+        let result = tauri::async_runtime::block_on(resolving);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn a_deeply_nested_page_does_not_overflow_the_stack() {
-        let depth = 3_000;
+        let depth = DEFAULT_LIMITS.max_html_depth - 6;
         let html = format!(
             "{}{}{}",
             "<div>".repeat(depth),
@@ -954,19 +1101,26 @@ mod tests {
     }
 
     #[test]
-    fn a_page_that_parses_too_slowly_ends_as_a_timeout() {
-        let html = format!("{}{}", "<div>".repeat(40_000), long_text());
+    fn a_page_that_takes_too_long_ends_as_a_timeout() {
+        /// A body that gives one byte every 50 ms, then ends: its reader thread stops by itself.
+        struct Slow(usize);
+        impl Read for Slow {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                if self.0 == 0 || buf.is_empty() {
+                    return Ok(0);
+                }
+                std::thread::sleep(Duration::from_millis(50));
+                self.0 -= 1;
+                buf[0] = b'a';
+                Ok(1)
+            }
+        }
         let deadline = Instant::now() + Duration::from_millis(200);
         let started = Instant::now();
         assert_eq!(
-            text_within(
-                io::Cursor::new(html.into_bytes()),
-                "text/html".into(),
-                &DEFAULT_LIMITS,
-                deadline
-            ),
+            text_within(Slow(40), "text/plain".into(), &DEFAULT_LIMITS, deadline),
             Err(FetchError::Timeout)
         );
-        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 }

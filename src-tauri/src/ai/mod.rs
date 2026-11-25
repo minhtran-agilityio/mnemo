@@ -6,6 +6,7 @@ pub mod config;
 pub mod fake;
 pub mod fetch;
 pub mod health;
+pub mod limits;
 pub mod models;
 pub mod process;
 #[cfg(test)]

@@ -128,6 +128,10 @@ const LIST_SQL: &str =
 const SET_STATUS_SQL: &str = "UPDATE bookmark SET summary_status = ?3, updated_at = ?2
      WHERE id = ?1 AND deleted_at IS NULL";
 
+// Starts a new summary: only a live bookmark that is not done and not being read already.
+const CLAIM_SQL: &str = "UPDATE bookmark SET summary_status = 'reading', updated_at = ?2
+     WHERE id = ?1 AND deleted_at IS NULL AND summary_status NOT IN ('reading', 'done')";
+
 const SET_TITLE_SQL: &str = "UPDATE bookmark SET title = ?3, updated_at = ?2
      WHERE id = ?1 AND deleted_at IS NULL";
 
@@ -167,17 +171,34 @@ const TAGS_OF_BOOKMARK_SQL: &str = "SELECT l.id, l.name FROM bookmark_label bl
      WHERE bl.bookmark_id = ?1 AND bl.deleted_at IS NULL
      ORDER BY l.name COLLATE NOCASE, l.id";
 
-/// The host of a web address, lower case and without a leading "www.", or `None`.
-/// The address was checked by `web_address` first.
-pub fn site_of(url: &str) -> Option<String> {
-    let rest = url.split_once("://")?.1;
-    let authority = rest.split(['/', '?', '#']).next()?;
-    let host_port = authority.rsplit('@').next()?;
-    let host = if let Some(v6) = host_port.strip_prefix('[') {
-        v6.split(']').next()?
-    } else {
-        host_port.split(':').next()?
+/// The link as the page reader will fetch it: parsed by the same URL parser, http or https,
+/// with a host and no user name or password. A link the two could read differently (such as
+/// `http://a.example\@b.example/`) is stored in the parsed form, so the stored link, its site and
+/// the page read all name the same host.
+fn parsed_link(url: &str) -> Result<url::Url, StorageError> {
+    let refused = || {
+        invalid(
+            "The link must be a web address starting with http:// or https://, with no user name or password."
+                .to_string(),
+        )
     };
+    let parsed = url::Url::parse(url).map_err(|_| refused())?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().unwrap_or("").is_empty()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err(refused());
+    }
+    Ok(parsed)
+}
+
+/// The host of a parsed link, lower case, without a leading "www." or a trailing dot, or `None`.
+pub fn site_of(url: &url::Url) -> Option<String> {
+    let host = url
+        .host_str()?
+        .trim_start_matches('[')
+        .trim_end_matches(']');
     let host = host.trim_end_matches('.').to_ascii_lowercase();
     let host = host.strip_prefix("www.").unwrap_or(&host).to_string();
     (!host.is_empty()).then_some(host)
@@ -276,9 +297,13 @@ impl Storage {
     pub(crate) fn save_link_at(&self, now: &str, url: &str) -> Result<SavedBookmark, StorageError> {
         let url = url.trim();
         web_address(url)?;
+        let parsed = parsed_link(url)?;
+        web_address(parsed.as_str())?;
         let base = RecordBase::new_at(now);
-        self.conn
-            .execute(INSERT_SQL, params![base.id, now, url, site_of(url)])?;
+        self.conn.execute(
+            INSERT_SQL,
+            params![base.id, now, parsed.as_str(), site_of(&parsed)],
+        )?;
         self.get_saved_bookmark(&base.id)
     }
 
@@ -363,6 +388,28 @@ impl Storage {
             return Err(BOOKMARK_NOT_FOUND);
         }
         self.get_saved_bookmark(id)
+    }
+
+    /// Starts a new summary of a stored bookmark ("Paste the text", "Summarize later"): sets
+    /// `reading` in one statement, so two calls cannot both start. A bookmark that already has
+    /// its summary (`done`) or is being read is refused, and its stored summary stays as it is.
+    pub fn claim_bookmark_for_summary(&self, id: &str) -> Result<SavedBookmark, StorageError> {
+        self.claim_bookmark_for_summary_at(&now_iso(), id)
+    }
+
+    pub(crate) fn claim_bookmark_for_summary_at(
+        &self,
+        now: &str,
+        id: &str,
+    ) -> Result<SavedBookmark, StorageError> {
+        if self.conn.execute(CLAIM_SQL, params![id, now])? == 1 {
+            return self.get_saved_bookmark(id);
+        }
+        let b = self.get_saved_bookmark(id)?;
+        Err(invalid(match b.summary_status {
+            SummaryStatus::Done => "This link already has its summary.".to_string(),
+            _ => "Mnemo is already reading this link. Wait for it to finish.".to_string(),
+        }))
     }
 
     /// Sets the title read from the page: trimmed, 1 to 500 characters, or null.
@@ -461,17 +508,37 @@ mod tests {
     }
 
     #[test]
-    fn site_of_gives_the_host_without_www_port_or_user() {
+    fn site_of_gives_the_host_without_www_or_port() {
         let cases = [
             ("https://www.Example.org/a?b", Some("example.org")),
             ("http://v2.tauri.app:8080/x", Some("v2.tauri.app")),
-            ("https://user:pw@host.example/", Some("host.example")),
             ("https://[2001:db8::1]:443/", Some("2001:db8::1")),
-            ("https://example.org.", Some("example.org")),
-            ("not a link", None),
+            ("https://example.org./", Some("example.org")),
         ];
         for (url, want) in cases {
-            assert_eq!(site_of(url).as_deref(), want, "{url}");
+            let parsed = url::Url::parse(url).unwrap();
+            assert_eq!(site_of(&parsed).as_deref(), want, "{url}");
+        }
+    }
+
+    #[test]
+    fn save_link_stores_the_host_the_reader_fetches_and_refuses_a_user_name() {
+        let (s, _d) = open_temp();
+        // The URL parser reads a backslash as "/", so the page read goes to evil.example: the stored
+        // link and site say so too, never paypal.com.
+        let b = s
+            .save_link_at(T1, "http://evil.example\\@paypal.com/")
+            .unwrap();
+        assert_eq!(b.site.as_deref(), Some("evil.example"));
+        assert!(b.url.starts_with("http://evil.example/"), "{}", b.url);
+        for url in [
+            "https://user:pw@host.example/",
+            "https://user@host.example/",
+        ] {
+            assert!(
+                matches!(s.save_link_at(T1, url), Err(StorageError::Invalid(_))),
+                "{url}"
+            );
         }
     }
 
@@ -531,6 +598,38 @@ mod tests {
         ));
         assert_eq!(
             s.set_bookmark_status_at(T2, "missing", SummaryStatus::Reading),
+            Err(BOOKMARK_NOT_FOUND)
+        );
+    }
+
+    #[test]
+    fn claim_for_summary_refuses_a_done_or_reading_bookmark_and_keeps_its_summary() {
+        let (mut s, _d) = open_temp();
+        let b = s.save_link_at(T1, "https://a.example").unwrap();
+        for st in [
+            SummaryStatus::Unreadable,
+            SummaryStatus::AiOff,
+            SummaryStatus::Pending,
+        ] {
+            s.set_bookmark_status_at(T1, &b.base.id, st).unwrap();
+            let got = s.claim_bookmark_for_summary_at(T2, &b.base.id).unwrap();
+            assert_eq!(got.summary_status, SummaryStatus::Reading);
+        }
+        // Reading: a second claim is refused.
+        assert!(matches!(
+            s.claim_bookmark_for_summary_at(T2, &b.base.id),
+            Err(StorageError::Invalid(_))
+        ));
+        let done = s
+            .set_bookmark_summary_at(T2, &b.base.id, &summary(&["a"]))
+            .unwrap();
+        assert!(matches!(
+            s.claim_bookmark_for_summary_at(T3, &b.base.id),
+            Err(StorageError::Invalid(_))
+        ));
+        assert_eq!(s.get_saved_bookmark(&b.base.id).unwrap(), done);
+        assert_eq!(
+            s.claim_bookmark_for_summary_at(T3, "missing"),
             Err(BOOKMARK_NOT_FOUND)
         );
     }
