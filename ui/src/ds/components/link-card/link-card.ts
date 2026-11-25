@@ -258,8 +258,16 @@ export function createLinkRow(
     // Reading is an AI task in progress: the spinner and the words, as a status region.
     sub.replaceChildren(reading(doc));
   }
+  // The body and the meta line share .link-main, after the icon: the meta line sits next to the
+  // body when it fits whole, else on its own line under the title.
+  const body = row.querySelector(":scope > .row-body");
+  const main = doc.createElement("span");
+  main.className = "link-main";
+  if (body) body.replaceWith(main);
+  else row.append(main);
+  if (body) main.append(body);
   const meta = metaLine(doc, item);
-  if (meta) row.append(meta);
+  if (meta) main.append(meta);
   return row;
 }
 

@@ -396,6 +396,7 @@ const TRUST_AUDIT = `(() => {
   const bad = [];
   const range = document.createRange();
   const x = (n) => Math.round(n);
+  let metas = 0;
   for (const pill of document.querySelectorAll('.trust')) {
     const pr = pill.getBoundingClientRect();
     if (pr.width < 1 || pr.height < 1) continue;
@@ -409,14 +410,15 @@ const TRUST_AUDIT = `(() => {
           bad.push('"' + word + '" text x' + x(r.left) + '-' + x(r.right) + ' outside its pill x' + x(pr.left) + '-' + x(pr.right));
       }
     }
-    const meta = pill.closest('.link-row')?.querySelector(':scope > .meta');
+    const meta = pill.closest('.link-row')?.querySelector('.meta');
     if (meta) {
+      metas++;
       const mr = meta.getBoundingClientRect();
       if (pr.right > mr.left + 0.5 && pr.left < mr.right - 0.5 && pr.bottom > mr.top && pr.top < mr.bottom)
         bad.push('"' + word + '" pill x' + x(pr.left) + '-' + x(pr.right) + ' overlaps the meta line x' + x(mr.left) + '-' + x(mr.right));
     }
   }
-  return { bad, labels: document.querySelectorAll('.link-row .trust').length };
+  return { bad, labels: document.querySelectorAll('.link-row .trust').length, metas };
 })()`;
 
 for (const scheme of ['light', 'dark']) {
@@ -429,9 +431,101 @@ for (const scheme of ['light', 'dark']) {
         await sleep(500);
         const r = await app.eval(TRUST_AUDIT);
         assert.ok(r.labels > 0, `no labelled link row in the Records tab @ ${s.label}`);
+        assert.ok(r.metas > 0, `no meta line found next to a labelled link row @ ${s.label}`);
         for (const b of r.bad) bad.push(`${b} @ ${s.label}`);
       });
     }
+    assert.deepEqual(bad, []);
+  });
+}
+
+// Issue 171. The List row of a link: the body and the meta line (app, site, date) share .link-main. At the page's
+// own width, and with each list stepped from 280 to 800px wide: a cut site means its meta line has the whole line
+// (no cap leaves room unused); the date is one piece on the site's row; a meta line that wrapped under the body
+// starts at the title's left edge; and no row is wider than its list. The counts make sure the checks ran.
+const ROW_AUDIT = `(() => {
+  const bad = [];
+  const x = (n) => Math.round(n * 10) / 10;
+  const seen = { rows: 0, wrapped: 0, cut: 0, shared: 0 };
+  const sample = [];
+  const lists = [...new Set([...document.querySelectorAll('.link-row')].map((r) => r.parentElement))];
+  const check = (width) => {
+    for (const row of document.querySelectorAll('.link-row')) {
+      const rr = row.getBoundingClientRect();
+      if (rr.width < 1) continue;
+      seen.rows++;
+      const at = '"' + row.querySelector('.row-title').textContent.slice(0, 24) + '" @ list ' + width;
+      const lr = row.parentElement.getBoundingClientRect();
+      if (rr.right > lr.right + 0.5 || rr.left < lr.left - 0.5) bad.push(at + ': row x' + x(rr.left) + '-' + x(rr.right) + ' leaves its list x' + x(lr.left) + '-' + x(lr.right));
+      const main = row.querySelector(':scope > .link-main');
+      const meta = main?.querySelector(':scope > .meta');
+      if (!meta) { bad.push(at + ': no .link-main > .meta'); continue; }
+      const title = main.querySelector('.row-title').getBoundingClientRect();
+      const body = main.querySelector(':scope > .row-body').getBoundingClientRect();
+      const mainR = main.getBoundingClientRect();
+      const mr = meta.getBoundingClientRect();
+      const site = meta.querySelector('.site');
+      const wrapped = mr.top >= body.bottom - 0.5;
+      if (wrapped) {
+        seen.wrapped++;
+        if (Math.abs(mr.left - title.left) > 0.5) bad.push(at + ': wrapped meta starts at x' + x(mr.left) + ', the title at x' + x(title.left));
+      } else seen.shared++;
+      // scrollWidth and clientWidth are whole pixels, so a site short by a fraction of a pixel (still cut, with an
+      // ellipsis) would pass unseen. Compare the text's own width with the site's box instead.
+      const range = document.createRange();
+      let siteBox = 0;
+      let siteText = 0;
+      if (site) {
+        siteBox = site.getBoundingClientRect().width;
+        range.selectNodeContents(site);
+        siteText = [...range.getClientRects()].reduce((w, r) => w + r.width, 0);
+      }
+      if (site && siteText > siteBox + 0.05) {
+        seen.cut++;
+        if (mr.width < mainR.width - 1) bad.push(at + ': site cut (' + x(siteBox) + ' of ' + x(siteText) + 'px) while its meta is ' + x(mr.width) + 'px of a ' + x(mainR.width) + 'px line');
+      }
+      const date = meta.lastElementChild;
+      range.selectNodeContents(date);
+      const rects = [...range.getClientRects()].filter((r) => r.width >= 1);
+      if (rects.length !== 1) bad.push(at + ': the date "' + date.textContent + '" has ' + rects.length + ' line boxes');
+      if (site) {
+        const sr = site.getBoundingClientRect();
+        const dr = date.getBoundingClientRect();
+        const mid = (r) => (r.top + r.bottom) / 2;
+        if (Math.abs(mid(sr) - mid(dr)) > sr.height / 2) bad.push(at + ': the date is not on the site row');
+      }
+      if (sample.length < 40 && row.querySelector('.row-title').textContent === 'Tauri 2 capabilities' && site?.textContent === 'v2.tauri.app' && !sample.some((s) => s.width === width))
+        sample.push({ width, site: x(siteBox) + '/' + x(siteText), meta: x(mr.width) + '/' + x(mainR.width), metaLeft: x(mr.left), titleLeft: x(title.left), wrapped });
+    }
+  };
+  check('page');
+  for (let w = 280; w <= 800; w += 40) {
+    for (const l of lists) l.style.width = w + 'px';
+    check(w);
+  }
+  for (const l of lists) l.style.width = '';
+  return { bad, seen, sample };
+})()`;
+
+for (const scheme of ['light', 'dark']) {
+  test(`AC3: a link's List row keeps its site whole when its line has room, its date on the site's row, a wrapped meta under the title, and stays in its list (${scheme})`, UI, async () => {
+    const bad = [];
+    const seen = { rows: 0, wrapped: 0, cut: 0, shared: 0 };
+    for (const s of SIZES) {
+      await withApp({ ...s, scheme }, async (app) => {
+        await app.goto('/#/ui-catalog', CATALOG_READY);
+        assert.ok(await app.click('Records'), 'no Records tab');
+        await sleep(500);
+        const r = await app.eval(ROW_AUDIT);
+        assert.ok(r.seen.rows > 0, `no link List row in the Records tab @ ${s.label}`);
+        for (const k of Object.keys(seen)) seen[k] += r.seen[k];
+        for (const b of r.bad) bad.push(`${b} @ ${s.label}`);
+        if (process.env.MNEMO_ROW_SAMPLE) console.log(scheme, s.label, JSON.stringify(r.sample));
+      });
+    }
+    assert.ok(seen.wrapped > 0, 'no wrapped meta line seen, so the title-edge check never ran');
+    assert.ok(seen.shared > 0, 'no meta line seen on the body line, so the layout never shared a line');
+    assert.ok(seen.cut > 0, 'no cut site seen, so the full-line check never ran');
     assert.deepEqual(bad, []);
   });
 }

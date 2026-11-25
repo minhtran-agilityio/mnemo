@@ -155,7 +155,7 @@ The UI Catalog tabs need fixed lengths that no token covered (prototype v3 uses 
 | `--tracking-caption` | 0.02em |
 | `--tracking-caps` | 0.06em |
 
-#171 added `--size-link-sub-min` (6rem) for the link row's summary line.
+#171 added `--size-link-sub-min` (6rem) for the List row's body and summary line; value **Unverified** in a real window.
 
 Rules:
 

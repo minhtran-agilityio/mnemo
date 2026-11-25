@@ -505,26 +505,36 @@ test("in the List view the body gives way first, and only the site in the meta l
   const site = `${"rất-dài-".repeat(12)}ẪẬẲỖỮỰ.example.vn`;
   const row = createLinkRow(document, { ...pasted, site });
   expect(row.classList.contains("link-row")).toBe(true);
-  expect(row.querySelector(":scope > .row-body")).not.toBeNull();
-  expect(row.querySelector(":scope > .meta > .site")?.textContent).toBe(site);
+  expect(row.querySelector(":scope > .link-main > .row-body")).not.toBeNull();
+  expect(
+    row.querySelector(":scope > .link-main > .meta > .site")?.textContent,
+  ).toBe(site);
   const css = (sel: string) =>
     cssRule(import.meta.dirname, "link-card.css", sel);
-  // A long summary starts from zero width, so it never squeezes a short site. The body never gets
-  // narrower than a whole trust label; when the row is too narrow, the meta line wraps under it.
-  expect(css(".link-row > .row-body")).toMatchObject({
+  // The body and the meta wrap inside .link-main: the meta shares the line only when it fits whole.
+  expect(css(".link-main")).toMatchObject({
+    display: "flex",
     flex: "1 1 0",
-    "min-width": "var(--size-link-sub-min)",
+    "flex-wrap": "wrap",
+    "min-width": "0",
+    gap: "var(--space-1) var(--space-3)",
   });
-  // The meta line stays on one line, at most half the row.
-  expect(css(".link-row > .meta")).toMatchObject({
+  // A long summary starts from its smallest width, so it never squeezes a short site. That width
+  // holds a whole trust label and is at least half the line.
+  expect(css(".link-main > .row-body")).toMatchObject({
+    flex: "1 1 0",
+    "min-width": "max(var(--size-link-sub-min), 50%)",
+  });
+  // The meta line stays on one line with no cap, so on its own line it has the full width.
+  expect(css(".link-main > .meta")).toMatchObject({
+    flex: "0 1 auto",
     "flex-wrap": "nowrap",
     "min-width": "0",
-    "max-width": "50%",
   });
-  expect(css(".link-row > .meta").flex.split(" ")[1]).toBe("1");
+  expect(css(".link-main > .meta")["max-width"]).toBeUndefined();
   // Badge, dots and date never shrink; the site does.
-  expect(css(".link-row > .meta > :not(.site)").flex).toBe("none");
-  expect(css(".link-row > .meta > .site").flex).toBe("0 1 auto");
+  expect(css(".link-main > .meta > :not(.site)").flex).toBe("none");
+  expect(css(".link-main > .meta > .site").flex).toBe("0 1 auto");
   expect(css(".link-row .site")).toMatchObject({
     ...MARKS_ROOM,
     "min-width": "0",
@@ -567,7 +577,7 @@ const rowCss = (sel: string) =>
 test("done: the List row's summary is labelled Written by AI, after the summary on its line", () => {
   const row = createLinkRow(document, pasted);
   expect(row.dataset.status).toBe("done");
-  const line = row.querySelector(":scope > .row-body > .link-sub");
+  const line = row.querySelector(":scope > .link-main > .row-body > .link-sub");
   expect(line?.querySelector(":scope > .row-sub")?.textContent).toBe(
     pasted.summary,
   );
@@ -678,20 +688,33 @@ test("overflow: a long Vietnamese summary is cut with its ellipsis and the label
     overflow: "hidden",
     "text-overflow": "ellipsis",
   });
-  // The issue 170 layout still holds: the body gives way, the meta keeps at most half the row.
-  expect(rowCss(".link-row > .row-body").flex).toBe("1 1 0");
-  expect(rowCss(".link-row > .meta")["max-width"]).toBe("50%");
-  expect(row.querySelector(":scope > .meta > .site")?.textContent).toBe(
-    "v2.tauri.app",
-  );
+  // The issue 170 rule still holds: the body gives way first, so the site keeps its width.
+  expect(rowCss(".link-main > .row-body").flex).toBe("1 1 0");
+  expect(
+    row.querySelector(":scope > .link-main > .meta > .site")?.textContent,
+  ).toBe("v2.tauri.app");
+});
+
+test("the List row holds the icon, then .link-main with the body and the meta line", () => {
+  const row = createLinkRow(document, pasted);
+  const kids = [...row.children];
+  expect(kids).toHaveLength(2);
+  expect(kids[0]?.tagName.toLowerCase()).toBe("svg");
+  expect(kids[1]?.className).toBe("link-main");
+  const main = [...(kids[1]?.children ?? [])].map((k) => k.className);
+  expect(main).toEqual(["row-body", "meta"]);
+  // With no meta line, .link-main holds the body alone.
+  const bare = createLinkRow(document, { title: "Untitled", url: "x.com/a" });
+  expect(
+    [...(bare.querySelector(".link-main")?.children ?? [])].map(
+      (k) => k.className,
+    ),
+  ).toEqual(["row-body"]);
+  // The row itself has no wrap rule any more; .link-main wraps, so the icon stays on the first line.
+  expect(() => rowCss(".link-row")).toThrow();
 });
 
 test("a narrow List row never clips the label: it wraps under the summary, and its words wrap", () => {
-  // The row wraps, so a narrow row puts the meta line under the body instead of squeezing it.
-  expect(rowCss(".link-row")).toMatchObject({
-    "flex-wrap": "wrap",
-    "row-gap": "var(--space-1)",
-  });
   // The line wraps and clips nothing.
   const line = rowCss(".link-row .link-sub");
   expect(line).toMatchObject({

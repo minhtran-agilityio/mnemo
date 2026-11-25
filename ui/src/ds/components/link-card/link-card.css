@@ -148,20 +148,29 @@
     );
 }
 
-/* A link's List row. Flex shares the shrink in proportion to each item's own width, so a long
-   summary would squeeze a short site. Instead the body (title and summary) starts from zero width
-   and takes the room that is left: it is the side that gives way, cut with its own ellipsis. It
-   never gets narrower than --size-link-sub-min, which holds a whole trust label (icon and its
-   longest word). When the icon, that body and the meta line do not fit on one line, the meta line
-   moves to a line of its own under them, so neither the label nor the date is pushed out. */
-.link-row {
+/* A link's List row: the icon, then .link-main, which holds the body (title and summary) and the
+   meta line (app, site, date). Flex wraps on each item's starting size. The body starts at
+   max(--size-link-sub-min, half of .link-main): the smallest width that holds a whole trust label,
+   and never less than half. The meta starts at its own width. So the meta shares the line only when
+   it fits whole next to that half; else it wraps to its own line, where it has the full width and
+   only its site is cut with an ellipsis. While they share a line, the body takes the room that is
+   left and gives way first (cut with its own ellipsis), so a long summary never squeezes a short
+   site. .link-main starts after the icon, so a wrapped meta lines up with the title. A long host at
+   a wide width takes its own meta line too, which makes the row taller.
+   Unverified on WebKitGTK: the 50% inside max() resolves against the definite width of .link-main
+   (checked in Chrome by tests/acceptance/ds-09-limits.test.mjs). */
+.link-main {
+  display: flex;
+  flex: 1 1 0;
   flex-wrap: wrap;
-  row-gap: var(--space-1);
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  min-width: 0;
 }
 
-.link-row > .row-body {
+.link-main > .row-body {
   flex: 1 1 0;
-  min-width: var(--size-link-sub-min);
+  min-width: max(var(--size-link-sub-min), 50%);
 }
 
 /* The summary line of a List row and its trust label. Nothing here is clipped without an ellipsis.
@@ -201,20 +210,20 @@
   vertical-align: middle;
 }
 
-/* The meta line stays on one line at its own width, at most half the row. Only the site in it may
-   shrink, so a long host is cut with its ellipsis and the badge, dots and date stay whole. */
-.link-row > .meta {
+/* The meta line stays on one line at its own width, with no cap: on a shared line it is as wide as
+   its content, and on its own line it may take the full width. Only the site in it may shrink, so
+   a long host is cut with its ellipsis and the badge, dots and date stay whole. */
+.link-main > .meta {
   flex: 0 1 auto;
   flex-wrap: nowrap;
   min-width: 0;
-  max-width: 50%;
 }
 
-.link-row > .meta > :not(.site) {
+.link-main > .meta > :not(.site) {
   flex: none;
 }
 
-.link-row > .meta > .site {
+.link-main > .meta > .site {
   flex: 0 1 auto;
 }
 
