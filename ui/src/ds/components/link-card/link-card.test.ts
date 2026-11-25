@@ -573,15 +573,23 @@ test("in the Compact view a long title gives way only down to its readable minim
     "min-width": "min(var(--size-link-site-min), 100%)",
     "max-width": "max-content",
   });
-  // With no site there is nothing to give room to: the title grows to the date.
-  expect(css(".compact-row.no-site .row-title")["max-width"]).toBe("none");
+  // The room left when both are whole goes to an auto end margin on the title, or on the spinner
+  // of a reading row: parts that never wrap. The site and the date, which can wrap, carry no auto
+  // margin, so a wrapped one starts at the row's edge.
+  expect(css(".compact-row > .row-title")["margin-inline-end"]).toBe("auto");
+  expect(css(".compact-row > .compact-reading")["margin-inline-end"]).toBe(
+    "auto",
+  );
+  expect(
+    css('.compact-row[data-status="reading"] > .row-title')[
+      "margin-inline-end"
+    ],
+  ).toBe("0");
   // The site starts at 8ch, capped by its own width (a short host's box is its text), and grows as
-  // fast as the title; the room left when both are whole goes to its auto start margin, so the site
-  // and date sit at the row's end. No 50% cap that left the title a few pixels (issue 175).
+  // fast as the title. No 50% cap that left the title a few pixels (issue 175).
   const dom = css(".compact-row .dom");
   expect(dom).toMatchObject({
     flex: "1 1 var(--size-link-site-min)",
-    "margin-inline-start": "auto",
     "min-width": "0",
     "max-width": "max-content",
   });
@@ -953,10 +961,6 @@ test("the host of a link with no site never shows the scheme", () => {
   // A URL with no host renders no site at all, not an empty span.
   const noHost = { ...pasted, site: undefined, url: "file:///home/me/a.txt" };
   const compact = createCompactRow(document, noHost);
-  expect(compact.classList.contains("no-site")).toBe(true);
-  expect(createCompactRow(document, pasted).classList.contains("no-site")).toBe(
-    false,
-  );
   expect(compact.querySelector(".dom")).toBeNull();
   expect(compact.querySelector(".row-meta")?.textContent).toBe("25 Nov 2026");
   const list = createLinkRow(document, noHost);

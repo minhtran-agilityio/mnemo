@@ -386,11 +386,12 @@ export function createLinkRow(
 /**
  * The Compact view: the title, the site and the saved date on one line, and a spinner (named
  * "Reading the page") while Mnemo reads it. The title and the site share the room, each up to its
- * own width, so a short title leaves the room to a long host; the title keeps a readable minimum
- * (8ch) and the site is cut before the title goes under it. A row with no site is marked
- * `no-site`. In a list of 220px or narrower (244px on a reading row) the date goes to a second line under
- * the title; on a reading row the site goes there too, only at 166px or narrower (issue 175,
- * measured in Chrome). It shows nothing the app wrote (no summary, tags or
+ * own width. The title keeps a readable minimum (8ch), so a short title keeps an 8ch box and any
+ * room beyond that goes to the site; the site is cut before the title goes under 8ch. The date goes
+ * to a second line under the title in a list of 220px or narrower with a host of 8ch or more (214px
+ * docs.rs, 201px x.com, 194px t.me, 160px no site; on a reading row 244, 238, 225, 218 and 184px);
+ * on a reading row the site goes there too at 166px or narrower (159px docs.rs, 146px x.com, 140px
+ * t.me). Measured in Chrome (issue 175). It shows nothing the app wrote (no summary, tags or
  * reason), so it needs no trust label; the List and Cards views show them, labelled (issue 171).
  */
 export function createCompactRow(
@@ -419,10 +420,8 @@ export function createCompactRow(
     );
     li.append(box);
   }
-  // A URL with no host (`file:///a`) shows no site, not an empty one; the title then takes the
-  // room up to the date.
+  // A URL with no host (`file:///a`) shows no site, not an empty one.
   const host = linkHost(item);
-  if (!host) li.classList.add("no-site");
   if (host) {
     const dom = textEl(doc, "span", "dom", host);
     dom.title = item.url;

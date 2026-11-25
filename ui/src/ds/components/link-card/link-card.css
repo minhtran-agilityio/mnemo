@@ -271,11 +271,13 @@
 /* The Compact row: the title, the reading spinner, the site and the date, on one line while they
    fit. Each part starts at its smallest width (the title and the site at --size-link-site-min, 8ch of
    their own font; the spinner and the date whole), and a line breaks only when those do not fit.
-   Measured in Chrome: the date goes to a second line, under the title, in a list of 220px or
-   narrower (201px with the host x.com, 194px with t.me, 160px with no site) and, on a reading row, of 244px or narrower.
-   The site goes there too only on a reading row in a list of 166px or narrower. No row of a list
-   280px or wider wraps (tests/acceptance/ds-09-limits.test.mjs; Unverified in WebKit and
-   WebKitGTK). */
+   Measured in Chrome (800 x 560 and 200% zoom alike), the date goes to a second line, under the
+   title, in a list of: 220px or narrower with a host of 8ch or more, 214px with docs.rs, 201px with
+   x.com, 194px with t.me, 160px with no site; on a reading row, 244px, 238px, 225px, 218px and
+   184px. The site goes there too only at 166px or narrower on a reading row with a host of 8ch or
+   more (159px docs.rs, 146px x.com, 140px t.me), and at 142px with no spinner. A wrapped part
+   starts at the row's edge. No row of a list 280px or wider wraps
+   (tests/acceptance/ds-09-limits.test.mjs; Unverified in WebKit and WebKitGTK). */
 .compact-row {
   display: flex;
   flex-wrap: wrap;
@@ -349,12 +351,11 @@
 
 /* The title is the row's main content. It starts from zero and grows as fast as the site (both
    flex-grow 1), up to its own width (max-width: max-content), so a long title next to a long host
-   shares the room with it, and a short title ("Go") never holds empty room that a cut host could
-   use. It keeps a readable minimum, --size-link-site-min (8ch of its own font) or the whole line
-   when that is narrower; the minimum wins over max-content, so a title shorter than 8ch keeps an
-   8ch box. A long title gives way (cut with its ellipsis, full title in its tooltip) only down to
-   that minimum, and the site is cut before it. A row with no site (.no-site) has nothing to give
-   room to, so its title grows to the date as before. */
+   shares the room with it. It keeps a readable minimum, --size-link-site-min (8ch of its own font)
+   or the whole line when that is narrower; the minimum wins over max-content, so a title shorter
+   than 8ch ("Go") keeps an 8ch box, and any room beyond that goes to the site. A long title gives
+   way (cut with its ellipsis, full title in its tooltip) only down to that minimum, and the site is
+   cut before it. */
 .compact-row .row-title {
   flex: 1 1 0;
   min-width: min(var(--size-link-site-min), 100%);
@@ -362,21 +363,27 @@
   font-weight: var(--weight-regular);
 }
 
-.compact-row.no-site .row-title {
-  max-width: none;
+/* The room left when the title and the site are both whole: an auto end margin on the last part
+   that never wraps (the title, or the spinner after it on a reading row; an 8ch title and the
+   spinner always fit the first line) takes it, so the site and the date sit at the row's end. Auto
+   margins take only the room the flex items leave. No part that can wrap (the site, the date)
+   carries an auto margin, so a wrapped part starts at the row's edge, under the title. */
+.compact-row > .row-title,
+.compact-row > .compact-reading {
+  margin-inline-end: auto;
+}
+
+.compact-row[data-status="reading"] > .row-title {
+  margin-inline-end: 0;
 }
 
 /* The site: as in the List row, its flex basis is --size-link-site-min, capped by its own width
    (max-width: max-content clamps the basis), so a short host ("t.me") gets a box as wide as its
    text, and a long one keeps 8ch on its line (the line breaks on these smallest widths). It grows
-   as fast as the title, up to its own width. When the title and the site are both whole, the room
-   left over goes to the site's auto start margin (auto margins take only the room the flex items
-   leave), so the site and the date sit at the row's end. A date wrapped alone to a second line has
-   no auto margin and starts under the title. A cut host shows its ellipsis, the full URL in its
+   as fast as the title, up to its own width. A cut host shows its ellipsis, the full URL in its
    tooltip and the full host on keyboard focus (wrapped, above). */
 .compact-row .dom {
   flex: 1 1 var(--size-link-site-min);
-  margin-inline-start: auto;
   min-width: 0;
   max-width: max-content;
   padding-block: var(--border-2);

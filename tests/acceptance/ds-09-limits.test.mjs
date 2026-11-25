@@ -655,8 +655,9 @@ test('AC3: control, the List row audit reports a site 1px under --size-link-site
   }));
 
 // Issue 175. The Compact row of a link: the title, the reading spinner, the site (.dom) and the date. In the Records
-// tab, at the page's own width and with each list set to widths from 158 to 800px (the narrowest catalog column is
-// 158px at 200% zoom and 161px at 800 x 560, as issues 172 and 175 measured it):
+// tab, at the page's own width and with each list set to widths from 150 to 800px (the narrowest catalog column is
+// 158px at 200% zoom and 161px at 800 x 560, as issues 172 and 175 measured it; 150, 155 and 166 are where a reading
+// row's medium host, github.io or example.org, wraps alone or first wraps):
 // - no row is wider than its list, and every part stays inside the row's content box, with no part over another;
 // - a cut title keeps at least --size-link-site-min (8ch of the title's own font, or the whole line when that is
 //   narrower), so the site is cut before the title drops below it;
@@ -672,8 +673,8 @@ test('AC3: control, the List row audit reports a site 1px under --size-link-site
 // - when the parts do not fit one line, a wrapped part starts at the row's content edge, under the title, and no
 //   row wraps at a list of 280px or wider.
 // The counts make sure each check ran.
-const COMPACT_WIDTHS = [158, 160, 161, 170, 180, 190, 200, 210, 220, 240, 260, 280, 320, 360, 400, 480, 560, 640, 720, 800];
-const COMPACT_SEEN = ['rows', 'cutTitles', 'cutHosts', 'hosts', 'shortHosts', 'dates', 'spinners', 'wrapped', 'oneLine', 'parts', 'titlesBesideCutHost', 'shortTitles', 'longTitlesBesideCutHost', 'datesAtEnd', 'noSite'];
+const COMPACT_WIDTHS = [150, 155, 158, 160, 161, 166, 170, 180, 190, 200, 210, 220, 240, 260, 280, 320, 360, 400, 480, 560, 640, 720, 800];
+const COMPACT_SEEN = ['rows', 'cutTitles', 'cutHosts', 'hosts', 'shortHosts', 'dates', 'spinners', 'wrapped', 'oneLine', 'parts', 'titlesBesideCutHost', 'shortTitles', 'longTitlesBesideCutHost', 'datesAtEnd', 'noSite', 'wrappedSites'];
 const COMPACT_AUDIT = `(() => {
   const bad = [];
   const x = (n) => Math.round(n * 100) / 100;
@@ -718,6 +719,7 @@ const COMPACT_AUDIT = `(() => {
           const sameLine = pr.top < qr.bottom - 0.5 && pr.bottom > qr.top + 0.5;
           if (sameLine && pr.left < qr.right - 0.5) bad.push(at + ': ' + part.className + ' x' + x(pr.left) + ' sits over ' + prev.className + ' x' + x(qr.right));
           // A part on a new line starts at the row's content edge, under the title.
+          if (!sameLine && pr.top >= qr.bottom - 0.5 && part.classList.contains('dom')) seen.wrappedSites++;
           if (!sameLine && pr.top >= qr.bottom - 0.5 && Math.abs(pr.left - left) > 0.5) bad.push(at + ': ' + part.className + ' wrapped to x' + x(pr.left) + ', not the row edge x' + x(left));
         }
         prev = part;
@@ -829,6 +831,7 @@ for (const scheme of ['light', 'dark']) {
     assert.ok(seen.longTitlesBesideCutHost > 0, 'no cut title seen next to a cut site, so the long-title check never ran');
     assert.ok(seen.datesAtEnd > 0, 'no one-line row with a date seen, so the date-at-end check never ran');
     assert.ok(seen.noSite > 0, 'no row without a site seen');
+    assert.ok(seen.wrappedSites > 0, 'no site wrapped to a second line seen, so its row-edge check never ran');
   });
 }
 
@@ -841,9 +844,11 @@ for (const scheme of ['light', 'dark']) {
 //   box next to a cut long host is reported;
 // - the site with first claim on the room (flex-grow 1000, the second version): the long title starved next to a
 //   long host is reported;
-// - the site with no auto start margin: a one-line row whose date stops short of the row end is reported;
+// - no auto end margin on the title or spinner: a one-line row whose date stops short of the row end is reported;
+// - the auto margin on the site instead (fb6db27): a reading row's site wrapped to a second line, pushed off the row
+//   edge, is reported;
 // - a site that never shrinks: it is reported spilling out of the row.
-test('AC3: control, the Compact row audit reports a title 1px under its minimum, none at it, the old layout, an uncapped title, a host-first split, a date short of the row end and a spilling site', UI, () =>
+test('AC3: control, the Compact row audit reports a title 1px under its minimum, none at it, the old layout, an uncapped title, a host-first split, a date short of the row end, a wrapped site off the row edge and a spilling site', UI, () =>
   withApp({}, async (app) => {
     await app.goto('/#/ui-catalog', CATALOG_READY);
     assert.ok(await app.click('Records'), 'no Records tab');
@@ -864,7 +869,7 @@ test('AC3: control, the Compact row audit reports a title 1px under its minimum,
     const below = await app.eval(COMPACT_AUDIT);
     assert.ok(below.seen.cutTitles > 0, 'no cut title seen with the titles held under their minimum');
     assert.ok(under(below).length > 0, 'a title held 1px under its minimum was not reported');
-    await style('.compact-row { flex-wrap: nowrap !important; } .compact-row .row-title { min-width: 0 !important; } .compact-row .dom { flex: 0 1 auto !important; max-width: 50% !important; }');
+    await style('.compact-row { flex-wrap: nowrap !important; } .compact-row .row-title { min-width: 0 !important; max-width: none !important; } .compact-row .dom { flex: 0 1 auto !important; max-width: 50% !important; }');
     const old = await app.eval(COMPACT_AUDIT);
     assert.ok(under(old).some((b) => b.includes('@ list 161')), 'the old layout, with its title of a few pixels at 161px, was not reported');
     await style('.compact-row .row-title { max-width: none !important; }');
@@ -873,9 +878,12 @@ test('AC3: control, the Compact row audit reports a title 1px under its minimum,
     await style('.compact-row .dom { flex-grow: 1000 !important; }');
     const hostFirst = await app.eval(COMPACT_AUDIT);
     assert.ok(hostFirst.bad.some((b) => b.startsWith('"Hướng') && b.includes('less than the site got')), 'a long title starved by a long host was not reported');
-    await style('.compact-row .dom { margin-inline-start: 0 !important; }');
+    await style('.compact-row > .row-title, .compact-row > .compact-reading { margin-inline-end: 0 !important; }');
     const noEnd = await app.eval(COMPACT_AUDIT);
     assert.ok(noEnd.bad.some((b) => b.includes('not the row end')), 'a date short of the row end was not reported');
+    await style('.compact-row > .row-title, .compact-row > .compact-reading { margin-inline-end: 0 !important; } .compact-row .dom { margin-inline-start: auto !important; }');
+    const hostMargin = await app.eval(COMPACT_AUDIT);
+    assert.ok(hostMargin.bad.some((b) => b.includes(' (reading)') && b.includes(': dom wrapped to x')), 'a wrapped site pushed off the row edge by its auto margin (fb6db27) was not reported');
     await style('.compact-row { flex-wrap: nowrap !important; } .compact-row .dom { min-width: max-content !important; }');
     const spill = await app.eval(COMPACT_AUDIT);
     assert.ok(spill.bad.some((b) => b.includes('spills out of the row')), 'a site that never shrinks was not reported spilling');

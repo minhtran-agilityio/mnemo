@@ -334,6 +334,26 @@ function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
       { ...overflow, ...unread, status: "reading" },
       "reading, long title and host: the spinner stays on the title's line",
     ],
+    [
+      {
+        ...pasted,
+        ...unread,
+        status: "reading",
+        site: "github.io",
+        url: "https://github.io/tauri-apps/plugins",
+      },
+      "reading, medium host github.io: in a narrow column the site and date wrap under the title, from its edge",
+    ],
+    [
+      {
+        ...pasted,
+        ...unread,
+        status: "reading",
+        site: "example.org",
+        url: "https://example.org/tauri/capabilities",
+      },
+      "reading, medium host example.org: in a narrow column the site and date wrap under the title, from its edge",
+    ],
     [pasted, "hover", { forceState: "hover" }],
     [pasted, "focus-visible", { forceState: "focus" }],
     [
