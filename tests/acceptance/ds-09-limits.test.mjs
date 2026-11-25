@@ -208,7 +208,7 @@ async function withApp(opts, fn) {
 // inline line, and the one specimen element that a caption calls a counter-example.
 const AUDIT = `(() => {
   const IN_CATALOG = location.hash.startsWith('#/ui-catalog');
-  const out = { scroll: [], hclip: [], vclip: [] };
+  const out = { scroll: [], hclip: [], vclip: [], texts: 0 };
   const de = document.documentElement;
   if (de.scrollWidth > de.clientWidth + 1) out.scroll.push('document ' + de.scrollWidth + ' > ' + de.clientWidth);
   if (document.body.scrollWidth > de.clientWidth + 1) out.scroll.push('body ' + document.body.scrollWidth + ' > ' + de.clientWidth);
@@ -228,6 +228,7 @@ const AUDIT = `(() => {
     if ((cs.overflowX === 'hidden' || cs.overflowX === 'clip') && hasText && wide && cs.textOverflow !== 'ellipsis') out.hclip.push(label(el) + ' ' + el.scrollWidth + ' > ' + el.clientWidth);
     const own = [...el.childNodes].filter((n) => n.nodeType === 3 && n.textContent.trim());
     if (!own.length) continue;
+    out.texts++;
     const fs = parseFloat(cs.fontSize);
     const pad = 0.15 * fs;
     const inline = (a) => { for (let n = el; n && n !== a; n = n.parentElement) if (getComputedStyle(n).display !== 'inline') return false; return true; };
@@ -346,13 +347,21 @@ const collectAll = (scheme) => {
   if (!collected.has(scheme)) {
     collected.set(scheme, (async () => {
       const problems = { scroll: [], hclip: [], vclip: [] };
-      const add = (l, s, r) => { for (const kind of Object.keys(problems)) for (const x of r[kind]) problems[kind].push(`${l} @ ${s.label}: ${x}`); };
+      // Each page must hold text for the audit to check, else a blank page would pass every check.
+      const blank = [];
+      let pages = 0;
+      const add = (l, s, r) => {
+        pages++;
+        if (!(r.texts > 0)) blank.push(`${l} @ ${s.label}: no text found to check`);
+        for (const kind of Object.keys(problems)) for (const x of r[kind]) problems[kind].push(`${l} @ ${s.label}: ${x}`);
+      };
       for (const s of SIZES) {
         await withApp({ ...s, scheme }, (app) => eachAppScreen(app, (l, r) => add(l, s, r)));
         await withApp({ ...s, scheme, mode: 'down' }, (app) => errorPage(app, (l, r) => add(l, s, r)));
         await withApp({ ...s, scheme }, (app) => eachCatalogTab(app, (l, r) => add(l, s, r)));
       }
-      return problems;
+      if (pages === 0) blank.push('no page was audited');
+      return { ...problems, blank };
     })());
   }
   return collected.get(scheme);
@@ -361,17 +370,23 @@ const collectAll = (scheme) => {
 // ---------------------------------------------------------------- AC2
 for (const scheme of ['light', 'dark']) {
   test(`AC2: no horizontal scroll at 800 x 560 and at 200% zoom on any app screen or catalog tab (${scheme})`, UI, async () => {
-    assert.deepEqual((await collectAll(scheme)).scroll, []);
+    const c = await collectAll(scheme);
+    assert.deepEqual(c.blank, []);
+    assert.deepEqual(c.scroll, []);
   });
 }
 
 // ---------------------------------------------------------------- AC3
 for (const scheme of ['light', 'dark']) {
   test(`AC3: no text is clipped sideways without an ellipsis, by its own box or an ancestor (${scheme})`, UI, async () => {
-    assert.deepEqual((await collectAll(scheme)).hclip, []);
+    const c = await collectAll(scheme);
+    assert.deepEqual(c.blank, []);
+    assert.deepEqual(c.hclip, []);
   });
   test(`AC3: no line is cut above or below, marks safe, by its own box or an ancestor (${scheme})`, UI, async () => {
-    assert.deepEqual((await collectAll(scheme)).vclip, []);
+    const c = await collectAll(scheme);
+    assert.deepEqual(c.blank, []);
+    assert.deepEqual(c.vclip, []);
   });
 }
 
@@ -386,6 +401,7 @@ test('AC3: the Limits tab holds Vietnamese stacked marks and a very long title, 
       return { viet, audit: ${AUDIT} };
     })()`);
     assert.ok(r.viet, 'no Vietnamese stacked-marks specimen in the Limits tab');
+    assert.ok(r.audit.texts > 0, 'the audit found no text in the Limits tab');
     assert.deepEqual([...r.audit.scroll, ...r.audit.hclip, ...r.audit.vclip], []);
   }));
 
@@ -439,67 +455,133 @@ for (const scheme of ['light', 'dark']) {
   });
 }
 
-// Issue 171. The List row of a link: the body and the meta line (app, site, date) share .link-main. At the page's
-// own width, and with each list stepped from 280 to 800px wide: a cut site means its meta line has the whole line
-// (no cap leaves room unused); the date is one piece on the site's row; a meta line that wrapped under the body
-// starts at the title's left edge; and no row is wider than its list. The counts make sure the checks ran.
+// Issues 171 and 172. The List row of a link: the icon, then .link-main, which holds the body and the meta line (the
+// app badge, then .link-host with the site, a dot and the date). At the page's own width, and with each list set to
+// widths from 280 to 800px (with 420, 500 and 540, the narrow lists of issue 172):
+// - no row is wider than its list, and .link-main fills the row after the icon (the row's gap from the icon, up to
+//   the row's content edge), so the checks below that use .link-main are checks against the row;
+// - a cut site has the whole line of the row after the icon (its .link-host spans it), and keeps at least
+//   --size-link-site-min (or the whole line, when that is narrower): no cap leaves room unused;
+// - a site's box is never wider than its text (+1px), so a host shorter than --size-link-site-min ("t.me") leaves no
+//   gap before its dot (a focused row, whose host wraps, is left out of this one);
+// - nothing spills out of the meta line, and the meta line stays inside .link-main;
+// - the date is one piece, on the site's row;
+// - a meta line that wrapped under the body, and a .link-host that wrapped under the badge, start at the title's edge.
+// The counts make sure each check ran.
+const ROW_WIDTHS = [280, 320, 360, 400, 420, 440, 480, 500, 520, 540, 560, 600, 640, 680, 720, 760, 800];
+const ROW_SEEN = ['rows', 'filled', 'wrapped', 'shared', 'cut', 'metaParts', 'dates', 'badges', 'hostUnderBadge', 'sites', 'shortHosts'];
 const ROW_AUDIT = `(() => {
   const bad = [];
-  const x = (n) => Math.round(n * 10) / 10;
-  const seen = { rows: 0, wrapped: 0, cut: 0, shared: 0 };
+  const x = (n) => Math.round(n * 100) / 100;
+  const seen = Object.fromEntries(${JSON.stringify(ROW_SEEN)}.map((k) => [k, 0]));
   const sample = [];
+  const range = document.createRange();
+  // The widest line box of a text, not the sum: Chrome gives a cut text more than one rect.
+  const widest = (node) => { range.selectNodeContents(node); return Math.max(0, ...[...range.getClientRects()].map((r) => r.width)); };
+  // --size-link-site-min in the site's own font (it is in ch, so it must resolve in the site's 11px mono, not in
+  // the 12.5px body font around it): the probe goes inside the site and inherits its font. Call it after the
+  // site's text is measured.
+  const siteMin = (site) => {
+    const probe = document.createElement('span');
+    probe.style.cssText = 'position:absolute;width:var(--size-link-site-min)';
+    site.append(probe);
+    const w = probe.getBoundingClientRect().width;
+    probe.remove();
+    return w;
+  };
   const lists = [...new Set([...document.querySelectorAll('.link-row')].map((r) => r.parentElement))];
   const check = (width) => {
     for (const row of document.querySelectorAll('.link-row')) {
       const rr = row.getBoundingClientRect();
       if (rr.width < 1) continue;
       seen.rows++;
-      const at = '"' + row.querySelector('.row-title').textContent.slice(0, 24) + '" @ list ' + width;
+      const at = '"' + row.querySelector('.row-title').textContent.slice(0, 24) + '"' + (row.querySelector('.app') ? ' (badge)' : '') + ' @ list ' + width;
       const lr = row.parentElement.getBoundingClientRect();
       if (rr.right > lr.right + 0.5 || rr.left < lr.left - 0.5) bad.push(at + ': row x' + x(rr.left) + '-' + x(rr.right) + ' leaves its list x' + x(lr.left) + '-' + x(lr.right));
       const main = row.querySelector(':scope > .link-main');
       const meta = main?.querySelector(':scope > .meta');
       if (!meta) { bad.push(at + ': no .link-main > .meta'); continue; }
+      // .link-main fills the row after the icon.
+      const cs = getComputedStyle(row);
+      const icon = row.firstElementChild.getBoundingClientRect();
+      const lineLeft = icon.right + parseFloat(cs.columnGap);
+      const lineRight = rr.right - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth);
+      const mainR = main.getBoundingClientRect();
+      if (Math.abs(mainR.left - lineLeft) > 0.5 || Math.abs(mainR.right - lineRight) > 0.5)
+        bad.push(at + ': .link-main x' + x(mainR.left) + '-' + x(mainR.right) + ' does not fill the row after the icon, x' + x(lineLeft) + '-' + x(lineRight));
+      else seen.filled++;
       const title = main.querySelector('.row-title').getBoundingClientRect();
       const body = main.querySelector(':scope > .row-body').getBoundingClientRect();
-      const mainR = main.getBoundingClientRect();
       const mr = meta.getBoundingClientRect();
-      const site = meta.querySelector('.site');
+      const host = meta.querySelector(':scope > .link-host');
+      const hr = host?.getBoundingClientRect();
+      const site = host?.querySelector(':scope > .site');
       const wrapped = mr.top >= body.bottom - 0.5;
       if (wrapped) {
         seen.wrapped++;
         if (Math.abs(mr.left - title.left) > 0.5) bad.push(at + ': wrapped meta starts at x' + x(mr.left) + ', the title at x' + x(title.left));
       } else seen.shared++;
+      if (meta.querySelector(':scope > .app')) {
+        seen.badges++;
+        if (host && hr.top >= meta.querySelector(':scope > .app').getBoundingClientRect().bottom - 0.5) {
+          seen.hostUnderBadge++;
+          if (Math.abs(hr.left - title.left) > 0.5) bad.push(at + ': site and date wrapped under the badge start at x' + x(hr.left) + ', the title at x' + x(title.left));
+        }
+      }
+      // Nothing spills: the meta line stays in .link-main, and every part of it stays in the meta line.
+      if (mr.left < mainR.left - 0.5 || mr.right > mainR.right + 0.5) bad.push(at + ': meta x' + x(mr.left) + '-' + x(mr.right) + ' leaves .link-main x' + x(mainR.left) + '-' + x(mainR.right));
+      for (const part of meta.querySelectorAll('*')) {
+        const pr = part.getBoundingClientRect();
+        if (pr.width < 1) continue;
+        seen.metaParts++;
+        if (pr.left < mr.left - 0.5 || pr.right > mr.right + 0.5) bad.push(at + ': "' + part.textContent.slice(0, 20) + '" x' + x(pr.left) + '-' + x(pr.right) + ' spills out of its meta line x' + x(mr.left) + '-' + x(mr.right));
+      }
       // scrollWidth and clientWidth are whole pixels, so a site short by a fraction of a pixel (still cut, with an
       // ellipsis) would pass unseen. Compare the text's own width with the site's box instead.
-      const range = document.createRange();
       let siteBox = 0;
       let siteText = 0;
+      let floor = 0;
       if (site) {
         siteBox = site.getBoundingClientRect().width;
-        range.selectNodeContents(site);
-        siteText = [...range.getClientRects()].reduce((w, r) => w + r.width, 0);
+        siteText = widest(site);
+        floor = siteMin(site);
+        seen.sites++;
+        if (siteText < floor - 0.5) seen.shortHosts++;
+        // The box hugs the text: no gap after a short host. A focused row wraps its host, so its widest line is
+        // narrower than the box by design.
+        if (!row.matches('.is-focus, :focus-visible') && siteBox > siteText + 1)
+          bad.push(at + ': site "' + site.textContent.slice(0, 20) + '" box ' + x(siteBox) + 'px is wider than its text ' + x(siteText) + 'px');
       }
       if (site && siteText > siteBox + 0.05) {
         seen.cut++;
-        if (mr.width < mainR.width - 1) bad.push(at + ': site cut (' + x(siteBox) + ' of ' + x(siteText) + 'px) while its meta is ' + x(mr.width) + 'px of a ' + x(mainR.width) + 'px line');
+        // A cut site has the row's whole line after the icon, and at least its smallest width.
+        if (Math.abs(hr.left - lineLeft) > 0.5 || Math.abs(hr.right - lineRight) > 1)
+          bad.push(at + ': site cut (' + x(siteBox) + ' of ' + x(siteText) + 'px) while its site and date have x' + x(hr.left) + '-' + x(hr.right) + ' of the row line x' + x(lineLeft) + '-' + x(lineRight));
+        const least = Math.min(floor, hr.width);
+        if (siteBox < least - 0.5) bad.push(at + ': site cut to ' + x(siteBox) + 'px, under its smallest width ' + x(least) + 'px');
       }
-      const date = meta.lastElementChild;
-      range.selectNodeContents(date);
-      const rects = [...range.getClientRects()].filter((r) => r.width >= 1);
-      if (rects.length !== 1) bad.push(at + ': the date "' + date.textContent + '" has ' + rects.length + ' line boxes');
-      if (site) {
-        const sr = site.getBoundingClientRect();
-        const dr = date.getBoundingClientRect();
-        const mid = (r) => (r.top + r.bottom) / 2;
-        if (Math.abs(mid(sr) - mid(dr)) > sr.height / 2) bad.push(at + ': the date is not on the site row');
+      const date = host?.lastElementChild;
+      if (date && date !== site) {
+        seen.dates++;
+        range.selectNodeContents(date);
+        const rects = [...range.getClientRects()].filter((r) => r.width >= 1);
+        if (rects.length !== 1) bad.push(at + ': the date "' + date.textContent + '" has ' + rects.length + ' line boxes');
+        if (site) {
+          const sr = site.getBoundingClientRect();
+          const dr = date.getBoundingClientRect();
+          const mid = (r) => (r.top + r.bottom) / 2;
+          if (Math.abs(mid(sr) - mid(dr)) > sr.height / 2) bad.push(at + ': the date is not on the site row');
+        }
       }
-      if (sample.length < 40 && row.querySelector('.row-title').textContent === 'Tauri 2 capabilities' && site?.textContent === 'v2.tauri.app' && !sample.some((s) => s.width === width))
-        sample.push({ width, site: x(siteBox) + '/' + x(siteText), meta: x(mr.width) + '/' + x(mainR.width), metaLeft: x(mr.left), titleLeft: x(title.left), wrapped });
+      if (row.querySelector('.row-title').textContent === 'Tauri 2 capabilities' && site?.textContent === 'v2.tauri.app' && !row.matches('.is-hover, .is-focus, .is-active')) {
+        const kind = row.querySelector('.app') ? 'badge' : 'plain';
+        if (!sample.some((s) => s.width === width && s.kind === kind))
+          sample.push({ width, kind, site: x(siteBox) + '/' + x(siteText), meta: x(mr.width) + '/' + x(mainR.width), left: { title: x(title.left), meta: x(mr.left), host: x(hr.left) }, wrapped, underBadge: !!row.querySelector('.app') && hr.top > mr.top + 1 });
+      }
     }
   };
   check('page');
-  for (let w = 280; w <= 800; w += 40) {
+  for (const w of ${JSON.stringify(ROW_WIDTHS)}) {
     for (const l of lists) l.style.width = w + 'px';
     check(w);
   }
@@ -508,9 +590,9 @@ const ROW_AUDIT = `(() => {
 })()`;
 
 for (const scheme of ['light', 'dark']) {
-  test(`AC3: a link's List row keeps its site whole when its line has room, its date on the site's row, a wrapped meta under the title, and stays in its list (${scheme})`, UI, async () => {
+  test(`AC3: a link's List row fills its row, keeps a short site whole when it has room and a cut one at its smallest width or more, spills nothing, keeps its date on the site's row and a wrapped meta under the title (${scheme})`, UI, async () => {
     const bad = [];
-    const seen = { rows: 0, wrapped: 0, cut: 0, shared: 0 };
+    const seen = Object.fromEntries(ROW_SEEN.map((k) => [k, 0]));
     for (const s of SIZES) {
       await withApp({ ...s, scheme }, async (app) => {
         await app.goto('/#/ui-catalog', CATALOG_READY);
@@ -518,17 +600,59 @@ for (const scheme of ['light', 'dark']) {
         await sleep(500);
         const r = await app.eval(ROW_AUDIT);
         assert.ok(r.seen.rows > 0, `no link List row in the Records tab @ ${s.label}`);
-        for (const k of Object.keys(seen)) seen[k] += r.seen[k];
+        for (const k of ROW_SEEN) seen[k] += r.seen[k];
         for (const b of r.bad) bad.push(`${b} @ ${s.label}`);
-        if (process.env.MNEMO_ROW_SAMPLE) console.log(scheme, s.label, JSON.stringify(r.sample));
+        if (process.env.MNEMO_ROW_SAMPLE) for (const line of r.sample) console.log(scheme, s.label, JSON.stringify(line));
       });
     }
     assert.ok(seen.wrapped > 0, 'no wrapped meta line seen, so the title-edge check never ran');
     assert.ok(seen.shared > 0, 'no meta line seen on the body line, so the layout never shared a line');
-    assert.ok(seen.cut > 0, 'no cut site seen, so the full-line check never ran');
+    assert.ok(seen.cut > 0, 'no cut site seen, so the full-line and smallest-width checks never ran');
+    assert.ok(seen.dates > 0, 'no date seen, so the date checks never ran');
+    assert.ok(seen.badges > 0, 'no row with an app badge seen');
+    assert.ok(seen.hostUnderBadge > 0, 'no site and date seen wrapped under a badge, so that edge check never ran');
+    assert.ok(seen.metaParts > 0, 'no meta part measured, so the spill check never ran');
+    assert.ok(seen.sites > 0, 'no site measured, so the box-hugs-text check never ran');
+    assert.ok(seen.shortHosts > 0, 'no host shorter than --size-link-site-min seen, so a short host was never checked');
     assert.deepEqual(bad, []);
+    assert.equal(seen.filled, seen.rows, 'a .link-main does not fill its row after the icon');
   });
 }
+
+// Control for the site checks above: a style injected into the page sets the List row sites.
+// - Held at exactly --size-link-site-min (8ch of the site's 11px mono font), no site is reported under its smallest
+//   width; held 1px under it, a cut site is. A probe that resolved 8ch in the meta line's 12.5px body font (about
+//   50px) let 51.8px pass, and fails the second half.
+// - With the 8ch floor put back on min-width (min-width wins over max-width: max-content), a short host gets an 8ch
+//   box, and the box-hugs-text check reports it.
+test('AC3: control, the List row audit reports a site 1px under --size-link-site-min, none at it, and a short host in an 8ch box', UI, () =>
+  withApp({}, async (app) => {
+    await app.goto('/#/ui-catalog', CATALOG_READY);
+    assert.ok(await app.click('Records'), 'no Records tab');
+    await sleep(500);
+    const under = (r) => r.bad.filter((b) => b.includes('under its smallest width'));
+    const hold = (width) => app.eval(`(() => {
+      let s = document.getElementById('ds09-site-hold');
+      if (!s) { s = document.createElement('style'); s.id = 'ds09-site-hold'; document.head.append(s); }
+      s.textContent = '.link-main .link-host > .site { flex: none !important; min-width: 0 !important; width: ${width} !important; max-width: none !important; }';
+      return true;
+    })()`);
+    await hold('var(--size-link-site-min)');
+    const at = await app.eval(ROW_AUDIT);
+    assert.ok(at.seen.cut > 0, 'no cut site seen with the sites held at their smallest width');
+    assert.deepEqual(under(at), []);
+    await hold('calc(var(--size-link-site-min) - 1px)');
+    const below = await app.eval(ROW_AUDIT);
+    assert.ok(below.seen.cut > 0, 'no cut site seen with the sites held under their smallest width');
+    assert.ok(under(below).length > 0, 'a site held 1px under its smallest width was not reported');
+    await app.eval(`(() => {
+      document.getElementById('ds09-site-hold').textContent = '.link-main .link-host > .site { min-width: min(var(--size-link-site-min), 100%) !important; }';
+      return true;
+    })()`);
+    const floored = await app.eval(ROW_AUDIT);
+    assert.ok(floored.seen.shortHosts > 0, 'no short host seen with the old 8ch min-width floor');
+    assert.ok(floored.bad.some((b) => b.includes('is wider than its text')), 'a short host in an 8ch box was not reported');
+  }));
 
 // ---------------------------------------------------------------- AC4
 test('AC4: the 1000-row catalog list builds in under 1.5 s and scrolls with no frame stall over 250 ms', UI, () =>

@@ -225,8 +225,39 @@ function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
       "Có thể liên quan đến danh sách lệnh được phép của Mnemo, vì mỗi cửa sổ chỉ gọi được những lệnh đã khai báo.",
   };
   type Case = [LinkItem, string, LinkRowOptions?];
+  // The request's samples (issue 172): a Telegram link, and links with no site, whose host comes
+  // from the URL with or without its scheme.
+  const telegram: LinkItem = { ...pasted, app: "telegram" };
+  const noSite: LinkItem = {
+    ...pasted,
+    site: undefined,
+    url: "https://v2.tauri.app/security/capabilities",
+  };
+  const noScheme: LinkItem = {
+    ...noSite,
+    url: "v2.tauri.app/security/capabilities",
+  };
+  // Hosts shorter than --size-link-site-min (8ch): the site's box is its own text width.
+  const shortTg: LinkItem = {
+    ...telegram,
+    site: "t.me",
+    url: "https://t.me/tauri_apps/1234",
+  };
+  const shortX: LinkItem = {
+    ...pasted,
+    site: "x.com",
+    url: "https://x.com/tauriapps/status/1",
+  };
   const listCases: Case[] = [
     [pasted, "done: summary Written by AI; tags and reason left out"],
+    [
+      telegram,
+      "Telegram badge, site and date: on a narrow line the site and date wrap under the badge, together",
+    ],
+    [shortTg, "short host t.me with a Telegram badge: no gap before the date"],
+    [shortX, "short host x.com: no gap before the date"],
+    [noSite, "partial: no site, the host from a URL with https://"],
+    [noScheme, "partial: no site, the host from a URL with no scheme"],
     [
       {
         ...pasted,
@@ -262,11 +293,20 @@ function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
     ],
     [pasted, "hover", { forceState: "hover" }],
     [pasted, "focus-visible", { forceState: "focus" }],
+    [
+      overflow,
+      "focus-visible: a cut host shows in full, wrapped",
+      { forceState: "focus" },
+    ],
     [pasted, "active", { forceState: "active" }],
   ];
   // The Compact row shows no summary, tags or reason, so it has no label in any status.
   const compactCases: Case[] = [
     [pasted, "done: title, site, date; nothing the app wrote, so no label"],
+    [shortTg, "short host t.me"],
+    [shortX, "short host x.com"],
+    [noSite, "partial: no site, the host from a URL with https://"],
+    [noScheme, "partial: no site, the host from a URL with no scheme"],
     [{ ...pasted, ...unread, status: "pending" }, "pending"],
     [
       { ...pasted, ...unread, status: "reading" },
@@ -277,6 +317,11 @@ function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
     [overflow, "overflow: long Vietnamese title and host"],
     [pasted, "hover", { forceState: "hover" }],
     [pasted, "focus-visible", { forceState: "focus" }],
+    [
+      overflow,
+      "focus-visible: a cut host shows in full, wrapped",
+      { forceState: "focus" },
+    ],
     [pasted, "active", { forceState: "active" }],
   ];
   const block = (

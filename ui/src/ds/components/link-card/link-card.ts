@@ -3,9 +3,11 @@
 // summary the app wrote and tags it chose are labelled "Written by AI", and a reason it guessed is
 // labelled "Guess". The status decides what shows: only a `done` link shows its summary.
 // A long title wraps (card) or is cut off with its full text in the tooltip (rows); a long URL or
-// host is cut off with the full value in the tooltip. A card has one action slot: the screen
-// passes the one button that fits the card's status (for example "Paste the text").
+// host is cut off with the full value in the tooltip; in a row, keyboard focus also shows the full
+// host. A card has one action slot: the screen passes the one button that fits the card's status
+// (for example "Paste the text").
 // Issue 169 added the site, the saved date, tags, the reason, the action slot and `pending`.
+// Issue 172: the rows show the host of the URL when there is no site, never its scheme.
 import { Clock, Link, PowerOff } from "lucide";
 import { createIcon } from "../../icon";
 import { createListRow } from "../list-row/list-row";
@@ -143,6 +145,116 @@ function metaLine(doc: Document, item: LinkItem): HTMLDivElement | null {
   return parts.length > 0 ? createMetaLine(doc, parts) : null;
 }
 
+/** A scheme with an authority, as in `https://`. Group 1 is the scheme's name. */
+const SCHEME = /^([a-z][a-z\d+.-]*):\/\//i;
+
+/** The port a scheme uses when the URL names none; `new URL()` leaves it out of the host. */
+const DEFAULT_PORT: Readonly<Record<string, string>> = {
+  http: "80",
+  https: "443",
+  ws: "80",
+  wss: "443",
+  ftp: "21",
+};
+
+/**
+ * The authority of a URL written as text: after the scheme (or a protocol-relative `//`), before
+ * the path, without a user. Empty when the URL has none (`file:///a`).
+ */
+function authority(url: string): string {
+  const rest = url.replace(SCHEME, "").replace(/^\/\//, "");
+  const end = rest.search(/[/?#]/);
+  const auth = end < 0 ? rest : rest.slice(0, end);
+  return auth.slice(auth.lastIndexOf("@") + 1);
+}
+
+/** A host and a port with no scheme ("localhost:1420/a"), which `new URL()` reads as a scheme. */
+const HOST_PORT = /^[^:/?#]+:\d+(?:[/?#]|$)/;
+
+/** A scheme with no authority after it, as in `mailto:`, `about:` or `file:/a`. */
+const BARE_SCHEME = /^[a-z][a-z\d+.-]*:(?!\/\/)/i;
+
+/** Text with only printable ASCII. */
+const ASCII = /^[\x20-\x7e]*$/;
+
+/** A host written as text, lowercased, without the default port of its scheme. */
+function foldHost(host: string, scheme: string): string {
+  const port = DEFAULT_PORT[scheme.toLowerCase()];
+  const low = host.toLowerCase();
+  return port && low.endsWith(`:${port}`)
+    ? low.slice(0, -(port.length + 1))
+    : low;
+}
+
+/**
+ * Whether `new URL()` takes the text as an absolute URL. `URL.canParse` is in WebKit since Safari 17
+ * and WebKitGTK 2.42 (2023); support in the WebKitGTK that Ubuntu 22.04 ships is **Unverified**.
+ * Where it is missing, the URL is read as text only (the same host for an http or https link).
+ */
+function parses(url: string): boolean {
+  return typeof URL.canParse === "function" && URL.canParse(url);
+}
+
+/**
+ * The host to show for a link: its site, else the host of its URL, never the scheme
+ * ("https://v2.tauri.app/a" and "v2.tauri.app/a" both give "v2.tauri.app"). Empty when the URL has
+ * no host: `file:///a`, `about:blank`, `mailto:me@x.com`, `javascript:...`. Only the host text
+ * decides how it is read:
+ * - an ASCII host is parsed with `new URL()`, which lowercases it and drops a default port;
+ * - a host with letters outside ASCII is lowercased as written, with a default port dropped here,
+ *   since `new URL()` turns it into punycode ("xn--..."), which the owner cannot read;
+ * - a URL with no scheme ("v2.tauri.app/a", "//v2.tauri.app/a", "localhost:1420/a") is not an
+ *   absolute URL; its host text is lowercased as written.
+ * A path with letters outside ASCII changes nothing.
+ */
+export function linkHost(item: LinkItem): string {
+  const site = item.site?.trim();
+  if (site) return site;
+  const url = item.url.trim();
+  if (HOST_PORT.test(url)) return foldHost(authority(url), "");
+  if (parses(url)) {
+    const parsed = new URL(url);
+    // A scheme with no host (about:, mailto:, javascript:, file:) shows no site.
+    if (!parsed.host) return "";
+    const text = authority(url);
+    return ASCII.test(text)
+      ? parsed.host
+      : foldHost(text, parsed.protocol.slice(0, -1));
+  }
+  if (BARE_SCHEME.test(url)) return "";
+  return foldHost(authority(url), SCHEME.exec(url)?.[1] ?? "");
+}
+
+/**
+ * The List row's meta line: the app badge, then the host and the saved date, kept together in
+ * `.link-host` so they wrap as one piece. When the line has no room for the badge and the whole
+ * host and date, they wrap under the badge. There is no dot after the badge (it is its own tinted
+ * box), so a wrapped line never ends with a dot. Null when none is known.
+ */
+function rowMetaLine(doc: Document, item: LinkItem): HTMLDivElement | null {
+  const parts: (string | Node)[] = [];
+  const host = linkHost(item);
+  if (host) {
+    const site = textEl(doc, "span", "site", host);
+    site.title = host;
+    parts.push(site);
+  }
+  // An empty string falls back, as a missing value does.
+  const when = item.saved || item.age;
+  if (when) parts.push(when);
+  if (!item.app && parts.length === 0) return null;
+  const line = createMetaLine(
+    doc,
+    item.app ? [createAppBadge(doc, item.app)] : [],
+  );
+  if (parts.length > 0) {
+    const group = createMetaLine(doc, parts);
+    group.classList.add("link-host");
+    line.append(group);
+  }
+  return line;
+}
+
 function noSummary(doc: Document, item: LinkItem): HTMLElement {
   const status = linkStatus(item);
   if (status === "reading") return reading(doc);
@@ -266,7 +378,7 @@ export function createLinkRow(
   if (body) body.replaceWith(main);
   else row.append(main);
   if (body) main.append(body);
-  const meta = metaLine(doc, item);
+  const meta = rowMetaLine(doc, item);
   if (meta) main.append(meta);
   return row;
 }
@@ -288,9 +400,6 @@ export function createCompactRow(
   li.tabIndex = 0;
   const title = textEl(doc, "span", "row-title", item.title);
   title.title = item.title;
-  const host = item.site || item.url.split("/")[0];
-  const dom = textEl(doc, "span", "dom", host);
-  dom.title = item.url;
   li.append(title);
   // While Mnemo reads the page, a spinner sits after the title, as a status region. Its words are
   // in the tooltip and hidden text, so the one-line row keeps room for the site and the date.
@@ -305,7 +414,13 @@ export function createCompactRow(
     );
     li.append(box);
   }
-  li.append(dom);
+  // A URL with no host (`file:///a`) shows no site, not an empty one.
+  const host = linkHost(item);
+  if (host) {
+    const dom = textEl(doc, "span", "dom", host);
+    dom.title = item.url;
+    li.append(dom);
+  }
   const when = item.saved || item.age;
   if (when) li.append(textEl(doc, "span", "row-meta", when));
   return li;
