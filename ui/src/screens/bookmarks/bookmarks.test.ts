@@ -2,7 +2,13 @@
 import { expect, test, vi } from "vitest";
 import type { Page, SavedBookmark, SaveResult } from "../../shared/api";
 import { type BookmarksDeps, renderBookmarks } from "./bookmarks";
-import { actionFor, savedDate, toLinkItem, upsert } from "./bookmarks-logic";
+import {
+  actionsFor,
+  savedDate,
+  shownAction,
+  toLinkItem,
+  upsert,
+} from "./bookmarks-logic";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
@@ -92,12 +98,29 @@ test("a link that is not done never shows a summary, tags or reason, and has a t
   expect(toLinkItem(bm({ summaryStatus: "ai_off" })).status).toBe("ai-off");
 });
 
-test("each status has its one action", () => {
-  expect(actionFor(bm({ summaryStatus: "unreadable" }))).toBe("paste");
-  expect(actionFor(bm({ summaryStatus: "ai_off" }))).toBe("later");
-  expect(actionFor(bm({ summaryStatus: "pending" }))).toBe("later");
-  expect(actionFor(bm({ summaryStatus: "reading" }))).toBeNull();
-  expect(actionFor(bm())).toBeNull();
+test("each status has its actions", () => {
+  expect(actionsFor(bm({ summaryStatus: "unreadable" }))).toEqual(["paste"]);
+  expect(actionsFor(bm({ summaryStatus: "ai_off" }))).toEqual(["later"]);
+  expect(actionsFor(bm({ summaryStatus: "pending" }))).toEqual(["later"]);
+  expect(actionsFor(bm({ summaryStatus: "reading" }))).toEqual([]);
+  expect(actionsFor(bm())).toEqual([]);
+});
+
+test("a page that could not be reached offers both Summarize later and Paste the text", () => {
+  const notReached = {
+    ...bm({ summaryStatus: "pending", summary: null, tags: [] }),
+    aiError: { code: "page_not_reached", message: "The site was down." },
+  };
+  expect(actionsFor(notReached)).toEqual(["later", "paste"]);
+  // Another AI failure keeps the one action.
+  const timeout = { ...notReached, aiError: { code: "timeout", message: "x" } };
+  expect(actionsFor(timeout)).toEqual(["later"]);
+  // Done or being read: no action, whatever the last error was.
+  expect(actionsFor({ ...notReached, summaryStatus: "reading" })).toEqual([]);
+  // The card shows one of them until it takes several (UI request issue 179).
+  expect(shownAction(notReached)).toBe("paste");
+  expect(shownAction(timeout)).toBe("later");
+  expect(shownAction(bm())).toBeNull();
 });
 
 test("upsert replaces in place and puts a new link first", () => {
@@ -249,6 +272,49 @@ test("Summarize later asks again without pasted text and an AI error shows as a 
   expect(document.body.textContent).toContain("Claude did not answer in time.");
   // Still no summary yet, so the action stays.
   expect(button(box, "Summarize later")).toBeDefined();
+});
+
+test("a link whose page could not be reached offers Paste the text, and pasted text makes its summary", async () => {
+  const { d } = deps({
+    saveLink: vi.fn(async (url: string) => ({
+      ...bm({
+        id: "n1",
+        url,
+        summaryStatus: "pending",
+        summary: null,
+        tags: [],
+      }),
+      aiError: {
+        code: "page_not_reached",
+        message:
+          "Mnemo could not reach the page: the site was down, slow or busy.",
+      },
+    })),
+    summarizeBookmark: vi.fn(async (id: string) =>
+      bm({ id, summary: "Summary made from the pasted text." }),
+    ),
+  });
+  const { box } = mount(d);
+  await flush();
+  (box.querySelector("input") as HTMLInputElement).value = "https://a.example";
+  box.querySelector("form")?.dispatchEvent(new Event("submit"));
+  await flush();
+  const card = box.querySelector("article") as HTMLElement;
+  // Link only, no summary, and "Paste the text" ("Summarize later" joins it with issue 179).
+  expect(card.textContent).toMatch(/no summary yet/i);
+  expect(card.textContent).not.toContain("Summary made");
+  expect(button(card, "Paste the text")).toBeDefined();
+  expect(document.body.textContent).toContain("Mnemo could not reach the page");
+  button(card, "Paste the text")?.click();
+  const dialog = document.querySelector("dialog") as HTMLElement;
+  (dialog.querySelector("textarea") as HTMLTextAreaElement).value =
+    "The page text.";
+  button(dialog, "Make summary")?.click();
+  expect(d.summarizeBookmark).toHaveBeenCalledWith("n1", "The page text.");
+  await flush();
+  expect(box.textContent).toContain("Summary made from the pasted text.");
+  expect(button(box, "Paste the text")).toBeUndefined();
+  expect(button(box, "Summarize later")).toBeUndefined();
 });
 
 test("a load failure says so, and leaving stops the event listener", async () => {
