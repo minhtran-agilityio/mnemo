@@ -292,7 +292,7 @@ test("a link whose page could not be reached offers Paste the text, and pasted t
       aiError: {
         code: "page_not_reached",
         message:
-          "Mnemo could not reach the page: the site was down, slow or busy.",
+          "Mnemo could not reach the site. No summary was saved. You can summarize it later or paste the text.",
       },
     })),
     summarizeBookmark: vi.fn(async (id: string) =>
@@ -309,7 +309,9 @@ test("a link whose page could not be reached offers Paste the text, and pasted t
   expect(card.textContent).toMatch(/no summary yet/i);
   expect(card.textContent).not.toContain("Summary made");
   expect(button(card, "Paste the text")).toBeDefined();
-  expect(document.body.textContent).toContain("Mnemo could not reach the page");
+  expect(document.body.textContent).toContain(
+    "Mnemo could not reach the site.",
+  );
   button(card, "Paste the text")?.click();
   const dialog = document.querySelector("dialog") as HTMLElement;
   (dialog.querySelector("textarea") as HTMLTextAreaElement).value =

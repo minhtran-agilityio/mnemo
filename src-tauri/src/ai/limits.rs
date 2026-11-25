@@ -31,3 +31,6 @@ pub const TITLE_BUFFER_BYTES: usize = 8 * 1024;
 pub const CHARSET_PRESCAN_BYTES: usize = 64 * 1024;
 /// How often a run waiting in the queue looks at its cancel token.
 pub const QUEUED_CANCEL_POLL: Duration = Duration::from_millis(50);
+/// The least time the HTML walk must have when the body is in. With less left, the body came in
+/// too late: the site was too slow (not reached), not the page too big (decision 34).
+pub const PARSE_BUDGET: Duration = Duration::from_secs(2);

@@ -120,11 +120,17 @@ pub struct BookmarkSummary {
 /// The token of one summary run. The claim and the save give it; every write of the run names it,
 /// and only the run that holds the bookmark's current claim can write.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClaimToken(String);
+pub struct ClaimToken(String, SummaryStatus);
 
 impl ClaimToken {
-    fn new() -> Self {
-        ClaimToken(uuid::Uuid::new_v4().to_string())
+    fn new(from: SummaryStatus) -> Self {
+        ClaimToken(uuid::Uuid::new_v4().to_string(), from)
+    }
+
+    /// The status the bookmark had before this claim (`pending` for a new save). A failed run
+    /// from pasted text ends with it, so the card keeps "Paste the text".
+    pub fn claimed_from(&self) -> SummaryStatus {
+        self.1
     }
 }
 
@@ -396,7 +402,7 @@ impl Storage {
         now: &str,
         url: &str,
     ) -> Result<(SavedBookmark, ClaimToken), StorageError> {
-        let token = ClaimToken::new();
+        let token = ClaimToken::new(SummaryStatus::Pending);
         let b = self.insert_link(now, url, Some(&token))?;
         Ok((b, token))
     }
@@ -561,8 +567,9 @@ impl Storage {
         now: &str,
         id: &str,
     ) -> Result<(SavedBookmark, ClaimToken), StorageError> {
-        let token = ClaimToken::new();
         let tx = self.immediate()?;
+        let from = saved_bookmark_on(&tx, id)?.summary_status;
+        let token = ClaimToken::new(from);
         if tx.execute(CLAIM_SQL, params![id, now, token.0])? == 1 {
             let b = saved_bookmark_on(&tx, id)?;
             tx.commit()?;
@@ -1297,6 +1304,34 @@ mod tests {
             s.get_saved_bookmark(&id).unwrap().summary_status,
             SummaryStatus::Pending
         );
+    }
+
+    #[test]
+    fn an_owner_edit_that_sends_the_same_link_in_another_form_keeps_the_verdict() {
+        let (mut s, _d) = open_temp();
+        let (b, claim) = s.save_link_to_read_at(T1, "https://example.org/").unwrap();
+        written(s.release_bookmark_at(T2, &b.base.id, &claim, SummaryStatus::NotReached));
+        for same in [
+            "HTTPS://Example.org",
+            "https://example.org/",
+            "https://EXAMPLE.org",
+        ] {
+            let _: Bookmark = s
+                .update_at(
+                    T3,
+                    &b.base.id,
+                    &BookmarkInput {
+                        title: Some("Mine".into()),
+                        ..bookmark(same)
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                s.get_saved_bookmark(&b.base.id).unwrap().summary_status,
+                SummaryStatus::NotReached,
+                "{same}"
+            );
+        }
     }
 
     #[test]

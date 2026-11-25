@@ -53,6 +53,8 @@ pub struct FetchLimits {
     pub min_text_chars: usize,
     /// Most attributes on one tag. A page with a bigger tag is too complex to read.
     pub max_tag_attributes: usize,
+    /// The least time left for the HTML walk once the body is in (else: not reached).
+    pub parse_budget: Duration,
     /// Tests only: lets the reader reach a loopback test server. Every other address is still
     /// checked. A release build has no such switch.
     #[cfg(test)]
@@ -70,6 +72,7 @@ pub const DEFAULT_LIMITS: FetchLimits = FetchLimits {
     max_text_chars: limits::MAX_TEXT_CHARS,
     min_text_chars: limits::MIN_TEXT_CHARS,
     max_tag_attributes: limits::MAX_TAG_ATTRIBUTES,
+    parse_budget: limits::PARSE_BUDGET,
     #[cfg(test)]
     allow_loopback: false,
     #[cfg(test)]
@@ -384,7 +387,12 @@ fn parse_time(deadline: Instant) -> Result<Duration, FetchError> {
 /// A request that got no answer: refused, TLS, no route, reset, timeout or a broken answer. All
 /// of them mean the site was not reached. The error is logged without the link.
 fn request_failed(e: reqwest::Error) -> FetchError {
+    let builder = e.is_builder();
     log::info!("the page request failed: {}", e.without_url());
+    if builder {
+        // A link reqwest cannot request at all: a new read can never pass (decision 35).
+        return FetchError::NotWebLink;
+    }
     FetchError::NotReached("request")
 }
 
@@ -443,6 +451,12 @@ fn text_within<R: Read + Send + 'static>(
         FetchError::NotReached("body timeout"),
         move || read_until(body, cap, deadline),
     )?;
+    // The body came in too late to make its text: the site was slow, not the page too big
+    // (decision 34).
+    let left = deadline.saturating_duration_since(Instant::now());
+    if left < limits.parse_budget {
+        return Err(FetchError::NotReached("body timeout"));
+    }
     let limits = limits.clone();
     on_helper(deadline, FetchError::TooSlow, move || {
         page_text_until(&bytes, &content_type, &limits, deadline)
@@ -1645,6 +1659,45 @@ mod tests {
         html.extend_from_slice(&encoding_rs::WINDOWS_1251.encode(&cyr).0);
         let got = page_text(&html, "text/html", &DEFAULT_LIMITS).unwrap();
         assert!(got.text.starts_with("Владение"));
+    }
+
+    #[test]
+    fn a_body_that_comes_in_too_late_to_parse_was_not_reached() {
+        // The bytes are all in, but less than the parse budget is left: the site was slow.
+        let limits = FetchLimits {
+            parse_budget: Duration::from_secs(2),
+            ..DEFAULT_LIMITS
+        };
+        let deadline = Instant::now() + Duration::from_millis(500);
+        let body = io::Cursor::new(long_text().into_bytes());
+        assert_eq!(
+            text_within(body, "text/plain".into(), &limits, deadline),
+            Err(FetchError::NotReached("body timeout"))
+        );
+        // With the budget left, the same body is read.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let body = io::Cursor::new(long_text().into_bytes());
+        assert!(text_within(body, "text/plain".into(), &limits, deadline).is_ok());
+        // A parse that started with its budget and ran out is too slow (the page is too big).
+        let html = two_mb("<div/>");
+        assert_eq!(
+            page_text_until(
+                html.as_bytes(),
+                "text/html",
+                &DEFAULT_LIMITS,
+                Instant::now() + Duration::from_millis(20)
+            ),
+            Err(FetchError::TooSlow)
+        );
+    }
+
+    #[test]
+    fn a_link_reqwest_cannot_request_is_unreadable() {
+        let e = Client::new().get("not a link").build().unwrap_err();
+        assert!(e.is_builder());
+        let got = request_failed(e);
+        assert!(!got.is_not_reached(), "{got:?}");
+        assert_eq!(got, FetchError::NotWebLink);
     }
 
     #[test]

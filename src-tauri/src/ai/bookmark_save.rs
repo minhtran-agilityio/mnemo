@@ -279,7 +279,13 @@ fn summarize_from(
     source: Source,
 ) -> Result<SaveResult, SaveError> {
     let id = b.base.id.clone();
-    match summarize_claimed(ctx, b, claim, source) {
+    // A failed run from pasted text ends with the status the card had, so "Paste the text"
+    // stays offered; a failed read ends as "no summary yet".
+    let back = match source {
+        Source::Pasted(_) => claim.claimed_from(),
+        Source::Page => SummaryStatus::Pending,
+    };
+    match summarize_claimed(ctx, b, claim, source, back) {
         Ok(r) => Ok(r),
         Err(Stop::Lost(Some(b))) => {
             log::info!("bookmark {id}: changed by the owner during the summary, the run stopped");
@@ -304,7 +310,7 @@ fn summarize_from(
             })
         }
         Err(Stop::Failed(e)) => {
-            match ctx.release(&id, claim, SummaryStatus::Pending) {
+            match ctx.release(&id, claim, back) {
                 Ok(_) | Err(Stop::Lost(_)) => {}
                 // Storage opens the next time with this row back to pending.
                 Err(Stop::Failed(again)) => {
@@ -321,6 +327,7 @@ fn summarize_claimed(
     mut b: SavedBookmark,
     claim: &ClaimToken,
     source: Source,
+    back: SummaryStatus,
 ) -> Result<SaveResult, Stop> {
     let id = b.base.id.clone();
     if !(ctx.ai_on)() {
@@ -363,7 +370,9 @@ fn summarize_claimed(
             log::info!("bookmark {id}: no summary ({e})");
             let off = matches!(e, AiError::UsageLimit | AiError::Unavailable)
                 || (e == AiError::Cancelled && !(ctx.ai_on)());
-            let status = if off {
+            let status = if back != SummaryStatus::Pending {
+                back
+            } else if off {
                 SummaryStatus::AiOff
             } else {
                 SummaryStatus::Pending
@@ -684,6 +693,52 @@ mod tests {
             ai_on: &|| true,
             emit: &|_: &SavedBookmark| {},
         }
+    }
+
+    #[test]
+    fn a_failed_run_from_pasted_text_keeps_the_status_the_card_had() {
+        for (read, before) in [
+            (FetchError::TooLittleText, Unreadable),
+            (FetchError::NotReached("dns"), NotReached),
+        ] {
+            for fail in [
+                FakeResult::Timeout,
+                FakeResult::SchemaMismatch,
+                FakeResult::UsageLimit,
+            ] {
+                let w = World::new(FakeReader::failing(read.clone()), fail);
+                let saved = w.run(|c| save_link(c, "https://example.org/")).unwrap();
+                assert_eq!(saved.bookmark.summary_status, before);
+                let got = w
+                    .run(|c| summarize(c, &saved.bookmark.base.id, Some(PAGE)))
+                    .unwrap();
+                // "Paste the text" is still offered, so the owner can try again.
+                assert_eq!(got.bookmark.summary_status, before, "{read:?}");
+                assert!(got.ai_error.is_some());
+                assert_eq!(w.stored(&saved.bookmark.base.id).summary_status, before);
+            }
+        }
+        // A run that read the page again keeps the usual rule.
+        let w = World::new(FakeReader::page(), FakeResult::Timeout);
+        let got = w.run(|c| save_link(c, "https://example.org/")).unwrap();
+        assert_eq!(got.bookmark.summary_status, Pending);
+    }
+
+    #[test]
+    fn a_storage_error_in_a_run_from_pasted_text_keeps_the_status_the_card_had() {
+        let (store, _dir) = FailingStore::new(|b| b.summary_status == Done);
+        let reader = FakeReader::failing(FetchError::TooLittleText);
+        let runner = FakeRunner::new(FakeResult::Valid(GOOD.into()));
+        let ctx = context(&store, &reader, &runner);
+        // The first save is unreadable; the store fails when the pasted summary is read back.
+        let saved = save_link(&ctx, "https://example.org/").unwrap();
+        assert_eq!(saved.bookmark.summary_status, Unreadable);
+        assert!(matches!(
+            summarize(&ctx, &saved.bookmark.base.id, Some(PAGE)),
+            Err(SaveError::Storage(_))
+        ));
+        // The summary was committed, so the row is done; nothing turns it back.
+        assert_eq!(store.only_bookmark().summary_status, Done);
     }
 
     #[test]
