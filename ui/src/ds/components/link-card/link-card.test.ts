@@ -198,9 +198,7 @@ test("pending is saved with reading not started, and has no summary", () => {
   expect(card.dataset.status).toBe("pending");
   expect(card.querySelector(".sum")).toBeNull();
   expect(card.querySelector(".trust")).toBeNull();
-  expect(card.querySelector(".nosum")?.textContent).toBe(
-    "Saved. Mnemo has not read the page yet.",
-  );
+  expect(card.querySelector(".nosum")?.textContent).toBe("No summary yet.");
   expect(card.querySelector(".nosum svg")).not.toBeNull();
 });
 
@@ -365,6 +363,26 @@ test("AI off keeps the link with the ticket's words, and the list row says the s
   expect(
     createLinkRow(document, off).querySelector(".row-sub")?.textContent,
   ).toBe("No summary yet: AI is off.");
+});
+
+test("pending and AI off both read as no summary yet, and the action is found by its name", () => {
+  const pending: LinkItem = { ...pasted, ...noSum, status: "pending" };
+  expect(noSummaryText(pending)).toBe("No summary yet.");
+  expect(
+    createLinkRow(document, pending).querySelector(".row-sub")?.textContent,
+  ).toBe("No summary yet.");
+  const action = createButton(document, { label: "Summarize later" });
+  const off = createLinkCard(
+    document,
+    { ...pasted, ...noSum, status: "ai-off" },
+    { action },
+  );
+  expect(off.textContent).toMatch(/no summary yet/i);
+  const named = [...off.querySelectorAll("button")].find(
+    (b) =>
+      (b.getAttribute("aria-label") ?? b.textContent) === "Summarize later",
+  );
+  expect(named).toBe(action);
 });
 
 test("list and compact rows work without an app: site and saved date", () => {

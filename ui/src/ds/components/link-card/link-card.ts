@@ -20,8 +20,9 @@ import { buildTrustLabel } from "../trust-label/trust-label";
 import "./link-card.css";
 
 /**
- * Where a saved link is. `pending`: saved, reading not started. `reading`: Mnemo is reading the
- * page. `done`: read, with a summary. `unreadable`: link only. `ai-off`: saved, AI is off.
+ * Where a saved link is. `pending`: saved, no summary yet (reading not started, or an AI run
+ * failed). `reading`: Mnemo is reading the page. `done`: read, with a summary. `unreadable`: link
+ * only. `ai-off`: saved, AI is off.
  */
 export type LinkStatus =
   | "pending"
@@ -83,7 +84,7 @@ function textEl<K extends keyof HTMLElementTagNameMap>(
 }
 
 const NO_SUMMARY = {
-  pending: "Saved. Mnemo has not read the page yet.",
+  pending: "No summary yet.",
   reading: "Reading the page",
   done: "No summary.",
   unreadable: "Link only. Mnemo could not read this page.",

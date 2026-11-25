@@ -37,10 +37,15 @@ test("Records shows the link card states, a guess label and the missing source m
   const text = mount(renderRecords).textContent ?? "";
   expect(text).toContain("Link only. Mnemo could not read this page.");
   expect(text).toContain("No summary yet: AI is off.");
-  expect(text).toContain("Saved. Mnemo has not read the page yet.");
+  const panel = mount(renderRecords);
+  const pending = panel.querySelector('.lcard[data-status="pending"] .nosum');
+  expect(pending?.textContent).toBe("No summary yet.");
   expect(text).toContain("It may matter for the Mnemo command allow-list.");
-  expect(text).toContain("Summarize later");
-  expect(text).toContain("Paste the text");
+  const names = [...panel.querySelectorAll(".lcard-action button")].map(
+    (b) => b.textContent,
+  );
+  expect(names).toContain("Summarize later");
+  expect(names).toContain("Paste the text");
   expect(text).toContain("Guess");
   expect(mount(renderRecords).querySelector(".cite.missing")).not.toBeNull();
 });
