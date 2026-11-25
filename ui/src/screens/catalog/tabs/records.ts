@@ -323,6 +323,10 @@ function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
       "overflow: long title, short host t.me kept whole",
     ],
     [
+      { ...overflow, title: "Go" },
+      "short title, long host: the host takes the room first, the title box stays small",
+    ],
+    [
       { ...overflow, ...unread, status: "reading" },
       "reading, long title and host: the spinner stays on the title's line",
     ],

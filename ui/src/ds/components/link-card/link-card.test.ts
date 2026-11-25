@@ -572,11 +572,12 @@ test("in the Compact view a long title gives way only down to its readable minim
     flex: "1 1 0",
     "min-width": "min(var(--size-link-site-min), 100%)",
   });
-  // The site starts at 8ch, capped by its own width (a short host's box is its text), grows up to
-  // its text and is cut below that, with no 50% cap that left the title a few pixels (issue 175).
+  // The site starts at 8ch, capped by its own width (a short host's box is its text), and has first
+  // claim on the room up to its text (flex-grow 1000 against the title's 1), so a short title keeps
+  // no empty box next to a cut host; no 50% cap that left the title a few pixels (issue 175).
   const dom = css(".compact-row .dom");
   expect(dom).toMatchObject({
-    flex: "1 1 var(--size-link-site-min)",
+    flex: "1000 1 var(--size-link-site-min)",
     "min-width": "0",
     "max-width": "max-content",
   });
@@ -596,7 +597,7 @@ test("in the Compact view a long title gives way only down to its readable minim
   ).toMatchObject({ flex: "none", "white-space": "nowrap" });
 });
 
-test("a compact row with a long Vietnamese title and host keeps both whole in the text and tooltips", () => {
+test("a compact row with a long Vietnamese title and host keeps both whole in its text and tooltips (text only; the layout is checked in ds-09)", () => {
   const title = `${"Hướng dẫn đầy đủ về quyền và khả năng — Ở ĐÂU, KHI NÀO? ".repeat(4)}`;
   const site = `${"rất-nhiều-tên-miền-con.".repeat(4)}tài-liệu.v2.tauri.app`;
   const row = createCompactRow(document, { ...pasted, title, site });

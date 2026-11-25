@@ -270,10 +270,12 @@
 
 /* The Compact row: the title, the reading spinner, the site and the date, on one line while they
    fit. Each part starts at its smallest width (the title and the site at --size-link-site-min, 8ch of
-   their own font; the spinner and the date whole), and a line breaks only when those do not fit, so a
-   narrow list (under about 250px, as in the narrow catalog columns) puts the date, or on a reading
-   row the site and the date, on a second line under the title. No row of a list 280px or wider wraps (checked in Chrome by
-   tests/acceptance/ds-09-limits.test.mjs; Unverified in WebKit and WebKitGTK). */
+   their own font; the spinner and the date whole), and a line breaks only when those do not fit.
+   Measured in Chrome: the date goes to a second line, under the title, in a list of 220px or
+   narrower (201px with the host x.com, 194px with t.me) and, on a reading row, of 244px or narrower.
+   The site goes there too only on a reading row in a list of 166px or narrower. No row of a list
+   280px or wider wraps (tests/acceptance/ds-09-limits.test.mjs; Unverified in WebKit and
+   WebKitGTK). */
 .compact-row {
   display: flex;
   flex-wrap: wrap;
@@ -346,10 +348,10 @@
 }
 
 /* The title keeps a readable minimum: --size-link-site-min (8ch of its own font), or the whole
-   line when that is narrower. Above it, the title and the site grow alike, and the title takes all
-   the room a short site leaves. So a long title gives way (cut with its ellipsis, full title in its
-   tooltip) only down to that minimum, and the site is cut before it. A title shorter than the
-   minimum keeps a box of the minimum. */
+   line when that is narrower. It takes the room the site leaves once the site is whole, so a long
+   title gives way (cut with its ellipsis, full title in its tooltip) down to that minimum, and the
+   site is cut only after the title is at it. A title shorter than the minimum keeps a box of the
+   minimum. */
 .compact-row .row-title {
   flex: 1 1 0;
   min-width: min(var(--size-link-site-min), 100%);
@@ -358,11 +360,14 @@
 
 /* The site: as in the List row, its flex basis is --size-link-site-min, capped by its own width
    (max-width: max-content clamps the basis), so a short host ("t.me") gets a box as wide as its
-   text, and a long one keeps 8ch on its line. It grows up to its own width and shrinks below the
-   basis only for the title's minimum; a cut host shows its ellipsis, the full URL in its tooltip and
-   the full host on keyboard focus (wrapped, above). */
+   text, and a long one keeps 8ch on its line (the line breaks on these smallest widths). The site
+   has first claim on the free room, up to its own width: its flex-grow (1000) outweighs the title's
+   (1), so the title gets under 0.1% of the room while the site grows and is held at its minimum
+   whenever the site is cut. A short title therefore never keeps empty room next to a cut long host.
+   A cut host shows its ellipsis, the full URL in its tooltip and the full host on keyboard focus
+   (wrapped, above). */
 .compact-row .dom {
-  flex: 1 1 var(--size-link-site-min);
+  flex: 1000 1 var(--size-link-site-min);
   min-width: 0;
   max-width: max-content;
   padding-block: var(--border-2);
