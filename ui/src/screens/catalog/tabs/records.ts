@@ -307,6 +307,10 @@ function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
     [shortX, "short host x.com"],
     [noSite, "partial: no site, the host from a URL with https://"],
     [noScheme, "partial: no site, the host from a URL with no scheme"],
+    [
+      { ...pasted, site: undefined, url: "file:///home/me/notes/tauri.pdf" },
+      "partial: no host (a file link), the date at the row's end",
+    ],
     [{ ...pasted, ...unread, status: "pending" }, "pending"],
     [
       { ...pasted, ...unread, status: "reading" },
@@ -324,7 +328,7 @@ function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
     ],
     [
       { ...overflow, title: "Go" },
-      "short title, long host: the host takes the room first, the title box stays small",
+      "short title, long host: the title box stops at 8ch, the host takes the rest",
     ],
     [
       { ...overflow, ...unread, status: "reading" },

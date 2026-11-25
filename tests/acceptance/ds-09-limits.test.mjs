@@ -661,9 +661,11 @@ test('AC3: control, the List row audit reports a site 1px under --size-link-site
 // - a cut title keeps at least --size-link-site-min (8ch of the title's own font, or the whole line when that is
 //   narrower), so the site is cut before the title drops below it;
 // - a cut site keeps at least --size-link-site-min of its own font (or the whole line), so its ellipsis shows;
-// - the site has first claim on the room: while it is cut, the title's box is no wider than its text or its minimum,
-//   whichever is wider (+1px), so a short title never keeps empty room next to a cut host (on a shared line; a
-//   title alone on its line, with the site wrapped under it, takes the line);
+// - on a line the title shares with a cut site: the title's box is no wider than its text or its minimum, whichever
+//   is wider (+1px), so a short title never keeps empty room next to a cut host; and a cut title gets at least the
+//   room the site got above its 8ch start (title >= site - 8ch of the site's font - 1px), so a long title is never
+//   starved by a long host (a title alone on its line, with the site wrapped under it, takes the line);
+// - on a one-line row the date ends at the row's content edge;
 // - a site's box is never wider than its text (+1px): a short host ("t.me") has no gap after it (a focused row,
 //   whose host wraps, is left out of this one);
 // - the date is one piece, never cut; the spinner sits on the title's line, right after it;
@@ -671,7 +673,7 @@ test('AC3: control, the List row audit reports a site 1px under --size-link-site
 //   row wraps at a list of 280px or wider.
 // The counts make sure each check ran.
 const COMPACT_WIDTHS = [158, 160, 161, 170, 180, 190, 200, 210, 220, 240, 260, 280, 320, 360, 400, 480, 560, 640, 720, 800];
-const COMPACT_SEEN = ['rows', 'cutTitles', 'cutHosts', 'hosts', 'shortHosts', 'dates', 'spinners', 'wrapped', 'oneLine', 'parts', 'titlesBesideCutHost', 'shortTitles'];
+const COMPACT_SEEN = ['rows', 'cutTitles', 'cutHosts', 'hosts', 'shortHosts', 'dates', 'spinners', 'wrapped', 'oneLine', 'parts', 'titlesBesideCutHost', 'shortTitles', 'longTitlesBesideCutHost', 'datesAtEnd', 'noSite'];
 const COMPACT_AUDIT = `(() => {
   const bad = [];
   const x = (n) => Math.round(n * 100) / 100;
@@ -746,6 +748,10 @@ const COMPACT_AUDIT = `(() => {
           const sr = site.getBoundingClientRect();
           const shareLine = sr.top < tBox.bottom - 0.5 && sr.bottom > tBox.top + 0.5;
           if (shareLine) seen.titlesBesideCutHost++;
+          if (shareLine && tText > tBox.width + 0.05) {
+            seen.longTitlesBesideCutHost++;
+            if (tBox.width < sBox - sFloor - 1) bad.push(at + ': title cut to ' + x(tBox.width) + 'px, less than the site got above its 8ch start (' + x(sBox) + ' - ' + x(sFloor) + 'px)');
+          }
           if (shareLine && tBox.width > Math.max(tText, tFloor) + 1) bad.push(at + ': title box ' + x(tBox.width) + 'px is wider than its text ' + x(tText) + 'px and its minimum ' + x(tFloor) + 'px while the site is cut to ' + x(sBox) + 'px');
         }
       }
@@ -761,11 +767,17 @@ const COMPACT_AUDIT = `(() => {
         if (widest(date) > dr.width + 0.05) bad.push(at + ': the date is cut');
         wrapped = dr.top >= tBox.bottom - 0.5;
       }
+      if (date && !wrapped) {
+        seen.datesAtEnd++;
+        const dr = date.getBoundingClientRect();
+        if (Math.abs(dr.right - right) > 0.5) bad.push(at + ': the date ends at x' + x(dr.right) + ', not the row end x' + x(right));
+      }
       if (wrapped) {
         seen.wrapped++;
         if (typeof width === 'number' && width >= 280) bad.push(at + ': the row wraps at a list of ' + width + 'px');
       } else seen.oneLine++;
       // The spinner: on the title's line, right after it (the part order check above keeps it off the title).
+      if (!site) seen.noSite++;
       const spin = row.querySelector(':scope > .compact-reading');
       if (spin) {
         seen.spinners++;
@@ -814,6 +826,9 @@ for (const scheme of ['light', 'dark']) {
     assert.ok(seen.parts > 0, 'no part measured, so the spill check never ran');
     assert.ok(seen.titlesBesideCutHost > 0, 'no title measured next to a cut site, so the first-claim check never ran');
     assert.ok(seen.shortTitles > 0, 'no title shorter than its minimum seen next to a cut site');
+    assert.ok(seen.longTitlesBesideCutHost > 0, 'no cut title seen next to a cut site, so the long-title check never ran');
+    assert.ok(seen.datesAtEnd > 0, 'no one-line row with a date seen, so the date-at-end check never ran');
+    assert.ok(seen.noSite > 0, 'no row without a site seen');
   });
 }
 
@@ -822,10 +837,13 @@ for (const scheme of ['light', 'dark']) {
 //   held 1px under it, a cut title is;
 // - the layout before issue 175 (the title from zero, the site up to half the row, one line): the 161px column's
 //   title of a few pixels is reported;
-// - the title and the site sharing the room alike (flex-grow 1 each, the first version of issue 175): a short title's
-//   empty box next to a cut long host is reported;
+// - the title with no max-content cap (the equal split of the first version of issue 175): the short title's empty
+//   box next to a cut long host is reported;
+// - the site with first claim on the room (flex-grow 1000, the second version): the long title starved next to a
+//   long host is reported;
+// - the site with no auto start margin: a one-line row whose date stops short of the row end is reported;
 // - a site that never shrinks: it is reported spilling out of the row.
-test('AC3: control, the Compact row audit reports a title 1px under its minimum, none at it, the old layout, an equal split and a spilling site', UI, () =>
+test('AC3: control, the Compact row audit reports a title 1px under its minimum, none at it, the old layout, an uncapped title, a host-first split, a date short of the row end and a spilling site', UI, () =>
   withApp({}, async (app) => {
     await app.goto('/#/ui-catalog', CATALOG_READY);
     assert.ok(await app.click('Records'), 'no Records tab');
@@ -849,9 +867,15 @@ test('AC3: control, the Compact row audit reports a title 1px under its minimum,
     await style('.compact-row { flex-wrap: nowrap !important; } .compact-row .row-title { min-width: 0 !important; } .compact-row .dom { flex: 0 1 auto !important; max-width: 50% !important; }');
     const old = await app.eval(COMPACT_AUDIT);
     assert.ok(under(old).some((b) => b.includes('@ list 161')), 'the old layout, with its title of a few pixels at 161px, was not reported');
-    await style('.compact-row .dom { flex-grow: 1 !important; }');
+    await style('.compact-row .row-title { max-width: none !important; }');
     const equal = await app.eval(COMPACT_AUDIT);
-    assert.ok(equal.bad.some((b) => b.startsWith('"Go"') && b.includes('while the site is cut')), 'a short title sharing the room alike with a cut host was not reported');
+    assert.ok(equal.bad.some((b) => b.startsWith('"Go"') && b.includes('while the site is cut')), 'a short title holding empty room next to a cut host was not reported');
+    await style('.compact-row .dom { flex-grow: 1000 !important; }');
+    const hostFirst = await app.eval(COMPACT_AUDIT);
+    assert.ok(hostFirst.bad.some((b) => b.startsWith('"Hướng') && b.includes('less than the site got')), 'a long title starved by a long host was not reported');
+    await style('.compact-row .dom { margin-inline-start: 0 !important; }');
+    const noEnd = await app.eval(COMPACT_AUDIT);
+    assert.ok(noEnd.bad.some((b) => b.includes('not the row end')), 'a date short of the row end was not reported');
     await style('.compact-row { flex-wrap: nowrap !important; } .compact-row .dom { min-width: max-content !important; }');
     const spill = await app.eval(COMPACT_AUDIT);
     assert.ok(spill.bad.some((b) => b.includes('spills out of the row')), 'a site that never shrinks was not reported spilling');
