@@ -8,7 +8,8 @@
 //   IPv4 address inside IPv6). A host name is resolved once, every address is checked, and the
 //   connection is pinned to those checked addresses, so a second DNS answer cannot point
 //   somewhere else. No proxy and no cookies;
-// - stops after 15 seconds in total, reads at most 2 MB of body (and uses what it read);
+// - stops after 15 seconds in total (DNS, every hop, the body read and the HTML parse), reads
+//   at most 2 MB of body (and uses what it read);
 // - reads only text/html and text/plain;
 // - calls a page with under 200 characters of text unreadable, and gives Claude at most
 //   20 000 characters.
@@ -160,7 +161,11 @@ impl PageReader for HttpReader {
 
 enum Hop {
     Redirect(Url),
-    Page { body: Vec<u8>, content_type: String },
+    /// The answer, its body not read yet: `text_within` reads it within the deadline.
+    Page {
+        body: reqwest::blocking::Response,
+        content_type: String,
+    },
 }
 
 impl HttpReader {
@@ -212,8 +217,10 @@ impl HttpReader {
         if text_kind(&content_type).is_none() {
             return Err(FetchError::NotText);
         }
-        let body = read_capped(response, self.limits.max_body_bytes).map_err(read_failed)?;
-        Ok(Hop::Page { body, content_type })
+        Ok(Hop::Page {
+            body: response,
+            content_type,
+        })
     }
 
     /// The addresses this link may reach, or why it is refused. A literal IP is checked as it
@@ -327,11 +334,13 @@ fn read_failed(e: io::Error) -> FetchError {
     }
 }
 
-/// `page_text` on a helper thread, given only the time left. A page built to be slow to parse
-/// (very deep nesting) then ends as a timeout instead of holding the save; the helper stops on
-/// its own when the parse ends (the body is at most `max_body_bytes`).
-fn text_within(
-    body: Vec<u8>,
+/// Reads the body (at most `max_body_bytes`) and makes its text on a helper thread, given only
+/// the time left. The reqwest blocking client times each read on its own, so a server that
+/// sends one byte at a time could outlast the deadline: the read loop stops at the deadline,
+/// and the caller stops waiting then too. A page built to be slow to parse (very deep nesting)
+/// also ends as a timeout. Either way the bookmark keeps the link only.
+fn text_within<R: Read + Send + 'static>(
+    body: R,
     content_type: String,
     limits: &FetchLimits,
     deadline: Instant,
@@ -340,7 +349,9 @@ fn text_within(
     let limits = limits.clone();
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let _ = tx.send(page_text(&body, &content_type, &limits));
+        let result = read_until(body, limits.max_body_bytes, deadline)
+            .and_then(|bytes| page_text(&bytes, &content_type, &limits));
+        let _ = tx.send(result);
     });
     match rx.recv_timeout(left) {
         Ok(result) => result,
@@ -349,11 +360,20 @@ fn text_within(
     }
 }
 
-/// Reads at most `cap` bytes; the rest of the body is left unread.
-pub fn read_capped<R: Read>(reader: R, cap: u64) -> io::Result<Vec<u8>> {
+/// Reads at most `cap` bytes in chunks and gives up once `deadline` has passed.
+fn read_until<R: Read>(body: R, cap: u64, deadline: Instant) -> Result<Vec<u8>, FetchError> {
+    let mut reader = body.take(cap);
     let mut out = Vec::new();
-    reader.take(cap).read_to_end(&mut out)?;
-    Ok(out)
+    let mut chunk = [0u8; 16 * 1024];
+    loop {
+        remaining(deadline)?;
+        match reader.read(&mut chunk) {
+            Ok(0) => return Ok(out),
+            Ok(n) => out.extend_from_slice(&chunk[..n]),
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(read_failed(e)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -528,6 +548,9 @@ fn is_public_v6(ip: Ipv6Addr) -> bool {
     if s[0] == 0x64 && s[1] == 0xff9b && s[2..6] == [0; 4] {
         return is_public_v4(v4_at(s[6], s[7])); // 64:ff9b::/96 NAT64
     }
+    if s[0] == 0 && s[1] == 0 && s[2] == 0 && s[3] == 0 && s[4] == 0xffff && s[5] == 0 {
+        return is_public_v4(v4_at(s[6], s[7])); // ::ffff:0:a.b.c.d IPv4-translated
+    }
     if s[0] == 0x2002 {
         return is_public_v4(v4_at(s[1], s[2])); // 2002::/16 6to4
     }
@@ -537,7 +560,10 @@ fn is_public_v6(ip: Ipv6Addr) -> bool {
         || (s[0] & 0xff00) == 0xff00 // ff00::/8 multicast
         || (s[0] == 0x2001 && s[1] == 0x0db8) // 2001:db8::/32 documentation
         || (s[0] == 0x2001 && s[1] == 0) // 2001::/32 Teredo
-        || (s[0] == 0x0100 && s[1..4] == [0; 3])) // 100::/64 discard
+        || (s[0] == 0x2001 && (s[1] & 0xfff0) == 0x0020) // 2001:20::/28 ORCHIDv2
+        || (s[0] == 0x0064 && s[1] == 0xff9b && s[2] == 0x0001) // 64:ff9b:1::/48 local NAT64
+        || (s[0] & 0xfff0) == 0x3ff0 // 3fff::/20 documentation
+        || (s[0] & 0xe000) != 0x2000) // outside 2000::/3 (global unicast), e.g. 100::/64
 }
 
 #[cfg(test)]
@@ -783,7 +809,8 @@ mod tests {
     #[test]
     fn caps_the_body_at_2_mb() {
         let big = vec![b'a'; 3 * 1024 * 1024];
-        let read = read_capped(&big[..], DEFAULT_LIMITS.max_body_bytes).unwrap();
+        let far = Instant::now() + Duration::from_secs(60);
+        let read = read_until(&big[..], DEFAULT_LIMITS.max_body_bytes, far).unwrap();
         assert_eq!(read.len(), 2 * 1024 * 1024);
         // Through the reader: a 3 MB page is read up to the cap and still gives its text.
         let port = serve(1, |_| {
@@ -836,6 +863,45 @@ mod tests {
             Err(FetchError::Timeout)
         );
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn gives_up_at_the_timeout_when_the_body_drips_in() {
+        // The headers come at once, then one byte every 100 ms: each read is quick, so only
+        // the total deadline can stop it.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 100000\r\n\r\n",
+                );
+                for _ in 0..100 {
+                    if stream.write_all(b"a").is_err() {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
+        });
+        let reader = HttpReader::new(FetchLimits {
+            timeout: Duration::from_millis(800),
+            ..local_limits()
+        });
+        let started = Instant::now();
+        assert_eq!(
+            reader.read(&format!("http://127.0.0.1:{port}/")),
+            Err(FetchError::Timeout)
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        // The read loop itself stops at the deadline.
+        let past = Instant::now();
+        assert_eq!(
+            read_until(io::repeat(b'a'), u64::MAX, past),
+            Err(FetchError::Timeout)
+        );
     }
 
     #[test]
@@ -894,7 +960,7 @@ mod tests {
         let started = Instant::now();
         assert_eq!(
             text_within(
-                html.into_bytes(),
+                io::Cursor::new(html.into_bytes()),
                 "text/html".into(),
                 &DEFAULT_LIMITS,
                 deadline
