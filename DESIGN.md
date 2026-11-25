@@ -98,6 +98,7 @@ The UI Catalog tabs need fixed lengths that no token covered (prototype v3 uses 
 | `--size-textarea-min` | 88px |
 | `--size-tags-max` | 360px |
 | `--size-tag-input-min` | 80px |
+| `--size-link-sub-min` | 6rem |
 | `--size-label-picker-max` | 280px |
 | `--size-menu-min` | 220px |
 | `--size-menu-max` | 320px |
@@ -153,6 +154,8 @@ The UI Catalog tabs need fixed lengths that no token covered (prototype v3 uses 
 | `--size-token-bar-max` | 200px |
 | `--tracking-caption` | 0.02em |
 | `--tracking-caps` | 0.06em |
+
+#171 added `--size-link-sub-min` (6rem) for the List row's body and summary line; value **Unverified** in a real window.
 
 Rules:
 

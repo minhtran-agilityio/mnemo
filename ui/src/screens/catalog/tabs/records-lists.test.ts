@@ -26,9 +26,12 @@ test("Records shows the Bookmarks view switch and changes the view", () => {
     "Compact",
   ]);
   expect(panel.querySelector('[aria-label="Links, list view"]')).toBeNull();
+  // The catalog's row states also hold compact rows, so look only in the switch's output.
+  const switched = '[aria-label="Links, compact view"] .compact-row';
+  expect(panel.querySelector(switched)).toBeNull();
   radios[2].click();
   expect(radios[2].getAttribute("aria-checked")).toBe("true");
-  expect(panel.querySelectorAll(".compact-row").length).toBeGreaterThan(0);
+  expect(panel.querySelectorAll(switched).length).toBeGreaterThan(0);
   radios[0].click();
   expect(panel.querySelector('[aria-label="Links, list view"]')).not.toBeNull();
 });

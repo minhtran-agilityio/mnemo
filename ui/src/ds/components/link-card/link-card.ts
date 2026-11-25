@@ -69,6 +69,12 @@ export interface LinkCardOptions {
   readonly action?: Node;
 }
 
+/** Options of a List or Compact row. */
+export interface LinkRowOptions {
+  /** Draws a state that cannot be live in a still view (the UI Catalog). */
+  readonly forceState?: "hover" | "focus" | "active";
+}
+
 /** Past this many tags the tag list shows one "+N" item. */
 const MAX_TAGS = 6;
 
@@ -221,30 +227,85 @@ export function createLinkCard(
   return card;
 }
 
-/** The List view: one row per link, with the summary (or why there is none) on a second line. */
-export function createLinkRow(doc: Document, item: LinkItem): HTMLLIElement {
+/**
+ * The List view: one row per link, with the summary (or why there is none) on a second line. A
+ * summary shows only on a `done` link and keeps its Written by AI (or Guess) label after the text:
+ * the summary is cut with its ellipsis, and the label stays whole (under the summary when the line
+ * is tight). Tags and the reason are left out of the two-line row (each needs its own label and
+ * line); the Cards view shows them (issue 171).
+ */
+export function createLinkRow(
+  doc: Document,
+  item: LinkItem,
+  options: LinkRowOptions = {},
+): HTMLLIElement {
+  const summary = shownSummary(item);
   const row = createListRow(doc, {
     title: item.title,
-    sub: shownSummary(item) ?? noSummaryText(item),
+    sub: summary ?? noSummaryText(item),
     icon: Link,
   });
   row.classList.add("link-row");
+  if (options.forceState) row.classList.add(`is-${options.forceState}`);
+  row.dataset.status = linkStatus(item);
+  const sub = row.querySelector(".row-sub");
+  if (summary && sub) {
+    const line = doc.createElement("span");
+    line.className = "link-sub";
+    sub.replaceWith(line);
+    line.append(sub, buildTrustLabel(item.summaryKind ?? "ai"));
+  } else if (linkStatus(item) === "reading" && sub) {
+    // Reading is an AI task in progress: the spinner and the words, as a status region.
+    sub.replaceChildren(reading(doc));
+  }
+  // The body and the meta line share .link-main, after the icon: the meta line sits next to the
+  // body when it fits whole, else on its own line under the title.
+  const body = row.querySelector(":scope > .row-body");
+  const main = doc.createElement("span");
+  main.className = "link-main";
+  if (body) body.replaceWith(main);
+  else row.append(main);
+  if (body) main.append(body);
   const meta = metaLine(doc, item);
-  if (meta) row.append(meta);
+  if (meta) main.append(meta);
   return row;
 }
 
-/** The Compact view: the title, the site and the age on one line. */
-export function createCompactRow(doc: Document, item: LinkItem): HTMLLIElement {
+/**
+ * The Compact view: the title, the site and the saved date on one line, and a spinner (named
+ * "Reading the page") while Mnemo reads it. It shows nothing the app wrote (no summary, tags or
+ * reason), so it needs no trust label; the List and Cards views show them, labelled (issue 171).
+ */
+export function createCompactRow(
+  doc: Document,
+  item: LinkItem,
+  options: LinkRowOptions = {},
+): HTMLLIElement {
   const li = doc.createElement("li");
   li.className = "compact-row";
+  if (options.forceState) li.classList.add(`is-${options.forceState}`);
+  li.dataset.status = linkStatus(item);
   li.tabIndex = 0;
   const title = textEl(doc, "span", "row-title", item.title);
   title.title = item.title;
   const host = item.site || item.url.split("/")[0];
   const dom = textEl(doc, "span", "dom", host);
   dom.title = item.url;
-  li.append(title, dom);
+  li.append(title);
+  // While Mnemo reads the page, a spinner sits after the title, as a status region. Its words are
+  // in the tooltip and hidden text, so the one-line row keeps room for the site and the date.
+  if (linkStatus(item) === "reading") {
+    const box = doc.createElement("span");
+    box.className = "compact-reading";
+    box.setAttribute("role", "status");
+    box.title = NO_SUMMARY.reading;
+    box.append(
+      buildSpinner(),
+      textEl(doc, "span", "compact-reading-words", NO_SUMMARY.reading),
+    );
+    li.append(box);
+  }
+  li.append(dom);
   const when = item.saved || item.age;
   if (when) li.append(textEl(doc, "span", "row-meta", when));
   return li;

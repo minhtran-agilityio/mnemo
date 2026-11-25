@@ -505,25 +505,36 @@ test("in the List view the body gives way first, and only the site in the meta l
   const site = `${"rất-dài-".repeat(12)}ẪẬẲỖỮỰ.example.vn`;
   const row = createLinkRow(document, { ...pasted, site });
   expect(row.classList.contains("link-row")).toBe(true);
-  expect(row.querySelector(":scope > .row-body")).not.toBeNull();
-  expect(row.querySelector(":scope > .meta > .site")?.textContent).toBe(site);
+  expect(row.querySelector(":scope > .link-main > .row-body")).not.toBeNull();
+  expect(
+    row.querySelector(":scope > .link-main > .meta > .site")?.textContent,
+  ).toBe(site);
   const css = (sel: string) =>
     cssRule(import.meta.dirname, "link-card.css", sel);
-  // A long summary starts from zero width, so it never squeezes a short site.
-  expect(css(".link-row > .row-body")).toMatchObject({
+  // The body and the meta wrap inside .link-main: the meta shares the line only when it fits whole.
+  expect(css(".link-main")).toMatchObject({
+    display: "flex",
     flex: "1 1 0",
+    "flex-wrap": "wrap",
     "min-width": "0",
+    gap: "var(--space-1) var(--space-3)",
   });
-  // The meta line stays on one line, at most half the row.
-  expect(css(".link-row > .meta")).toMatchObject({
+  // A long summary starts from its smallest width, so it never squeezes a short site. That width
+  // holds a whole trust label and is at least half the line.
+  expect(css(".link-main > .row-body")).toMatchObject({
+    flex: "1 1 0",
+    "min-width": "max(var(--size-link-sub-min), 50%)",
+  });
+  // The meta line stays on one line with no cap, so on its own line it has the full width.
+  expect(css(".link-main > .meta")).toMatchObject({
+    flex: "0 1 auto",
     "flex-wrap": "nowrap",
     "min-width": "0",
-    "max-width": "50%",
   });
-  expect(css(".link-row > .meta").flex.split(" ")[1]).toBe("1");
+  expect(css(".link-main > .meta")["max-width"]).toBeUndefined();
   // Badge, dots and date never shrink; the site does.
-  expect(css(".link-row > .meta > :not(.site)").flex).toBe("none");
-  expect(css(".link-row > .meta > .site").flex).toBe("0 1 auto");
+  expect(css(".link-main > .meta > :not(.site)").flex).toBe("none");
+  expect(css(".link-main > .meta > .site").flex).toBe("0 1 auto");
   expect(css(".link-row .site")).toMatchObject({
     ...MARKS_ROOM,
     "min-width": "0",
@@ -556,4 +567,242 @@ test("a link with no app, site, saved date or age has no empty meta line", () =>
     createLinkCard(document, { ...bare, age: "2 d" }).querySelector(".meta")
       ?.textContent,
   ).toBe("2 d");
+});
+
+// Issue 171: the List and Compact rows label what the app wrote, or leave it out.
+const ROW_STATUSES = ["pending", "reading", "unreadable", "ai-off"] as const;
+const rowCss = (sel: string) =>
+  cssRule(import.meta.dirname, "link-card.css", sel);
+
+test("done: the List row's summary is labelled Written by AI, after the summary on its line", () => {
+  const row = createLinkRow(document, pasted);
+  expect(row.dataset.status).toBe("done");
+  const line = row.querySelector(":scope > .link-main > .row-body > .link-sub");
+  expect(line?.querySelector(":scope > .row-sub")?.textContent).toBe(
+    pasted.summary,
+  );
+  const label = line?.querySelector(":scope > .trust");
+  expect(label?.textContent).toBe("Written by AI");
+  expect(label?.classList.contains("trust-ai")).toBe(true);
+  expect(line?.lastElementChild).toBe(label);
+  expect(row.querySelectorAll(".trust")).toHaveLength(1);
+});
+
+test("a guessed summary in the List row is labelled Guess", () => {
+  const row = createLinkRow(document, { ...pasted, summaryKind: "guess" });
+  const labels = row.querySelectorAll(".trust");
+  expect(labels).toHaveLength(1);
+  expect(labels[0]?.textContent).toBe("Guess");
+  expect(row.textContent).not.toContain("Written by AI");
+});
+
+test("loading, error and AI off rows say why there is no summary, with no label", () => {
+  for (const status of ROW_STATUSES) {
+    const item: LinkItem = { ...pasted, status, summary: "Made-up text." };
+    const row = createLinkRow(document, item);
+    expect(row.dataset.status).toBe(status);
+    expect(row.querySelector(".link-sub")).toBeNull();
+    expect(row.querySelector(".trust")).toBeNull();
+    expect(row.querySelector(".row-sub")?.textContent).toBe(
+      noSummaryText(item),
+    );
+    expect(row.textContent).not.toContain("Made-up text.");
+    const compact = createCompactRow(document, item);
+    expect(compact.dataset.status).toBe(status);
+    expect(compact.querySelector(".trust")).toBeNull();
+  }
+});
+
+test("a done link with no summary has no label in the List row", () => {
+  const row = createLinkRow(document, { ...pasted, ...noSum });
+  expect(row.querySelector(".row-sub")?.textContent).toBe("No summary.");
+  expect(row.querySelector(".trust")).toBeNull();
+});
+
+test("the rows leave out tags and the reason, from the app or the owner, so nothing shows unlabelled", () => {
+  const owner = { tagsKind: "owner", reasonKind: "owner" } as const;
+  for (const item of [pasted, { ...pasted, ...owner }]) {
+    for (const row of [
+      createLinkRow(document, item),
+      createCompactRow(document, item),
+    ]) {
+      expect(row.querySelector(".tags")).toBeNull();
+      expect(row.querySelector(".reason")).toBeNull();
+      expect(row.textContent).not.toContain("security");
+      expect(row.textContent).not.toContain(pasted.reason);
+      expect(row.textContent).not.toContain("Guess");
+    }
+  }
+});
+
+test("partial: a summary without tags or reason keeps its label in the List row", () => {
+  const row = createLinkRow(document, {
+    ...pasted,
+    tags: undefined,
+    reason: undefined,
+  });
+  expect(row.querySelector(".link-sub .trust")?.textContent).toBe(
+    "Written by AI",
+  );
+});
+
+test("the Compact row shows no summary and so no label", () => {
+  const compact = createCompactRow(document, pasted);
+  expect(compact.textContent).toBe(
+    "Tauri 2 capabilitiesv2.tauri.app25 Nov 2026",
+  );
+  expect(compact.querySelector(".trust")).toBeNull();
+});
+
+test("the rows take keyboard focus, and the List row's text holds the title, the summary and its label", () => {
+  const row = createLinkRow(document, pasted);
+  const compact = createCompactRow(document, pasted);
+  expect(row.tabIndex).toBe(0);
+  expect(compact.tabIndex).toBe(0);
+  expect(row.textContent).toContain(pasted.title);
+  expect(row.textContent).toContain(`${pasted.summary}Written by AI`);
+  document.body.replaceChildren(row, compact);
+  row.focus();
+  expect(document.activeElement).toBe(row);
+  compact.focus();
+  expect(document.activeElement).toBe(compact);
+  document.body.replaceChildren();
+});
+
+// happy-dom has no layout, so these tests hold the CSS contract of each fix. The real layout, at
+// 800 x 560 and at 200% zoom, light and dark, on the Records tab that shows every row state, is
+// proved in a real browser by tests/acceptance/ds-09-limits.test.mjs (AC3): no text is cut without
+// an ellipsis, and each trust label keeps its words inside its pill and off a link row's meta line.
+
+test("overflow: a long Vietnamese summary is cut with its ellipsis and the label stays whole", () => {
+  const summary = `${"Mỗi cửa sổ chỉ gọi được những lệnh đã khai báo. ".repeat(8)}ẪẬẲỖỮỰ`;
+  const row = createLinkRow(document, { ...pasted, summary });
+  const sub = row.querySelector<HTMLElement>(".link-sub > .row-sub");
+  expect(sub?.textContent).toBe(summary);
+  expect(sub?.title).toBe(summary);
+  // The summary line itself is cut only by .row-sub, which has its ellipsis and marks room.
+  expect(
+    cssRule(import.meta.dirname, "../list-row/list-row.css", ".row-sub"),
+  ).toMatchObject({
+    ...MARKS_ROOM,
+    overflow: "hidden",
+    "text-overflow": "ellipsis",
+  });
+  // The issue 170 rule still holds: the body gives way first, so the site keeps its width.
+  expect(rowCss(".link-main > .row-body").flex).toBe("1 1 0");
+  expect(
+    row.querySelector(":scope > .link-main > .meta > .site")?.textContent,
+  ).toBe("v2.tauri.app");
+});
+
+test("the List row holds the icon, then .link-main with the body and the meta line", () => {
+  const row = createLinkRow(document, pasted);
+  const kids = [...row.children];
+  expect(kids).toHaveLength(2);
+  expect(kids[0]?.tagName.toLowerCase()).toBe("svg");
+  expect(kids[1]?.className).toBe("link-main");
+  const main = [...(kids[1]?.children ?? [])].map((k) => k.className);
+  expect(main).toEqual(["row-body", "meta"]);
+  // With no meta line, .link-main holds the body alone.
+  const bare = createLinkRow(document, { title: "Untitled", url: "x.com/a" });
+  expect(
+    [...(bare.querySelector(".link-main")?.children ?? [])].map(
+      (k) => k.className,
+    ),
+  ).toEqual(["row-body"]);
+  // The row itself has no wrap rule any more; .link-main wraps, so the icon stays on the first line.
+  expect(() => rowCss(".link-row")).toThrow();
+});
+
+test("a narrow List row never clips the label: it wraps under the summary, and its words wrap", () => {
+  // The line wraps and clips nothing.
+  const line = rowCss(".link-row .link-sub");
+  expect(line).toMatchObject({
+    display: "flex",
+    "flex-wrap": "wrap",
+    "min-width": "0",
+  });
+  expect(line.overflow).toBeUndefined();
+  // The summary starts from its smallest width and grows up to its own text width, so a short
+  // summary keeps the label right after it and a tight line sends the label to the next line.
+  expect(rowCss(".link-row .link-sub > .row-sub")).toMatchObject({
+    flex: "1 1 0",
+    "min-width": "min(var(--size-link-sub-min), 100%)",
+    "max-width": "max-content",
+  });
+  // The label never shrinks or clips; narrower than itself, its words wrap.
+  const label = rowCss(".link-row .link-sub > .trust");
+  expect(label).toMatchObject({
+    flex: "none",
+    "max-width": "100%",
+    "white-space": "normal",
+  });
+  expect(label.overflow).toBeUndefined();
+});
+
+test("hover, focus-visible and active can be drawn for a still view, and have a look", () => {
+  for (const state of ["hover", "focus", "active"] as const) {
+    const row = createLinkRow(document, pasted, { forceState: state });
+    expect(row.classList.contains(`is-${state}`)).toBe(true);
+    const compact = createCompactRow(document, pasted, { forceState: state });
+    expect(compact.classList.contains(`is-${state}`)).toBe(true);
+  }
+  // Pressed: the hover surface and an edge in --control-edge (3:1), drawn inside the row, so the
+  // row's bounds stay visible against the pale --line dividers.
+  for (const sel of [".compact-row.is-active", ".link-row.is-active"]) {
+    expect(rowCss(sel)).toMatchObject({
+      background: "var(--head)",
+      outline: "var(--border-1) solid var(--control-edge)",
+      "outline-offset": "calc(-1 * var(--border-1))",
+    });
+  }
+  expect(rowCss(".compact-row.is-hover").background).toBe("var(--head)");
+  // The focus ring wins over the pressed edge in both rows.
+  for (const sel of [".compact-row.is-focus", ".link-row.is-focus"]) {
+    expect(rowCss(sel).outline).toBe("var(--focus-ring) solid var(--accent)");
+  }
+});
+
+test("reading: the List row's second line is a status with a spinner and the words, inline", () => {
+  const item: LinkItem = { ...pasted, ...noSum, status: "reading" };
+  const row = createLinkRow(document, item);
+  const status = row.querySelector(".row-sub > [role='status']");
+  expect(status?.textContent).toBe("Reading the page");
+  expect(status?.querySelector(".spinner")?.getAttribute("aria-hidden")).toBe(
+    "true",
+  );
+  expect(row.querySelector(".row-sub")?.textContent).toBe(noSummaryText(item));
+  // Inline, so a narrow row cuts the words with the second line's ellipsis.
+  expect(rowCss(".link-row .row-sub > .rec-reading").display).toBe("inline");
+  for (const other of ["pending", "done", "unreadable", "ai-off"] as const) {
+    const quiet = createLinkRow(document, { ...pasted, status: other });
+    expect(quiet.querySelector("[role='status']")).toBeNull();
+    expect(quiet.querySelector(".spinner")).toBeNull();
+  }
+});
+
+test("reading: the Compact row shows a spinner after the title, a status named by hidden words and a tooltip", () => {
+  const item: LinkItem = { ...pasted, ...noSum, status: "reading" };
+  const compact = createCompactRow(document, item);
+  const status = compact.querySelector<HTMLElement>(":scope > [role='status']");
+  expect(status?.textContent).toBe("Reading the page");
+  expect(status?.title).toBe("Reading the page");
+  expect(status?.querySelector(".spinner")).not.toBeNull();
+  expect(status?.querySelector(".compact-reading-words")?.textContent).toBe(
+    "Reading the page",
+  );
+  expect(status?.previousElementSibling?.className).toBe("row-title");
+  expect(status?.nextElementSibling?.className).toBe("dom");
+  // Only the spinner takes room, so the site and the date keep theirs.
+  expect(rowCss(".compact-row .compact-reading").flex).toBe("none");
+  expect(rowCss(".compact-row .compact-reading-words")).toMatchObject({
+    position: "absolute",
+    width: "var(--border-1)",
+    height: "var(--border-1)",
+    "clip-path": "inset(50%)",
+  });
+  for (const other of ["pending", "done", "unreadable", "ai-off"] as const) {
+    const quiet = createCompactRow(document, { ...pasted, status: other });
+    expect(quiet.querySelector("[role='status']")).toBeNull();
+  }
 });

@@ -148,28 +148,82 @@
     );
 }
 
-/* A link's List row. Flex shares the shrink in proportion to each item's own width, so a long
-   summary would squeeze a short site. Instead the body (title and summary) starts from zero width
-   and takes the room that is left: it is the side that gives way, cut with its own ellipsis. */
-.link-row > .row-body {
+/* A link's List row: the icon, then .link-main, which holds the body (title and summary) and the
+   meta line (app, site, date). Flex wraps on each item's starting size. The body starts at
+   max(--size-link-sub-min, half of .link-main): the smallest width that holds a whole trust label,
+   and never less than half. The meta starts at its own width. So the meta shares the line only when
+   it fits whole next to that half; else it wraps to its own line, where it has the full width and
+   only its site is cut with an ellipsis. While they share a line, the body takes the room that is
+   left and gives way first (cut with its own ellipsis), so a long summary never squeezes a short
+   site. .link-main starts after the icon, so a wrapped meta lines up with the title. A long host at
+   a wide width takes its own meta line too, which makes the row taller.
+   Unverified on WebKitGTK: the 50% inside max() resolves against the definite width of .link-main
+   (checked in Chrome by tests/acceptance/ds-09-limits.test.mjs). */
+.link-main {
+  display: flex;
   flex: 1 1 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
   min-width: 0;
 }
 
-/* The meta line stays on one line at its own width, at most half the row. Only the site in it may
-   shrink, so a long host is cut with its ellipsis and the badge, dots and date stay whole. */
-.link-row > .meta {
+.link-main > .row-body {
+  flex: 1 1 0;
+  min-width: max(var(--size-link-sub-min), 50%);
+}
+
+/* The summary line of a List row and its trust label. Nothing here is clipped without an ellipsis.
+   The summary starts from its smallest width (--size-link-sub-min, or the whole line when that is
+   narrower) and grows up to its own text width, so a short summary keeps its label right after
+   it, and a long one is cut with its ellipsis (full text in its tooltip). When the line has no
+   room for that smallest summary and the whole label, the label wraps under the summary. A label
+   in a line narrower than itself wraps its words, as on the card. */
+.link-row .link-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+}
+
+.link-row .link-sub > .row-sub {
+  flex: 1 1 0;
+  min-width: min(var(--size-link-sub-min), 100%);
+  max-width: max-content;
+}
+
+.link-row .link-sub > .trust {
+  flex: none;
+  max-width: 100%;
+  white-space: normal;
+}
+
+/* Reading in a List row: the spinner and the words run inline in the second line, so a narrow
+   row cuts the words with the line's ellipsis. */
+.link-row .row-sub > .rec-reading {
+  display: inline;
+}
+
+.link-row .row-sub > .rec-reading > .spinner {
+  margin-inline-end: var(--space-1);
+  vertical-align: middle;
+}
+
+/* The meta line stays on one line at its own width, with no cap: on a shared line it is as wide as
+   its content, and on its own line it may take the full width. Only the site in it may shrink, so
+   a long host is cut with its ellipsis and the badge, dots and date stay whole. */
+.link-main > .meta {
   flex: 0 1 auto;
   flex-wrap: nowrap;
   min-width: 0;
-  max-width: 50%;
 }
 
-.link-row > .meta > :not(.site) {
+.link-main > .meta > :not(.site) {
   flex: none;
 }
 
-.link-row > .meta > .site {
+.link-main > .meta > .site {
   flex: 0 1 auto;
 }
 
@@ -187,11 +241,52 @@
   border-top: var(--border-1) solid var(--line);
 }
 
-.compact-row:hover {
+.compact-row:hover,
+.compact-row.is-hover {
   background: var(--head);
 }
 
-.compact-row:focus-visible {
+/* Pressed: the hover surface and a thin edge in --control-edge (3:1 on the row surfaces) drawn
+   inside the row. A pale fill alone is too close to the --line dividers; the edge keeps the row's
+   bounds visible. Focus-visible, drawn after this rule, wins over the edge. */
+.link-row:active,
+.link-row.is-active,
+.compact-row:active,
+.compact-row.is-active {
+  background: var(--head);
+  outline: var(--border-1) solid var(--control-edge);
+  outline-offset: calc(-1 * var(--border-1));
+}
+
+/* A List row's focus ring (from the list row part) wins over the pressed edge. */
+.link-row:focus-visible,
+.link-row.is-focus {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: calc(var(--focus-ring) * -1);
+}
+
+/* While Mnemo reads the page: the spinner alone after the title, with "Reading the page" in the
+   tooltip and in hidden words that the status region reads out. It never pushes the date out. */
+.compact-row .compact-reading {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  color: var(--muted);
+}
+
+.compact-row .compact-reading-words {
+  position: absolute;
+  width: var(--border-1);
+  height: var(--border-1);
+  margin: calc(-1 * var(--border-1));
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.compact-row:focus-visible,
+.compact-row.is-focus {
   outline: var(--focus-ring) solid var(--accent);
   outline-offset: calc(var(--focus-ring) * -1);
 }
