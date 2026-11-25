@@ -78,7 +78,7 @@
 /* The site (host) on the meta line: one line, cut with an ellipsis, full host in the tooltip, with
    room for stacked Vietnamese marks. */
 .lcard .site,
-.row .site {
+.link-row .site {
   min-width: 0;
   max-width: 100%;
   padding-block: var(--border-2);
@@ -148,12 +148,29 @@
     );
 }
 
-/* The meta line of a List row: it may shrink (at most half the row), so a long site is cut with
-   its ellipsis instead of widening the row past its list. */
-.row > .meta {
+/* A link's List row. Flex shares the shrink in proportion to each item's own width, so a long
+   summary would squeeze a short site. Instead the body (title and summary) starts from zero width
+   and takes the room that is left: it is the side that gives way, cut with its own ellipsis. */
+.link-row > .row-body {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* The meta line stays on one line at its own width, at most half the row. Only the site in it may
+   shrink, so a long host is cut with its ellipsis and the badge, dots and date stay whole. */
+.link-row > .meta {
   flex: 0 1 auto;
+  flex-wrap: nowrap;
   min-width: 0;
   max-width: 50%;
+}
+
+.link-row > .meta > :not(.site) {
+  flex: none;
+}
+
+.link-row > .meta > .site {
+  flex: 0 1 auto;
 }
 
 .compact-row {
@@ -179,7 +196,11 @@
   outline-offset: calc(var(--focus-ring) * -1);
 }
 
+/* The title starts from zero width and takes the room that is left, so a long title gives way
+   (cut with its ellipsis) and never squeezes a short site. */
 .compact-row .row-title {
+  flex: 1 1 0;
+  min-width: 0;
   font-weight: var(--weight-regular);
 }
 

@@ -119,8 +119,11 @@ function reading(doc: Document): HTMLElement {
   return box;
 }
 
-/** The meta line: the source app, the site and when it was saved, each only when known. */
-function metaLine(doc: Document, item: LinkItem): HTMLDivElement {
+/**
+ * The meta line: the source app, the site and when it was saved, each only when known. Null when
+ * none is known, so no empty line adds a gap.
+ */
+function metaLine(doc: Document, item: LinkItem): HTMLDivElement | null {
   const parts: (string | Node)[] = [];
   if (item.app) parts.push(createAppBadge(doc, item.app));
   if (item.site) {
@@ -131,7 +134,7 @@ function metaLine(doc: Document, item: LinkItem): HTMLDivElement {
   // An empty string falls back, as a missing value does.
   const when = item.saved || item.age;
   if (when) parts.push(when);
-  return createMetaLine(doc, parts);
+  return parts.length > 0 ? createMetaLine(doc, parts) : null;
 }
 
 function noSummary(doc: Document, item: LinkItem): HTMLElement {
@@ -185,7 +188,8 @@ export function createLinkCard(
     thumb.append(createIcon(Link));
     card.append(thumb);
   }
-  card.append(metaLine(doc, item));
+  const meta = metaLine(doc, item);
+  if (meta) card.append(meta);
   const title = textEl(doc, "div", "title", item.title);
   title.title = item.title;
   const url = textEl(doc, "div", "url", item.url);
@@ -224,7 +228,9 @@ export function createLinkRow(doc: Document, item: LinkItem): HTMLLIElement {
     sub: shownSummary(item) ?? noSummaryText(item),
     icon: Link,
   });
-  row.append(metaLine(doc, item));
+  row.classList.add("link-row");
+  const meta = metaLine(doc, item);
+  if (meta) row.append(meta);
   return row;
 }
 

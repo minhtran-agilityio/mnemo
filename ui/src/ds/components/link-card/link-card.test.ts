@@ -501,22 +501,59 @@ test("an empty site or saved date falls back: the url host, and the age", () => 
   ).toBe("2 d");
 });
 
-test("in the List view the meta line can shrink, so a long site gets its ellipsis", () => {
+test("in the List view the body gives way first, and only the site in the meta line shrinks", () => {
   const site = `${"rất-dài-".repeat(12)}ẪẬẲỖỮỰ.example.vn`;
   const row = createLinkRow(document, { ...pasted, site });
+  expect(row.classList.contains("link-row")).toBe(true);
+  expect(row.querySelector(":scope > .row-body")).not.toBeNull();
   expect(row.querySelector(":scope > .meta > .site")?.textContent).toBe(site);
   const css = (sel: string) =>
     cssRule(import.meta.dirname, "link-card.css", sel);
-  expect(css(".row > .meta")).toMatchObject({
+  // A long summary starts from zero width, so it never squeezes a short site.
+  expect(css(".link-row > .row-body")).toMatchObject({
+    flex: "1 1 0",
+    "min-width": "0",
+  });
+  // The meta line stays on one line, at most half the row.
+  expect(css(".link-row > .meta")).toMatchObject({
+    "flex-wrap": "nowrap",
     "min-width": "0",
     "max-width": "50%",
   });
-  expect(css(".row > .meta").flex.split(" ")[1]).toBe("1");
-  expect(css(".row .site")).toMatchObject({
+  expect(css(".link-row > .meta").flex.split(" ")[1]).toBe("1");
+  // Badge, dots and date never shrink; the site does.
+  expect(css(".link-row > .meta > :not(.site)").flex).toBe("none");
+  expect(css(".link-row > .meta > .site").flex).toBe("0 1 auto");
+  expect(css(".link-row .site")).toMatchObject({
     ...MARKS_ROOM,
     "min-width": "0",
     overflow: "hidden",
     "text-overflow": "ellipsis",
     "white-space": "nowrap",
   });
+});
+
+test("in the Compact view a long title gives way first, so a short site keeps its width", () => {
+  const rule = cssRule(
+    import.meta.dirname,
+    "link-card.css",
+    ".compact-row .row-title",
+  );
+  expect(rule).toMatchObject({ flex: "1 1 0", "min-width": "0" });
+});
+
+test("a link with no app, site, saved date or age has no empty meta line", () => {
+  const bare: LinkItem = { title: "Untitled", url: "example.com/x" };
+  const card = createLinkCard(document, bare);
+  expect(card.querySelector(".meta")).toBeNull();
+  expect(card.firstElementChild?.className).toBe("title");
+  expect(createLinkRow(document, bare).querySelector(".meta")).toBeNull();
+  const compact = createCompactRow(document, bare);
+  expect(compact.querySelector(".row-meta")).toBeNull();
+  expect(compact.querySelector(".dom")?.textContent).toBe("example.com");
+  // With any one part, the line is there.
+  expect(
+    createLinkCard(document, { ...bare, age: "2 d" }).querySelector(".meta")
+      ?.textContent,
+  ).toBe("2 d");
 });
