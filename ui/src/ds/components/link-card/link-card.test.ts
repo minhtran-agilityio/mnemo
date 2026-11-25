@@ -1,12 +1,14 @@
 // @vitest-environment happy-dom
 import { expect, test } from "vitest";
 import { cssRule, MARKS_ROOM } from "../../../css-rule";
+import { createButton } from "../button/button";
 import {
   createCompactRow,
   createLinkCard,
   createLinkRow,
   createLinkView,
   type LinkItem,
+  noSummaryText,
 } from "./link-card";
 
 const read: LinkItem = {
@@ -50,7 +52,7 @@ test("a page that could not be read keeps the link only, with no summary", () =>
 test("AI off and reading say so, and reading is a status", () => {
   expect(
     createLinkCard(document, { ...unread, status: "ai-off" }).textContent,
-  ).toContain("No summary: AI is off.");
+  ).toContain("No summary yet: AI is off.");
   const r = createLinkCard(document, { ...unread, status: "reading" });
   expect(r.querySelector('[role="status"]')?.textContent).toBe(
     "Reading the page",
@@ -120,4 +122,438 @@ test("the cards view has columns that shrink to the container, so a narrow windo
   expect(rule["grid-template-columns"]).toContain(
     "min(var(--size-basis-column), 100%)",
   );
+});
+
+// Issue 169 (BM-01): a pasted link with its site, saved date, tags, reason and one action.
+const pasted: LinkItem = {
+  title: "Tauri 2 capabilities",
+  url: "v2.tauri.app/security/capabilities",
+  site: "v2.tauri.app",
+  saved: "25 Nov 2026",
+  status: "done",
+  summary: "Each window gets a list of allowed commands.",
+  tags: ["tauri", "security"],
+  reason: "It may matter for the Mnemo command allow-list.",
+};
+const noSum = { summary: undefined, tags: undefined, reason: undefined };
+
+test("a pasted link has no app: the meta line shows the site and the saved date", () => {
+  const card = createLinkCard(document, pasted);
+  expect(card.querySelector(".app")).toBeNull();
+  const meta = card.querySelector(".meta") as HTMLElement;
+  expect(meta.querySelector(".site")?.textContent).toBe("v2.tauri.app");
+  expect(meta.querySelector<HTMLElement>(".site")?.title).toBe("v2.tauri.app");
+  expect(meta.textContent).toContain("25 Nov 2026");
+  // The saved date wins over the age; an app still shows when there is one.
+  const both = createLinkCard(document, { ...pasted, app: "zalo", age: "2 d" });
+  expect(both.querySelector(".app")?.textContent).toBe("Zalo");
+  expect(both.querySelector(".meta")?.textContent).not.toContain("2 d");
+});
+
+test("done shows the summary as Written by AI, the tags, and the reason as a Guess", () => {
+  const card = createLinkCard(document, pasted);
+  expect(card.dataset.status).toBe("done");
+  expect(card.querySelector(".sum")?.textContent).toBe(pasted.summary);
+  expect(card.querySelector(":scope > .trust-ai")?.textContent).toBe(
+    "Written by AI",
+  );
+  const tags = card.querySelector('ul.tags[aria-label="Tags"]');
+  expect(
+    [...(tags?.querySelectorAll(".tag-item") ?? [])].map((t) => t.textContent),
+  ).toEqual(["tauri", "security"]);
+  const reason = card.querySelector(":scope > .reason") as HTMLElement;
+  expect(reason.querySelector(".reason-text")?.textContent).toBe(pasted.reason);
+  expect(reason.querySelector(".trust-guess")?.textContent).toBe("Guess");
+  // The reason is its own line: the summary's label stays Written by AI, not Guess.
+  expect(card.querySelectorAll(".trust-guess")).toHaveLength(1);
+});
+
+test("a reason the owner wrote has no Guess label", () => {
+  const card = createLinkCard(document, { ...pasted, reasonKind: "owner" });
+  expect(card.querySelector(".reason .trust")).toBeNull();
+});
+
+test("partial: a summary without tags or reason, and tags without a reason", () => {
+  const bare = createLinkCard(document, {
+    ...pasted,
+    tags: undefined,
+    reason: undefined,
+  });
+  expect(bare.querySelector(".tags")).toBeNull();
+  expect(bare.querySelector(".reason")).toBeNull();
+  expect(bare.querySelector(".sum")).not.toBeNull();
+  const tagsOnly = createLinkCard(document, { ...pasted, reason: undefined });
+  expect(tagsOnly.querySelector(".tags")).not.toBeNull();
+  expect(tagsOnly.querySelector(".reason")).toBeNull();
+  const noTags = createLinkCard(document, { ...pasted, tags: [] });
+  expect(noTags.querySelector(".tags")).toBeNull();
+});
+
+test("pending is saved with reading not started, and has no summary", () => {
+  const card = createLinkCard(document, {
+    ...pasted,
+    ...noSum,
+    status: "pending",
+  });
+  expect(card.dataset.status).toBe("pending");
+  expect(card.querySelector(".sum")).toBeNull();
+  expect(card.querySelector(".trust")).toBeNull();
+  expect(card.querySelector(".nosum")?.textContent).toBe("No summary yet.");
+  expect(card.querySelector(".nosum svg")).not.toBeNull();
+});
+
+test("the action slot holds the one button the screen passes, reachable by keyboard", () => {
+  let clicks = 0;
+  const action = createButton(document, {
+    label: "Paste the text",
+    size: "sm",
+    onClick: () => clicks++,
+  });
+  const card = createLinkCard(
+    document,
+    { ...pasted, ...noSum, status: "unreadable" },
+    { action },
+  );
+  document.body.append(card);
+  const slot = card.querySelector(":scope > .lcard-action") as HTMLElement;
+  expect(slot.children).toHaveLength(1);
+  expect(slot.firstElementChild).toBe(action);
+  expect(card.lastElementChild).toBe(slot);
+  // A real button: its name is its text, it takes focus, and Enter or Space click it.
+  expect(action.tagName).toBe("BUTTON");
+  expect(action.textContent).toBe("Paste the text");
+  action.focus();
+  expect(document.activeElement).toBe(action);
+  action.click();
+  expect(clicks).toBe(1);
+  card.remove();
+  expect(
+    createLinkCard(document, pasted).querySelector(".lcard-action"),
+  ).toBeNull();
+});
+
+test("a busy or disabled action stays in the slot and ignores clicks", () => {
+  let busyClicks = 0;
+  let offClicks = 0;
+  const busy = createButton(document, {
+    label: "Summarize later",
+    busy: true,
+    onClick: () => busyClicks++,
+  });
+  const off = createButton(document, {
+    label: "Paste the text",
+    disabled: true,
+    onClick: () => offClicks++,
+  });
+  const busyCard = createLinkCard(
+    document,
+    { ...pasted, ...noSum, status: "ai-off" },
+    { action: busy },
+  );
+  expect(busyCard.querySelector(":scope > .lcard-action > button")).toBe(busy);
+  busy.click();
+  expect(busyClicks).toBe(0);
+  expect(busy.getAttribute("aria-busy")).toBe("true");
+  const offCard = createLinkCard(
+    document,
+    { ...pasted, ...noSum },
+    { action: off },
+  );
+  document.body.append(offCard);
+  expect(offCard.querySelector(":scope > .lcard-action > button")).toBe(off);
+  expect(off.disabled).toBe(true);
+  off.click();
+  expect(offClicks).toBe(0);
+  offCard.remove();
+});
+
+test("the status decides: a summary shows only when the link is done", () => {
+  for (const status of [
+    "unreadable",
+    "reading",
+    "pending",
+    "ai-off",
+  ] as const) {
+    const item: LinkItem = { ...pasted, status, summary: "Made-up text." };
+    const card = createLinkCard(document, item);
+    expect(card.dataset.status).toBe(status);
+    expect(card.querySelector(".sum")).toBeNull();
+    // No AI text at all: no summary, no AI tags, no guessed reason, and no trust label anywhere.
+    expect(card.querySelector(".trust")).toBeNull();
+    expect(card.querySelector(".lcard-tags")).toBeNull();
+    expect(card.querySelector(".tags")).toBeNull();
+    expect(card.querySelector(".reason")).toBeNull();
+    expect(card.textContent).not.toContain("Made-up text.");
+    expect(card.textContent).not.toContain(pasted.reason);
+    expect(card.textContent).not.toContain("Written by AI");
+    expect(card.textContent).not.toContain("Guess");
+    const sub = createLinkRow(document, item).querySelector(".row-sub");
+    expect(sub?.textContent).toBe(noSummaryText(item));
+  }
+  const unreadable = createLinkCard(document, {
+    ...pasted,
+    status: "unreadable",
+  });
+  expect(unreadable.querySelector(".nosum")?.textContent).toBe(
+    "Link only. Mnemo could not read this page.",
+  );
+  const reading = createLinkCard(document, { ...pasted, status: "reading" });
+  expect(reading.querySelector('[role="status"]')?.textContent).toBe(
+    "Reading the page",
+  );
+  // Left out, the status follows the summary.
+  const noStatus: LinkItem = { ...pasted, status: undefined };
+  expect(createLinkCard(document, noStatus).dataset.status).toBe("done");
+  expect(
+    createLinkCard(document, { ...noStatus, summary: undefined }).dataset
+      .status,
+  ).toBe("unreadable");
+});
+
+test("an empty summary counts as none, in the card and in the list row alike", () => {
+  const item: LinkItem = { ...unread, summary: "" };
+  const card = createLinkCard(document, item);
+  expect(card.dataset.status).toBe("unreadable");
+  expect(card.querySelector(".sum")).toBeNull();
+  expect(card.querySelector(".nosum")?.textContent).toBe(noSummaryText(item));
+  expect(
+    createLinkRow(document, item).querySelector(".row-sub")?.textContent,
+  ).toBe("Link only. Mnemo could not read this page.");
+  const done: LinkItem = { ...pasted, ...noSum, summary: "" };
+  expect(
+    createLinkRow(document, done).querySelector(".row-sub")?.textContent,
+  ).toBe("No summary.");
+});
+
+test("tags the app chose are labelled Written by AI; the owner's tags are not", () => {
+  const card = createLinkCard(document, pasted);
+  const line = card.querySelector(":scope > .lcard-tags") as HTMLElement;
+  expect(line.querySelector("ul.tags")).not.toBeNull();
+  expect(line.querySelector(".trust-ai")?.textContent).toBe("Written by AI");
+  const own = createLinkCard(document, { ...pasted, tagsKind: "owner" });
+  expect(own.querySelector(".lcard-tags .tags")).not.toBeNull();
+  expect(own.querySelector(".lcard-tags .trust")).toBeNull();
+  const css = (sel: string) =>
+    cssRule(import.meta.dirname, "link-card.css", sel);
+  expect(css(".lcard-tags > .tags").gap).toBe("var(--space-2)");
+  expect(css(".lcard .lcard-tags")["flex-wrap"]).toBe("wrap");
+});
+
+test("a long site in a compact row shrinks and is cut with an ellipsis", () => {
+  const site = `${"rất-dài-".repeat(12)}ẪẬẲỖỮỰ.example.vn`;
+  const row = createCompactRow(document, { ...pasted, site });
+  const dom = row.querySelector<HTMLElement>(".dom");
+  expect(dom?.textContent).toBe(site);
+  expect(dom?.title).toBe(pasted.url);
+  const rule = cssRule(
+    import.meta.dirname,
+    "link-card.css",
+    ".compact-row .dom",
+  );
+  expect(rule).toMatchObject({
+    ...MARKS_ROOM,
+    "min-width": "0",
+    overflow: "hidden",
+    "text-overflow": "ellipsis",
+    "white-space": "nowrap",
+  });
+  expect(rule.flex).not.toBe("none");
+  expect(rule.flex.split(" ")[1]).toBe("1");
+});
+
+test("AI off keeps the link with the ticket's words, and the list row says the same", () => {
+  const off: LinkItem = { ...pasted, ...noSum, status: "ai-off" };
+  expect(
+    createLinkCard(document, off).querySelector(".nosum")?.textContent,
+  ).toBe("No summary yet: AI is off.");
+  expect(noSummaryText(off)).toBe("No summary yet: AI is off.");
+  expect(
+    createLinkRow(document, off).querySelector(".row-sub")?.textContent,
+  ).toBe("No summary yet: AI is off.");
+});
+
+test("pending and AI off both read as no summary yet, and the action is found by its name", () => {
+  const pending: LinkItem = { ...pasted, ...noSum, status: "pending" };
+  expect(noSummaryText(pending)).toBe("No summary yet.");
+  expect(
+    createLinkRow(document, pending).querySelector(".row-sub")?.textContent,
+  ).toBe("No summary yet.");
+  const action = createButton(document, { label: "Summarize later" });
+  const off = createLinkCard(
+    document,
+    { ...pasted, ...noSum, status: "ai-off" },
+    { action },
+  );
+  expect(off.textContent).toMatch(/no summary yet/i);
+  const named = [...off.querySelectorAll("button")].find(
+    (b) =>
+      (b.getAttribute("aria-label") ?? b.textContent) === "Summarize later",
+  );
+  expect(named).toBe(action);
+});
+
+test("list and compact rows work without an app: site and saved date", () => {
+  const row = createLinkRow(document, pasted);
+  expect(row.querySelector(".app")).toBeNull();
+  expect(row.querySelector(".site")?.textContent).toBe("v2.tauri.app");
+  const compact = createCompactRow(document, pasted);
+  expect(compact.querySelector(".dom")?.textContent).toBe("v2.tauri.app");
+  expect(compact.querySelector(".row-meta")?.textContent).toBe("25 Nov 2026");
+});
+
+test("overflow: a long host, many tags and a long Vietnamese reason keep full values and wrap", () => {
+  const site = `${"rất-dài-".repeat(12)}ẪẬẲỖỮỰ.example.vn`;
+  const tags = [
+    "tauri",
+    "security",
+    "rust",
+    "ipc",
+    "capabilities",
+    "windows",
+    "đặc-tả",
+    "lưu-trữ",
+  ];
+  const reason = `Có thể liên quan đến danh sách lệnh được phép của Mnemo ${"ẪẬẲỖỮỰ".repeat(20)}`;
+  const card = createLinkCard(document, { ...pasted, site, tags, reason });
+  const host = card.querySelector<HTMLElement>(".site");
+  expect(host?.textContent).toBe(site);
+  expect(host?.title).toBe(site);
+  const items = card.querySelectorAll<HTMLElement>(".tag-item");
+  expect(items).toHaveLength(7);
+  expect(items[6].getAttribute("aria-label")).toBe("2 more tags");
+  expect(items[6].title).toBe("đặc-tả, lưu-trữ");
+  expect(card.querySelector(".reason-text")?.textContent).toBe(reason);
+  const siteRule = cssRule(
+    import.meta.dirname,
+    "link-card.css",
+    ".lcard .site",
+  );
+  expect(siteRule).toMatchObject(MARKS_ROOM);
+  expect(siteRule["text-overflow"]).toBe("ellipsis");
+  expect(siteRule["min-width"]).toBe("0");
+  const css = (sel: string) =>
+    cssRule(import.meta.dirname, "link-card.css", sel);
+  expect(css(".lcard .reason-text")["overflow-wrap"]).toBe("anywhere");
+  expect(css(".lcard .reason")["flex-wrap"]).toBe("wrap");
+  // The tag list stays a plain list in the card, never the tag input's box, and never wider.
+  expect(css(".lcard-tags > .tags")).toMatchObject({
+    border: "0",
+    "max-width": "100%",
+  });
+});
+
+test("the owner's tags and reason show in every status, with no label", () => {
+  for (const status of [
+    "pending",
+    "reading",
+    "unreadable",
+    "ai-off",
+    "done",
+  ] as const) {
+    const card = createLinkCard(document, {
+      ...pasted,
+      status,
+      tagsKind: "owner",
+      reasonKind: "owner",
+    });
+    expect(card.querySelector(":scope > .lcard-tags > .tags")).not.toBeNull();
+    expect(card.querySelector(".lcard-tags .trust")).toBeNull();
+    expect(card.querySelector(".reason-text")?.textContent).toBe(pasted.reason);
+    expect(card.querySelector(".reason .trust")).toBeNull();
+  }
+});
+
+test("only the card's own tag list loses the tag input box: the selector names the card's wrapper", () => {
+  const card = createLinkCard(document, pasted);
+  expect(card.querySelector(":scope > .lcard-tags > ul.tags")).not.toBeNull();
+  expect(() =>
+    cssRule(import.meta.dirname, "link-card.css", ".lcard .tags"),
+  ).toThrow();
+});
+
+test("a read link with no summary says so, without the link-only icon", () => {
+  const card = createLinkCard(document, {
+    ...pasted,
+    ...noSum,
+    status: "done",
+  });
+  const none = card.querySelector(".nosum");
+  expect(none?.textContent).toBe("No summary.");
+  expect(none?.querySelector("svg")).toBeNull();
+  const linkOnly = createLinkCard(document, {
+    ...pasted,
+    ...noSum,
+    status: "unreadable",
+  });
+  expect(linkOnly.querySelector(".nosum svg")).not.toBeNull();
+});
+
+test("an empty site or saved date falls back: the url host, and the age", () => {
+  const item: LinkItem = { ...pasted, site: "", saved: "", age: "2 d" };
+  const compact = createCompactRow(document, item);
+  expect(compact.querySelector(".dom")?.textContent).toBe("v2.tauri.app");
+  expect(compact.querySelector(".row-meta")?.textContent).toBe("2 d");
+  const card = createLinkCard(document, item);
+  expect(card.querySelector(".site")).toBeNull();
+  expect(card.querySelector(".meta")?.textContent).toBe("2 d");
+  expect(
+    createLinkRow(document, item).querySelector(".meta")?.textContent,
+  ).toBe("2 d");
+});
+
+test("in the List view the body gives way first, and only the site in the meta line shrinks", () => {
+  const site = `${"rất-dài-".repeat(12)}ẪẬẲỖỮỰ.example.vn`;
+  const row = createLinkRow(document, { ...pasted, site });
+  expect(row.classList.contains("link-row")).toBe(true);
+  expect(row.querySelector(":scope > .row-body")).not.toBeNull();
+  expect(row.querySelector(":scope > .meta > .site")?.textContent).toBe(site);
+  const css = (sel: string) =>
+    cssRule(import.meta.dirname, "link-card.css", sel);
+  // A long summary starts from zero width, so it never squeezes a short site.
+  expect(css(".link-row > .row-body")).toMatchObject({
+    flex: "1 1 0",
+    "min-width": "0",
+  });
+  // The meta line stays on one line, at most half the row.
+  expect(css(".link-row > .meta")).toMatchObject({
+    "flex-wrap": "nowrap",
+    "min-width": "0",
+    "max-width": "50%",
+  });
+  expect(css(".link-row > .meta").flex.split(" ")[1]).toBe("1");
+  // Badge, dots and date never shrink; the site does.
+  expect(css(".link-row > .meta > :not(.site)").flex).toBe("none");
+  expect(css(".link-row > .meta > .site").flex).toBe("0 1 auto");
+  expect(css(".link-row .site")).toMatchObject({
+    ...MARKS_ROOM,
+    "min-width": "0",
+    overflow: "hidden",
+    "text-overflow": "ellipsis",
+    "white-space": "nowrap",
+  });
+});
+
+test("in the Compact view a long title gives way first, so a short site keeps its width", () => {
+  const rule = cssRule(
+    import.meta.dirname,
+    "link-card.css",
+    ".compact-row .row-title",
+  );
+  expect(rule).toMatchObject({ flex: "1 1 0", "min-width": "0" });
+});
+
+test("a link with no app, site, saved date or age has no empty meta line", () => {
+  const bare: LinkItem = { title: "Untitled", url: "example.com/x" };
+  const card = createLinkCard(document, bare);
+  expect(card.querySelector(".meta")).toBeNull();
+  expect(card.firstElementChild?.className).toBe("title");
+  expect(createLinkRow(document, bare).querySelector(".meta")).toBeNull();
+  const compact = createCompactRow(document, bare);
+  expect(compact.querySelector(".row-meta")).toBeNull();
+  expect(compact.querySelector(".dom")?.textContent).toBe("example.com");
+  // With any one part, the line is there.
+  expect(
+    createLinkCard(document, { ...bare, age: "2 d" }).querySelector(".meta")
+      ?.textContent,
+  ).toBe("2 d");
 });
