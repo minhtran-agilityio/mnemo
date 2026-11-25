@@ -150,10 +150,18 @@
 
 /* A link's List row. Flex shares the shrink in proportion to each item's own width, so a long
    summary would squeeze a short site. Instead the body (title and summary) starts from zero width
-   and takes the room that is left: it is the side that gives way, cut with its own ellipsis. */
+   and takes the room that is left: it is the side that gives way, cut with its own ellipsis. It
+   never gets narrower than --size-link-sub-min, which holds a whole trust label (icon and its
+   longest word). When the icon, that body and the meta line do not fit on one line, the meta line
+   moves to a line of its own under them, so neither the label nor the date is pushed out. */
+.link-row {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
+}
+
 .link-row > .row-body {
   flex: 1 1 0;
-  min-width: 0;
+  min-width: var(--size-link-sub-min);
 }
 
 /* The summary line of a List row and its trust label. Nothing here is clipped without an ellipsis.

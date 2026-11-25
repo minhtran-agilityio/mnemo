@@ -389,6 +389,53 @@ test('AC3: the Limits tab holds Vietnamese stacked marks and a very long title, 
     assert.deepEqual([...r.audit.scroll, ...r.audit.hclip, ...r.audit.vclip], []);
   }));
 
+// Issue 171. Text that runs out of its tinted pill is not clipped, so the clip audit above cannot see it. In the
+// Records tab every trust label (Written by AI, Guess) keeps its words inside its pill, and in a List row of a
+// link the label stays off the meta line (site and date).
+const TRUST_AUDIT = `(() => {
+  const bad = [];
+  const range = document.createRange();
+  const x = (n) => Math.round(n);
+  for (const pill of document.querySelectorAll('.trust')) {
+    const pr = pill.getBoundingClientRect();
+    if (pr.width < 1 || pr.height < 1) continue;
+    const word = pill.textContent.trim();
+    for (const n of pill.childNodes) {
+      if (n.nodeType !== 3 || !n.textContent.trim()) continue;
+      range.selectNodeContents(n);
+      for (const r of range.getClientRects()) {
+        if (r.width < 1) continue;
+        if (r.left < pr.left - 0.5 || r.right > pr.right + 0.5 || r.top < pr.top - 0.5 || r.bottom > pr.bottom + 0.5)
+          bad.push('"' + word + '" text x' + x(r.left) + '-' + x(r.right) + ' outside its pill x' + x(pr.left) + '-' + x(pr.right));
+      }
+    }
+    const meta = pill.closest('.link-row')?.querySelector(':scope > .meta');
+    if (meta) {
+      const mr = meta.getBoundingClientRect();
+      if (pr.right > mr.left + 0.5 && pr.left < mr.right - 0.5 && pr.bottom > mr.top && pr.top < mr.bottom)
+        bad.push('"' + word + '" pill x' + x(pr.left) + '-' + x(pr.right) + ' overlaps the meta line x' + x(mr.left) + '-' + x(mr.right));
+    }
+  }
+  return { bad, labels: document.querySelectorAll('.link-row .trust').length };
+})()`;
+
+for (const scheme of ['light', 'dark']) {
+  test(`AC3: in the Records tab a trust label keeps its words in its pill and off a link row's meta line (${scheme})`, UI, async () => {
+    const bad = [];
+    for (const s of SIZES) {
+      await withApp({ ...s, scheme }, async (app) => {
+        await app.goto('/#/ui-catalog', CATALOG_READY);
+        assert.ok(await app.click('Records'), 'no Records tab');
+        await sleep(500);
+        const r = await app.eval(TRUST_AUDIT);
+        assert.ok(r.labels > 0, `no labelled link row in the Records tab @ ${s.label}`);
+        for (const b of r.bad) bad.push(`${b} @ ${s.label}`);
+      });
+    }
+    assert.deepEqual(bad, []);
+  });
+}
+
 // ---------------------------------------------------------------- AC4
 test('AC4: the 1000-row catalog list builds in under 1.5 s and scrolls with no frame stall over 250 ms', UI, () =>
   withApp({ w: 900, h: 640 }, async (app) => {

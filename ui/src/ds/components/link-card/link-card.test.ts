@@ -509,10 +509,11 @@ test("in the List view the body gives way first, and only the site in the meta l
   expect(row.querySelector(":scope > .meta > .site")?.textContent).toBe(site);
   const css = (sel: string) =>
     cssRule(import.meta.dirname, "link-card.css", sel);
-  // A long summary starts from zero width, so it never squeezes a short site.
+  // A long summary starts from zero width, so it never squeezes a short site. The body never gets
+  // narrower than a whole trust label; when the row is too narrow, the meta line wraps under it.
   expect(css(".link-row > .row-body")).toMatchObject({
     flex: "1 1 0",
-    "min-width": "0",
+    "min-width": "var(--size-link-sub-min)",
   });
   // The meta line stays on one line, at most half the row.
   expect(css(".link-row > .meta")).toMatchObject({
@@ -658,10 +659,10 @@ test("the rows take keyboard focus, and the List row's text holds the title, the
   document.body.replaceChildren();
 });
 
-// happy-dom has no layout, so these tests hold the CSS contract of each fix. The real layout (no
-// text cut without an ellipsis, at 800 x 560 and at 200% zoom, light and dark, on the Records tab
-// that shows every row state) is proved in a real browser by
-// tests/acceptance/ds-09-limits.test.mjs (AC3).
+// happy-dom has no layout, so these tests hold the CSS contract of each fix. The real layout, at
+// 800 x 560 and at 200% zoom, light and dark, on the Records tab that shows every row state, is
+// proved in a real browser by tests/acceptance/ds-09-limits.test.mjs (AC3): no text is cut without
+// an ellipsis, and each trust label keeps its words inside its pill and off a link row's meta line.
 
 test("overflow: a long Vietnamese summary is cut with its ellipsis and the label stays whole", () => {
   const summary = `${"Mỗi cửa sổ chỉ gọi được những lệnh đã khai báo. ".repeat(8)}ẪẬẲỖỮỰ`;
@@ -686,6 +687,11 @@ test("overflow: a long Vietnamese summary is cut with its ellipsis and the label
 });
 
 test("a narrow List row never clips the label: it wraps under the summary, and its words wrap", () => {
+  // The row wraps, so a narrow row puts the meta line under the body instead of squeezing it.
+  expect(rowCss(".link-row")).toMatchObject({
+    "flex-wrap": "wrap",
+    "row-gap": "var(--space-1)",
+  });
   // The line wraps and clips nothing.
   const line = rowCss(".link-row .link-sub");
   expect(line).toMatchObject({
