@@ -385,7 +385,9 @@ export function createLinkRow(
 
 /**
  * The Compact view: the title, the site and the saved date on one line, and a spinner (named
- * "Reading the page") while Mnemo reads it. It shows nothing the app wrote (no summary, tags or
+ * "Reading the page") while Mnemo reads it. The title keeps a readable minimum (8ch) and the site
+ * is cut first; in a narrow list the date (on a reading row, the site and the date) goes to a
+ * second line under the title (issue 175). It shows nothing the app wrote (no summary, tags or
  * reason), so it needs no trust label; the List and Cards views show them, labelled (issue 171).
  */
 export function createCompactRow(

@@ -314,7 +314,18 @@ function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
     ],
     [{ ...pasted, ...unread, status: "unreadable" }, "could not read"],
     [{ ...pasted, ...unread, status: "ai-off" }, "AI off"],
-    [overflow, "overflow: long Vietnamese title and host"],
+    [
+      overflow,
+      "overflow: long Vietnamese title and host; the title keeps 8ch and the host is cut first, the date wraps under the title in a narrow column",
+    ],
+    [
+      { ...overflow, site: "t.me", url: "https://t.me/tauri_apps/1234" },
+      "overflow: long title, short host t.me kept whole",
+    ],
+    [
+      { ...overflow, ...unread, status: "reading" },
+      "reading, long title and host: the spinner stays on the title's line",
+    ],
     [pasted, "hover", { forceState: "hover" }],
     [pasted, "focus-visible", { forceState: "focus" }],
     [
