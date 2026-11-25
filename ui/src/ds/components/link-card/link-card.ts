@@ -51,11 +51,12 @@ export interface LinkItem {
    * left out). Left out, the status is `done` with a summary and `unreadable` without one.
    */
   readonly status?: LinkStatus;
-  /** The top-level label names, shown with the tag list part. */
+  /** The top-level label names, shown with the tag list part. Tags the app chose show only on a
+   * `done` link; the owner's show in every status. */
   readonly tags?: readonly string[];
   /** Who chose the tags. `ai` (the app chose them) is labelled Written by AI. Default `ai`. */
   readonly tagsKind?: "ai" | "owner";
-  /** Why the link was saved. */
+  /** Why the link was saved. A guessed reason shows only on a `done` link; the owner's always. */
   readonly reason?: string;
   /** Who wrote the reason. `guess` (the app wrote it) is labelled Guess. Default `guess`. */
   readonly reasonKind?: "guess" | "owner";
@@ -127,7 +128,8 @@ function metaLine(doc: Document, item: LinkItem): HTMLDivElement {
     site.title = item.site;
     parts.push(site);
   }
-  const when = item.saved ?? item.age;
+  // An empty string falls back, as a missing value does.
+  const when = item.saved || item.age;
   if (when) parts.push(when);
   return createMetaLine(doc, parts);
 }
@@ -137,9 +139,17 @@ function noSummary(doc: Document, item: LinkItem): HTMLElement {
   if (status === "reading") return reading(doc);
   const none = doc.createElement("div");
   none.className = "nosum";
+  // The link icon means "link only", so a read link with no summary has no icon.
   const icon =
-    status === "ai-off" ? PowerOff : status === "pending" ? Clock : Link;
-  none.append(createIcon(icon), doc.createTextNode(noSummaryText(item)));
+    status === "ai-off"
+      ? PowerOff
+      : status === "pending"
+        ? Clock
+        : status === "unreadable"
+          ? Link
+          : undefined;
+  if (icon) none.append(createIcon(icon));
+  none.append(doc.createTextNode(noSummaryText(item)));
   return none;
 }
 
@@ -155,7 +165,7 @@ function reasonLine(doc: Document, item: LinkItem): HTMLElement {
 /** The tags, with the Written by AI label when the app chose them. */
 function tagLine(doc: Document, item: LinkItem): HTMLElement {
   const line = doc.createElement("div");
-  line.className = "tagline";
+  line.className = "lcard-tags";
   line.append(createTagList(doc, item.tags ?? [], { max: MAX_TAGS }));
   if ((item.tagsKind ?? "ai") === "ai") line.append(buildTrustLabel("ai"));
   return line;
@@ -190,8 +200,14 @@ export function createLinkCard(
   } else {
     card.append(noSummary(doc, item));
   }
-  if (item.tags && item.tags.length > 0) card.append(tagLine(doc, item));
-  if (item.reason) card.append(reasonLine(doc, item));
+  // Shared rule 1: tags and a reason the app wrote show only on a read (`done`) link. The owner's
+  // own tags and reason show in every status.
+  const read = linkStatus(item) === "done";
+  const aiTags = (item.tagsKind ?? "ai") === "ai";
+  if (item.tags && item.tags.length > 0 && (read || !aiTags))
+    card.append(tagLine(doc, item));
+  const guessed = (item.reasonKind ?? "guess") === "guess";
+  if (item.reason && (read || !guessed)) card.append(reasonLine(doc, item));
   if (options.action) {
     const slot = doc.createElement("div");
     slot.className = "lcard-action";
@@ -219,11 +235,11 @@ export function createCompactRow(doc: Document, item: LinkItem): HTMLLIElement {
   li.tabIndex = 0;
   const title = textEl(doc, "span", "row-title", item.title);
   title.title = item.title;
-  const host = item.site ?? item.url.split("/")[0];
+  const host = item.site || item.url.split("/")[0];
   const dom = textEl(doc, "span", "dom", host);
   dom.title = item.url;
   li.append(title, dom);
-  const when = item.saved ?? item.age;
+  const when = item.saved || item.age;
   if (when) li.append(textEl(doc, "span", "row-meta", when));
   return li;
 }

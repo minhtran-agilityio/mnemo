@@ -90,9 +90,11 @@
   white-space: nowrap;
 }
 
-/* The tag list in a card is the plain tag list. The tag input part also uses the class .tags (a
-   box with a border); this keeps its box off the card wherever both style sheets are loaded. */
-.lcard .tags {
+/* The tag list the card builds, inside its own .lcard-tags wrapper. The tag input part also uses
+   the class .tags (a box with a border); this keeps that box off the card's tag list, wherever both
+   style sheets load. The selector names only the card's own wrapper, so a tag input placed inside a
+   card keeps its own look. */
+.lcard-tags > .tags {
   max-width: 100%;
   min-height: 0;
   padding: 0;
@@ -102,7 +104,7 @@
 }
 
 /* The tags and, when the app chose them, their Written by AI label. */
-.lcard .tagline {
+.lcard .lcard-tags {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -144,6 +146,14 @@
       auto-fill,
       minmax(min(var(--size-basis-column), 100%), 1fr)
     );
+}
+
+/* The meta line of a List row: it may shrink (at most half the row), so a long site is cut with
+   its ellipsis instead of widening the row past its list. */
+.row > .meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
 }
 
 .compact-row {

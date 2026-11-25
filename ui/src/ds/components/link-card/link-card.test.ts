@@ -278,8 +278,15 @@ test("the status decides: a summary shows only when the link is done", () => {
     const card = createLinkCard(document, item);
     expect(card.dataset.status).toBe(status);
     expect(card.querySelector(".sum")).toBeNull();
-    expect(card.querySelector(":scope > .trust")).toBeNull();
+    // No AI text at all: no summary, no AI tags, no guessed reason, and no trust label anywhere.
+    expect(card.querySelector(".trust")).toBeNull();
+    expect(card.querySelector(".lcard-tags")).toBeNull();
+    expect(card.querySelector(".tags")).toBeNull();
+    expect(card.querySelector(".reason")).toBeNull();
     expect(card.textContent).not.toContain("Made-up text.");
+    expect(card.textContent).not.toContain(pasted.reason);
+    expect(card.textContent).not.toContain("Written by AI");
+    expect(card.textContent).not.toContain("Guess");
     const sub = createLinkRow(document, item).querySelector(".row-sub");
     expect(sub?.textContent).toBe(noSummaryText(item));
   }
@@ -320,16 +327,16 @@ test("an empty summary counts as none, in the card and in the list row alike", (
 
 test("tags the app chose are labelled Written by AI; the owner's tags are not", () => {
   const card = createLinkCard(document, pasted);
-  const line = card.querySelector(":scope > .tagline") as HTMLElement;
+  const line = card.querySelector(":scope > .lcard-tags") as HTMLElement;
   expect(line.querySelector("ul.tags")).not.toBeNull();
   expect(line.querySelector(".trust-ai")?.textContent).toBe("Written by AI");
   const own = createLinkCard(document, { ...pasted, tagsKind: "owner" });
-  expect(own.querySelector(".tagline .tags")).not.toBeNull();
-  expect(own.querySelector(".tagline .trust")).toBeNull();
+  expect(own.querySelector(".lcard-tags .tags")).not.toBeNull();
+  expect(own.querySelector(".lcard-tags .trust")).toBeNull();
   const css = (sel: string) =>
     cssRule(import.meta.dirname, "link-card.css", sel);
-  expect(css(".lcard .tags").gap).toBe("var(--space-2)");
-  expect(css(".lcard .tagline")["flex-wrap"]).toBe("wrap");
+  expect(css(".lcard-tags > .tags").gap).toBe("var(--space-2)");
+  expect(css(".lcard .lcard-tags")["flex-wrap"]).toBe("wrap");
 });
 
 test("a long site in a compact row shrinks and is cut with an ellipsis", () => {
@@ -429,8 +436,87 @@ test("overflow: a long host, many tags and a long Vietnamese reason keep full va
   expect(css(".lcard .reason-text")["overflow-wrap"]).toBe("anywhere");
   expect(css(".lcard .reason")["flex-wrap"]).toBe("wrap");
   // The tag list stays a plain list in the card, never the tag input's box, and never wider.
-  expect(css(".lcard .tags")).toMatchObject({
+  expect(css(".lcard-tags > .tags")).toMatchObject({
     border: "0",
     "max-width": "100%",
+  });
+});
+
+test("the owner's tags and reason show in every status, with no label", () => {
+  for (const status of [
+    "pending",
+    "reading",
+    "unreadable",
+    "ai-off",
+    "done",
+  ] as const) {
+    const card = createLinkCard(document, {
+      ...pasted,
+      status,
+      tagsKind: "owner",
+      reasonKind: "owner",
+    });
+    expect(card.querySelector(":scope > .lcard-tags > .tags")).not.toBeNull();
+    expect(card.querySelector(".lcard-tags .trust")).toBeNull();
+    expect(card.querySelector(".reason-text")?.textContent).toBe(pasted.reason);
+    expect(card.querySelector(".reason .trust")).toBeNull();
+  }
+});
+
+test("only the card's own tag list loses the tag input box: the selector names the card's wrapper", () => {
+  const card = createLinkCard(document, pasted);
+  expect(card.querySelector(":scope > .lcard-tags > ul.tags")).not.toBeNull();
+  expect(() =>
+    cssRule(import.meta.dirname, "link-card.css", ".lcard .tags"),
+  ).toThrow();
+});
+
+test("a read link with no summary says so, without the link-only icon", () => {
+  const card = createLinkCard(document, {
+    ...pasted,
+    ...noSum,
+    status: "done",
+  });
+  const none = card.querySelector(".nosum");
+  expect(none?.textContent).toBe("No summary.");
+  expect(none?.querySelector("svg")).toBeNull();
+  const linkOnly = createLinkCard(document, {
+    ...pasted,
+    ...noSum,
+    status: "unreadable",
+  });
+  expect(linkOnly.querySelector(".nosum svg")).not.toBeNull();
+});
+
+test("an empty site or saved date falls back: the url host, and the age", () => {
+  const item: LinkItem = { ...pasted, site: "", saved: "", age: "2 d" };
+  const compact = createCompactRow(document, item);
+  expect(compact.querySelector(".dom")?.textContent).toBe("v2.tauri.app");
+  expect(compact.querySelector(".row-meta")?.textContent).toBe("2 d");
+  const card = createLinkCard(document, item);
+  expect(card.querySelector(".site")).toBeNull();
+  expect(card.querySelector(".meta")?.textContent).toBe("2 d");
+  expect(
+    createLinkRow(document, item).querySelector(".meta")?.textContent,
+  ).toBe("2 d");
+});
+
+test("in the List view the meta line can shrink, so a long site gets its ellipsis", () => {
+  const site = `${"rất-dài-".repeat(12)}ẪẬẲỖỮỰ.example.vn`;
+  const row = createLinkRow(document, { ...pasted, site });
+  expect(row.querySelector(":scope > .meta > .site")?.textContent).toBe(site);
+  const css = (sel: string) =>
+    cssRule(import.meta.dirname, "link-card.css", sel);
+  expect(css(".row > .meta")).toMatchObject({
+    "min-width": "0",
+    "max-width": "50%",
+  });
+  expect(css(".row > .meta").flex.split(" ")[1]).toBe("1");
+  expect(css(".row .site")).toMatchObject({
+    ...MARKS_ROOM,
+    "min-width": "0",
+    overflow: "hidden",
+    "text-overflow": "ellipsis",
+    "white-space": "nowrap",
   });
 });
