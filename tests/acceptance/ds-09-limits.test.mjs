@@ -1037,6 +1037,48 @@ test('AC3: control, the link card action audit reports the one-line slot spillin
     assert.ok(nowrap.bad.some((b) => b.includes('spills out of its button')), 'a label that may not wrap was not reported spilling out of its button');
   }));
 
+// The slot's rules touch only the button part, and an icon-only button keeps its own padding (0) and size there: a
+// small icon-only button, and a plain span, are put in a link card's slot of the Records tab and compared with the
+// same nodes outside any card. A text button in the slot gets its --space-2 block padding (the check can fail).
+test('AC3: in a link card\'s slot an icon-only button keeps its own padding and size, and a node that is not a button is not restyled', UI, () =>
+  withApp({}, async (app) => {
+    await app.goto('/#/ui-catalog', CATALOG_READY);
+    assert.ok(await app.click('Records'), 'no Records tab');
+    await sleep(500);
+    const r = await app.eval(`(() => {
+      const slot = document.querySelector('.lcard > .lcard-action');
+      if (!slot) return null;
+      const keys = ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'width', 'height', 'minWidth', 'maxWidth', 'overflowWrap'];
+      const look = (e) => { const cs = getComputedStyle(e); return Object.fromEntries(keys.map((k) => [k, cs[k]])); };
+      const make = (cls, text) => { const b = document.createElement(cls ? 'button' : 'span'); if (cls) b.className = cls; b.textContent = text; return b; };
+      const outIcon = make('btn btn-sm btn-icon', '+');
+      const outSpan = make('', 'note');
+      const outText = make('btn btn-sm', 'Paste the text');
+      document.body.append(outIcon, outSpan, outText);
+      const inIcon = make('btn btn-sm btn-icon', '+');
+      const inSpan = make('', 'note');
+      const inText = make('btn btn-sm', 'Paste the text');
+      slot.append(inIcon, inSpan, inText);
+      const res = { icon: [look(outIcon), look(inIcon)], span: [look(outSpan), look(inSpan)], text: [look(outText), look(inText)] };
+      for (const e of [outIcon, outSpan, outText, inIcon, inSpan, inText]) e.remove();
+      return res;
+    })()`);
+    assert.ok(r, 'no link card with an action slot in the Records tab');
+    const [outIcon, inIcon] = r.icon;
+    for (const k of ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'width', 'height']) assert.equal(inIcon[k], outIcon[k], `icon-only button ${k} in the slot`);
+    assert.equal(inIcon.paddingTop, '0px');
+    const [outSpan, inSpan] = r.span;
+    // A span becomes a flex item in the slot, so its used width and height change, and its min-width stays the flex
+    // item's auto (the old rule on every child set it to 0); its padding, cap and wrapping are its own.
+    for (const k of ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'maxWidth', 'overflowWrap']) assert.equal(inSpan[k], outSpan[k], `a span in the slot was restyled: ${k}`);
+    assert.equal(inSpan.minWidth, 'auto', 'a span in the slot was given a min-width');
+    assert.equal(inSpan.maxWidth, 'none');
+    const [outText, inText] = r.text;
+    assert.equal(outText.paddingTop, '0px');
+    assert.equal(inText.paddingTop, '4px', 'a text button in the slot has no --space-1 block padding, so this check could not fail');
+    assert.equal(inText.overflowWrap, 'anywhere');
+  }));
+
 // ---------------------------------------------------------------- AC4
 test('AC4: the 1000-row catalog list builds in under 1.5 s and scrolls with no frame stall over 250 ms', UI, () =>
   withApp({ w: 900, h: 640 }, async (app) => {

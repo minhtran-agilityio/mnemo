@@ -70,20 +70,29 @@ export interface LinkCardOptions {
   /** Shows a picture box on top (the Cards view). */
   readonly thumb?: boolean;
   /**
-   * The actions of the card for its status, in order: the first is the main one. Usually
-   * `createButton` with size `sm`. They sit in the `.lcard-action` slot with a gap and wrap on a
-   * narrow card. Empty or left out (with no `action`): no slot. When given, even empty, it wins
-   * over `action`, which is then ignored.
+   * The actions of the card for its status, in order: the first is the main one. They sit in the
+   * `.lcard-action` slot with a gap and wrap on a narrow card.
+   *
+   * The screen picks the buttons' variants; the card does not restyle them. A list holds many
+   * cards, and a view has one primary action, so no card button is `primary`: the main action is a
+   * default `createButton` with size `sm`, and each other one is a `ghost` `sm` button (quieter).
+   * For example "Summarize later" (default) then "Paste the text" (ghost).
+   *
+   * A non-empty list wins over `action`. Empty or left out, `action` is shown; with neither there
+   * is no slot.
    */
   readonly actions?: readonly Node[];
-  /** One action: the same as `actions: [action]`. Ignored when `actions` is given. */
+  /** One action: the same as `actions: [action]`. Shown only when `actions` is empty or left out. */
   readonly action?: Node;
 }
 
-/** The actions to show: `actions` when given, else `action` alone, else none. */
+/** The actions to show: a non-empty `actions`, else `action` alone, else none. */
 function cardActions(options: LinkCardOptions): readonly Node[] {
-  if (options.actions) return options.actions;
-  return options.action ? [options.action] : [];
+  return options.actions?.length
+    ? options.actions
+    : options.action
+      ? [options.action]
+      : [];
 }
 
 /** Options of a List or Compact row. */

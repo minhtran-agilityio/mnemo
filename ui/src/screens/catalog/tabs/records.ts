@@ -119,6 +119,7 @@ function linkCardRow(ctx: TabContext) {
       busy?: boolean;
       disabled?: boolean;
       forced?: "hover" | "focus" | "pressed";
+      variant?: "ghost";
     } = {},
   ) =>
     createButton(doc, {
@@ -127,6 +128,8 @@ function linkCardRow(ctx: TabContext) {
       ...more,
       onClick: () => ctx.toast(`${label}: an example action`),
     });
+  // Every action after the main one is quieter (issue 179).
+  const ghost = { variant: "ghost" } as const;
   // The request's sample (issue 169): a link pasted into Mnemo, so no source app.
   const pasted: LinkItem = {
     title: "Tauri 2 capabilities",
@@ -163,16 +166,18 @@ function linkCardRow(ctx: TabContext) {
       "action disabled",
       act("Paste the text", { disabled: true }),
     ),
-    // Issue 179, the owner's "Offer both": a pending card whose page could not be reached.
+    // Issue 179, the owner's "Offer both": a pending card whose page could not be reached. A list
+    // holds many cards and a view has one primary action, so no card button is primary: the main
+    // action is a default sm button and the other one a quieter ghost sm button.
     cardWith(
       { ...pasted, ...unread, status: "pending" },
-      "two actions: pending, the main one first",
-      [act("Summarize later"), act("Paste the text")],
+      "two actions: pending, the main one default, the other ghost",
+      [act("Summarize later"), act("Paste the text", ghost)],
     ),
     cardWith(
       { ...pasted, ...unread, status: "pending" },
       "two actions on a narrow card: they wrap",
-      [act("Summarize later"), act("Paste the text")],
+      [act("Summarize later"), act("Paste the text", ghost)],
       true,
     ),
     cardWith(
@@ -185,31 +190,37 @@ function linkCardRow(ctx: TabContext) {
       "overflow: two long Vietnamese labels on a narrow card",
       [
         act("Tóm tắt sau khi có mạng trở lại"),
-        act("Dán toàn bộ nội dung của trang vào đây"),
+        act("Dán toàn bộ nội dung của trang vào đây", ghost),
       ],
       true,
     ),
     cardWith(
       { ...pasted, ...unread, status: "pending" },
       "two actions: the first busy",
-      [act("Summarize later", { busy: true }), act("Paste the text")],
+      [act("Summarize later", { busy: true }), act("Paste the text", ghost)],
     ),
     cardWith(
       { ...pasted, ...unread, status: "pending" },
       "two actions: the first disabled",
-      [act("Summarize later", { disabled: true }), act("Paste the text")],
+      [
+        act("Summarize later", { disabled: true }),
+        act("Paste the text", ghost),
+      ],
     ),
     cardWith(
       { ...pasted, ...unread, status: "pending" },
       "two actions: focus-visible on the second",
-      [act("Summarize later"), act("Paste the text", { forced: "focus" })],
+      [
+        act("Summarize later"),
+        act("Paste the text", { ...ghost, forced: "focus" }),
+      ],
     ),
     cardWith(
       { ...pasted, ...unread, status: "pending" },
       "two actions: hover on the first, active on the second",
       [
         act("Summarize later", { forced: "hover" }),
-        act("Paste the text", { forced: "pressed" }),
+        act("Paste the text", { ...ghost, forced: "pressed" }),
       ],
     ),
     card(

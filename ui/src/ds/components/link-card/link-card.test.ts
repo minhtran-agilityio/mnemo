@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { Link } from "lucide";
 import { expect, test } from "vitest";
 import { cssRule, MARKS_ROOM } from "../../../css-rule";
 import { createButton } from "../button/button";
@@ -301,7 +302,7 @@ test("no actions, an empty list or no options: no slot", () => {
   expect(slotOf(createLinkCard(document, pending, { actions: [] }))).toBeNull();
 });
 
-test("action is a one-item shorthand for actions; when both are given, actions wins", () => {
+test("action is a one-item shorthand for actions; a non-empty actions wins, an empty one falls back to action", () => {
   const one = sm("Paste the text");
   const short = createLinkCard(document, pending, { action: one });
   expect(inSlot(short)).toEqual([one]);
@@ -318,12 +319,36 @@ test("action is a one-item shorthand for actions; when both are given, actions w
   });
   expect(inSlot(both)).toEqual([later, paste]);
   expect(both.contains(ignored)).toBe(false);
-  // An empty actions list still wins: no slot, and the shorthand is not shown.
-  const emptyWins = createLinkCard(document, pending, {
-    action: ignored,
+  // An empty actions list does not drop the only action: the shorthand shows.
+  const only = sm("Paste the text");
+  const fallback = createLinkCard(document, pending, {
+    action: only,
     actions: [],
   });
-  expect(slotOf(emptyWins)).toBeNull();
+  expect(inSlot(fallback)).toEqual([only]);
+});
+
+test("the main action is a default sm button and the others ghost sm; the card keeps the variants the screen picks", () => {
+  const later = sm("Summarize later");
+  const paste = createButton(document, {
+    label: "Paste the text",
+    size: "sm",
+    variant: "ghost",
+  });
+  const before = [later.className, paste.className];
+  const card = createLinkCard(document, pending, { actions: [later, paste] });
+  expect(inSlot(card)).toEqual([later, paste]);
+  expect([later.className, paste.className]).toEqual(before);
+  expect(later.classList.contains("btn-ghost")).toBe(false);
+  expect(paste.classList.contains("btn-ghost")).toBe(true);
+  // A list holds many cards, and a view has one primary action: no card button is primary.
+  expect(card.querySelector(".btn-primary")).toBeNull();
+  // The slot's rules name no variant, so the card never restyles one.
+  const css = readFileSync(
+    resolve(import.meta.dirname, "link-card.css"),
+    "utf8",
+  );
+  expect(css).not.toMatch(/\.lcard-action[^{]*\.btn-(primary|ghost|danger)/);
 });
 
 test("two actions: Tab reaches them in order, each has its name and clicks on its own", () => {
@@ -410,14 +435,52 @@ test("the slot wraps its actions from its start edge with a token gap, and a lon
   const item = cssRule(
     import.meta.dirname,
     "link-card.css",
-    ".lcard .lcard-action > *",
+    ".lcard .lcard-action > .btn",
   );
   expect(item["max-width"]).toBe("100%");
   expect(item["min-width"]).toBe("0");
   expect(item["overflow-wrap"]).toBe("anywhere");
-  // No auto margin, so a wrapped button starts at the slot's edge.
+  // No auto margin, so a wrapped button starts at the slot's edge; no padding, so an icon-only
+  // button keeps its own.
   expect(item["margin-inline-start"]).toBeUndefined();
   expect(item.margin).toBeUndefined();
+  expect(item.padding).toBeUndefined();
+  expect(item["padding-block"]).toBeUndefined();
+  expect(item["padding-inline"]).toBeUndefined();
+  const label = cssRule(
+    import.meta.dirname,
+    "link-card.css",
+    ".lcard .lcard-action > .btn:not(.btn-icon)",
+  );
+  expect(label).toEqual({ "padding-block": "var(--space-1)" });
+  // Only the button part is touched: no rule styles any node in the slot.
+  expect(() =>
+    cssRule(import.meta.dirname, "link-card.css", ".lcard .lcard-action > *"),
+  ).toThrow();
+});
+
+test("an icon-only button in the slot keeps its classes, so its own padding applies", () => {
+  const icon = createButton(document, {
+    label: "More actions",
+    size: "sm",
+    iconOnly: true,
+    icon: Link,
+  });
+  const card = createLinkCard(document, pending, {
+    actions: [sm("Summarize later"), icon],
+  });
+  expect(inSlot(card)[1]).toBe(icon);
+  expect(icon.matches(".lcard .lcard-action > .btn")).toBe(true);
+  expect(icon.matches(".lcard .lcard-action > .btn:not(.btn-icon)")).toBe(
+    false,
+  );
+  expect(icon.getAttribute("aria-label")).toBe("More actions");
+  const own = cssRule(
+    resolve(import.meta.dirname, "../button"),
+    "button.css",
+    ".btn-icon",
+  );
+  expect(own.padding).toBe("0");
 });
 
 test("the status decides: a summary shows only when the link is done", () => {
