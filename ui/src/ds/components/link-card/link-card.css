@@ -156,31 +156,41 @@
   min-width: 0;
 }
 
-/* The summary line of a List row and its trust label. The summary shrinks first and is cut with
-   its ellipsis (full text in its tooltip); the label after it stays whole. Only when the line is
-   narrower than the label does the label shrink, to the line's width, and the line clips it, so
-   it never spills over the meta line. The line keeps room above and below for stacked Vietnamese
-   marks, taken back by the margin, so the clip never cuts them. */
+/* The summary line of a List row and its trust label. Nothing here is clipped without an ellipsis.
+   The summary starts from its smallest width (--size-link-sub-min, or the whole line when that is
+   narrower) and grows up to its own text width, so a short summary keeps its label right after
+   it, and a long one is cut with its ellipsis (full text in its tooltip). When the line has no
+   room for that smallest summary and the whole label, the label wraps under the summary. A label
+   in a line narrower than itself wraps its words, as on the card. */
 .link-row .link-sub {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-1) var(--space-2);
   min-width: 0;
-  padding-block: var(--border-2);
-  margin-block: calc(-1 * var(--border-2));
-  overflow: hidden;
 }
 
 .link-row .link-sub > .row-sub {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: 1 1 0;
+  min-width: min(var(--size-link-sub-min), 100%);
+  max-width: max-content;
 }
 
 .link-row .link-sub > .trust {
   flex: none;
-  min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  white-space: normal;
+}
+
+/* Reading in a List row: the spinner and the words run inline in the second line, so a narrow
+   row cuts the words with the line's ellipsis. */
+.link-row .row-sub > .rec-reading {
+  display: inline;
+}
+
+.link-row .row-sub > .rec-reading > .spinner {
+  margin-inline-end: var(--space-1);
+  vertical-align: middle;
 }
 
 /* The meta line stays on one line at its own width, at most half the row. Only the site in it may
@@ -219,19 +229,42 @@
   background: var(--head);
 }
 
-/* Pressed: the soft info tint, as a pressed label picker item. It differs from the hover surface
-   (--head) and from the row dividers (--line), so the dividers stay visible on press. */
+/* Pressed: the hover surface and a thin edge in --control-edge (3:1 on the row surfaces) drawn
+   inside the row. A pale fill alone is too close to the --line dividers; the edge keeps the row's
+   bounds visible. Focus-visible, drawn after this rule, wins over the edge. */
 .link-row:active,
 .link-row.is-active,
 .compact-row:active,
 .compact-row.is-active {
-  background: var(--tint-info);
+  background: var(--head);
+  outline: var(--border-1) solid var(--control-edge);
+  outline-offset: calc(-1 * var(--border-1));
 }
 
-/* While Mnemo reads the page: the spinner and "Reading the page" after the title, kept whole on
-   one line; the title gives way first. */
-.compact-row .rec-reading {
+/* A List row's focus ring (from the list row part) wins over the pressed edge. */
+.link-row:focus-visible,
+.link-row.is-focus {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: calc(var(--focus-ring) * -1);
+}
+
+/* While Mnemo reads the page: the spinner alone after the title, with "Reading the page" in the
+   tooltip and in hidden words that the status region reads out. It never pushes the date out. */
+.compact-row .compact-reading {
+  display: inline-flex;
   flex: none;
+  align-items: center;
+  color: var(--muted);
+}
+
+.compact-row .compact-reading-words {
+  position: absolute;
+  width: var(--border-1);
+  height: var(--border-1);
+  margin: calc(-1 * var(--border-1));
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
   white-space: nowrap;
 }
 

@@ -230,8 +230,9 @@ export function createLinkCard(
 /**
  * The List view: one row per link, with the summary (or why there is none) on a second line. A
  * summary shows only on a `done` link and keeps its Written by AI (or Guess) label after the text:
- * the summary is cut with its ellipsis, the label stays whole. Tags and the reason are left out of
- * the two-line row (each needs its own label and line); the Cards view shows them (issue 171).
+ * the summary is cut with its ellipsis, and the label stays whole (under the summary when the line
+ * is tight). Tags and the reason are left out of the two-line row (each needs its own label and
+ * line); the Cards view shows them (issue 171).
  */
 export function createLinkRow(
   doc: Document,
@@ -263,8 +264,8 @@ export function createLinkRow(
 }
 
 /**
- * The Compact view: the title, the site and the saved date on one line, and "Reading the page"
- * with a spinner while Mnemo reads it. It shows nothing the app wrote (no summary, tags or
+ * The Compact view: the title, the site and the saved date on one line, and a spinner (named
+ * "Reading the page") while Mnemo reads it. It shows nothing the app wrote (no summary, tags or
  * reason), so it needs no trust label; the List and Cards views show them, labelled (issue 171).
  */
 export function createCompactRow(
@@ -283,8 +284,19 @@ export function createCompactRow(
   const dom = textEl(doc, "span", "dom", host);
   dom.title = item.url;
   li.append(title);
-  // While Mnemo reads the page, the spinner and the words sit after the title, as a status region.
-  if (linkStatus(item) === "reading") li.append(reading(doc));
+  // While Mnemo reads the page, a spinner sits after the title, as a status region. Its words are
+  // in the tooltip and hidden text, so the one-line row keeps room for the site and the date.
+  if (linkStatus(item) === "reading") {
+    const box = doc.createElement("span");
+    box.className = "compact-reading";
+    box.setAttribute("role", "status");
+    box.title = NO_SUMMARY.reading;
+    box.append(
+      buildSpinner(),
+      textEl(doc, "span", "compact-reading-words", NO_SUMMARY.reading),
+    );
+    li.append(box);
+  }
   li.append(dom);
   const when = item.saved || item.age;
   if (when) li.append(textEl(doc, "span", "row-meta", when));

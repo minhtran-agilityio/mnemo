@@ -270,7 +270,7 @@ function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
     [{ ...pasted, ...unread, status: "pending" }, "pending"],
     [
       { ...pasted, ...unread, status: "reading" },
-      "reading: spinner and words after the title",
+      "reading: spinner after the title, named Reading the page",
     ],
     [{ ...pasted, ...unread, status: "unreadable" }, "could not read"],
     [{ ...pasted, ...unread, status: "ai-off" }, "AI off"],
