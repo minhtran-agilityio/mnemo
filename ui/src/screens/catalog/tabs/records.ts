@@ -10,6 +10,7 @@ import {
   buildTrustLabel,
   createAnswer,
   createAppBadge,
+  createButton,
   createCite,
   createKanbanCard,
   createLinkCard,
@@ -92,21 +93,86 @@ function linkCardRow(ctx: TabContext) {
   const sw = viewSwitch(doc, out, "cards");
   const base = LINKS[1];
   const states = el(doc, "div", "rec-wrap");
-  const card = (item: LinkItem, caption: string) =>
-    state(doc, caption, createLinkCard(doc, item), { grow: true });
+  const card = (item: LinkItem, caption: string, action?: Node) =>
+    state(doc, caption, createLinkCard(doc, item, { action }), { grow: true });
+  const act = (
+    label: string,
+    more: { busy?: boolean; disabled?: boolean } = {},
+  ) =>
+    createButton(doc, {
+      label,
+      size: "sm",
+      ...more,
+      onClick: () => ctx.toast(`${label}: an example action`),
+    });
+  // The request's sample (issue 169): a link pasted into Mnemo, so no source app.
+  const pasted: LinkItem = {
+    title: "Tauri 2 capabilities",
+    url: "v2.tauri.app/security/capabilities",
+    site: "v2.tauri.app",
+    saved: "25 Nov 2026",
+    status: "done",
+    summary: "Each window gets a list of allowed commands.",
+    tags: ["tauri", "security"],
+    reason: "It may matter for the Mnemo command allow-list.",
+  };
+  const unread = { summary: undefined, tags: undefined, reason: undefined };
   states.append(
+    card(pasted, "done: summary, tags, reason (Guess)"),
+    card({ ...pasted, ...unread, status: "pending" }, "pending"),
+    card({ ...pasted, ...unread, status: "reading" }, "reading"),
+    card(
+      { ...pasted, ...unread, status: "unreadable" },
+      "could not read, with its action",
+      act("Paste the text"),
+    ),
+    card(
+      { ...pasted, ...unread, status: "ai-off" },
+      "AI off, with its action",
+      act("Summarize later"),
+    ),
+    card(
+      { ...pasted, ...unread, status: "ai-off" },
+      "action busy",
+      act("Summarize later", { busy: true }),
+    ),
+    card(
+      { ...pasted, ...unread, status: "unreadable" },
+      "action disabled",
+      act("Paste the text", { disabled: true }),
+    ),
+    card(
+      { ...pasted, tags: undefined, reason: undefined },
+      "partial: summary only",
+    ),
+    card({ ...pasted, reason: undefined }, "partial: tags, no reason"),
     card(
       {
-        title: "Đang đọc trang…",
-        url: "thanhnien.vn/cong-nghe/ai-viet-nam",
-        app: "telegram",
-        age: "2 min",
-        status: "reading",
+        ...pasted,
+        title:
+          "Hướng dẫn đầy đủ về quyền và khả năng trong Tauri 2 — Ở ĐÂU, KHI NÀO, VÌ SAO cần giới hạn lệnh?",
+        url: "rất-nhiều-tên-miền-con.tài-liệu.v2.tauri.app/security/capabilities/permissions/scopes/very/long/path",
+        site: "rất-nhiều-tên-miền-con.tài-liệu.v2.tauri.app",
+        tags: [
+          "tauri",
+          "security",
+          "rust",
+          "ipc",
+          "capabilities",
+          "windows",
+          "đặc-tả",
+          "lưu-trữ",
+        ],
+        reason:
+          "Có thể liên quan đến danh sách lệnh được phép của Mnemo, vì mỗi cửa sổ chỉ gọi được những lệnh đã khai báo trong tệp capabilities.",
       },
-      "reading",
+      "overflow: long title, host, many tags, long reason",
     ),
-    card({ ...LINKS[2] }, "could not read"),
-    card({ ...base, summary: undefined, status: "ai-off" }, "AI off"),
+    card({ ...LINKS[2] }, "could not read (from an app)"),
+    card(
+      { ...base, summary: undefined, status: "ai-off" },
+      "AI off (from an app)",
+    ),
     card(
       {
         ...base,

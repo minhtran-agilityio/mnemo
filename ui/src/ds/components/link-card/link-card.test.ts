@@ -1,12 +1,14 @@
 // @vitest-environment happy-dom
 import { expect, test } from "vitest";
 import { cssRule, MARKS_ROOM } from "../../../css-rule";
+import { createButton } from "../button/button";
 import {
   createCompactRow,
   createLinkCard,
   createLinkRow,
   createLinkView,
   type LinkItem,
+  noSummaryText,
 } from "./link-card";
 
 const read: LinkItem = {
@@ -50,7 +52,7 @@ test("a page that could not be read keeps the link only, with no summary", () =>
 test("AI off and reading say so, and reading is a status", () => {
   expect(
     createLinkCard(document, { ...unread, status: "ai-off" }).textContent,
-  ).toContain("No summary: AI is off.");
+  ).toContain("No summary yet: AI is off.");
   const r = createLinkCard(document, { ...unread, status: "reading" });
   expect(r.querySelector('[role="status"]')?.textContent).toBe(
     "Reading the page",
@@ -120,4 +122,204 @@ test("the cards view has columns that shrink to the container, so a narrow windo
   expect(rule["grid-template-columns"]).toContain(
     "min(var(--size-basis-column), 100%)",
   );
+});
+
+// Issue 169 (BM-01): a pasted link with its site, saved date, tags, reason and one action.
+const pasted: LinkItem = {
+  title: "Tauri 2 capabilities",
+  url: "v2.tauri.app/security/capabilities",
+  site: "v2.tauri.app",
+  saved: "25 Nov 2026",
+  status: "done",
+  summary: "Each window gets a list of allowed commands.",
+  tags: ["tauri", "security"],
+  reason: "It may matter for the Mnemo command allow-list.",
+};
+const noSum = { summary: undefined, tags: undefined, reason: undefined };
+
+test("a pasted link has no app: the meta line shows the site and the saved date", () => {
+  const card = createLinkCard(document, pasted);
+  expect(card.querySelector(".app")).toBeNull();
+  const meta = card.querySelector(".meta") as HTMLElement;
+  expect(meta.querySelector(".site")?.textContent).toBe("v2.tauri.app");
+  expect(meta.querySelector<HTMLElement>(".site")?.title).toBe("v2.tauri.app");
+  expect(meta.textContent).toContain("25 Nov 2026");
+  // The saved date wins over the age; an app still shows when there is one.
+  const both = createLinkCard(document, { ...pasted, app: "zalo", age: "2 d" });
+  expect(both.querySelector(".app")?.textContent).toBe("Zalo");
+  expect(both.querySelector(".meta")?.textContent).not.toContain("2 d");
+});
+
+test("done shows the summary as Written by AI, the tags, and the reason as a Guess", () => {
+  const card = createLinkCard(document, pasted);
+  expect(card.dataset.status).toBe("done");
+  expect(card.querySelector(".sum")?.textContent).toBe(pasted.summary);
+  expect(card.querySelector(":scope > .trust-ai")?.textContent).toBe(
+    "Written by AI",
+  );
+  const tags = card.querySelector('ul.tags[aria-label="Tags"]');
+  expect(
+    [...(tags?.querySelectorAll(".tag-item") ?? [])].map((t) => t.textContent),
+  ).toEqual(["tauri", "security"]);
+  const reason = card.querySelector(":scope > .reason") as HTMLElement;
+  expect(reason.querySelector(".reason-text")?.textContent).toBe(pasted.reason);
+  expect(reason.querySelector(".trust-guess")?.textContent).toBe("Guess");
+  // The reason is its own line: the summary's label stays Written by AI, not Guess.
+  expect(card.querySelectorAll(".trust-guess")).toHaveLength(1);
+});
+
+test("a reason the owner wrote has no Guess label", () => {
+  const card = createLinkCard(document, { ...pasted, reasonKind: "owner" });
+  expect(card.querySelector(".reason .trust")).toBeNull();
+});
+
+test("partial: a summary without tags or reason, and tags without a reason", () => {
+  const bare = createLinkCard(document, {
+    ...pasted,
+    tags: undefined,
+    reason: undefined,
+  });
+  expect(bare.querySelector(".tags")).toBeNull();
+  expect(bare.querySelector(".reason")).toBeNull();
+  expect(bare.querySelector(".sum")).not.toBeNull();
+  const tagsOnly = createLinkCard(document, { ...pasted, reason: undefined });
+  expect(tagsOnly.querySelector(".tags")).not.toBeNull();
+  expect(tagsOnly.querySelector(".reason")).toBeNull();
+  const noTags = createLinkCard(document, { ...pasted, tags: [] });
+  expect(noTags.querySelector(".tags")).toBeNull();
+});
+
+test("pending is saved with reading not started, and has no summary", () => {
+  const card = createLinkCard(document, {
+    ...pasted,
+    ...noSum,
+    status: "pending",
+  });
+  expect(card.dataset.status).toBe("pending");
+  expect(card.querySelector(".sum")).toBeNull();
+  expect(card.querySelector(".trust")).toBeNull();
+  expect(card.querySelector(".nosum")?.textContent).toBe(
+    "Saved. Mnemo has not read the page yet.",
+  );
+  expect(card.querySelector(".nosum svg")).not.toBeNull();
+});
+
+test("the action slot holds the one button the screen passes, reachable by keyboard", () => {
+  let clicks = 0;
+  const action = createButton(document, {
+    label: "Paste the text",
+    size: "sm",
+    onClick: () => clicks++,
+  });
+  const card = createLinkCard(
+    document,
+    { ...pasted, ...noSum, status: "unreadable" },
+    { action },
+  );
+  document.body.append(card);
+  const slot = card.querySelector(":scope > .lcard-action") as HTMLElement;
+  expect(slot.children).toHaveLength(1);
+  expect(slot.firstElementChild).toBe(action);
+  expect(card.lastElementChild).toBe(slot);
+  // A real button: its name is its text, it takes focus, and Enter or Space click it.
+  expect(action.tagName).toBe("BUTTON");
+  expect(action.textContent).toBe("Paste the text");
+  action.focus();
+  expect(document.activeElement).toBe(action);
+  action.click();
+  expect(clicks).toBe(1);
+  card.remove();
+  expect(
+    createLinkCard(document, pasted).querySelector(".lcard-action"),
+  ).toBeNull();
+});
+
+test("a busy or disabled action stays in the slot and ignores clicks", () => {
+  let clicks = 0;
+  const busy = createButton(document, {
+    label: "Summarize later",
+    busy: true,
+    onClick: () => clicks++,
+  });
+  const off = createButton(document, {
+    label: "Paste the text",
+    disabled: true,
+  });
+  createLinkCard(
+    document,
+    { ...pasted, ...noSum, status: "ai-off" },
+    { action: busy },
+  );
+  busy.click();
+  expect(clicks).toBe(0);
+  expect(busy.getAttribute("aria-busy")).toBe("true");
+  const card = createLinkCard(
+    document,
+    { ...pasted, ...noSum },
+    { action: off },
+  );
+  expect(
+    card.querySelector<HTMLButtonElement>(".lcard-action button")?.disabled,
+  ).toBe(true);
+});
+
+test("AI off keeps the link with the ticket's words, and the list row says the same", () => {
+  const off: LinkItem = { ...pasted, ...noSum, status: "ai-off" };
+  expect(
+    createLinkCard(document, off).querySelector(".nosum")?.textContent,
+  ).toBe("No summary yet: AI is off.");
+  expect(noSummaryText(off)).toBe("No summary yet: AI is off.");
+  expect(
+    createLinkRow(document, off).querySelector(".row-sub")?.textContent,
+  ).toBe("No summary yet: AI is off.");
+});
+
+test("list and compact rows work without an app: site and saved date", () => {
+  const row = createLinkRow(document, pasted);
+  expect(row.querySelector(".app")).toBeNull();
+  expect(row.querySelector(".site")?.textContent).toBe("v2.tauri.app");
+  const compact = createCompactRow(document, pasted);
+  expect(compact.querySelector(".dom")?.textContent).toBe("v2.tauri.app");
+  expect(compact.querySelector(".row-meta")?.textContent).toBe("25 Nov 2026");
+});
+
+test("overflow: a long host, many tags and a long Vietnamese reason keep full values and wrap", () => {
+  const site = `${"rất-dài-".repeat(12)}ẪẬẲỖỮỰ.example.vn`;
+  const tags = [
+    "tauri",
+    "security",
+    "rust",
+    "ipc",
+    "capabilities",
+    "windows",
+    "đặc-tả",
+    "lưu-trữ",
+  ];
+  const reason = `Có thể liên quan đến danh sách lệnh được phép của Mnemo ${"ẪẬẲỖỮỰ".repeat(20)}`;
+  const card = createLinkCard(document, { ...pasted, site, tags, reason });
+  const host = card.querySelector<HTMLElement>(".site");
+  expect(host?.textContent).toBe(site);
+  expect(host?.title).toBe(site);
+  const items = card.querySelectorAll<HTMLElement>(".tag-item");
+  expect(items).toHaveLength(7);
+  expect(items[6].getAttribute("aria-label")).toBe("2 more tags");
+  expect(items[6].title).toBe("đặc-tả, lưu-trữ");
+  expect(card.querySelector(".reason-text")?.textContent).toBe(reason);
+  const siteRule = cssRule(
+    import.meta.dirname,
+    "link-card.css",
+    ".lcard .site",
+  );
+  expect(siteRule).toMatchObject(MARKS_ROOM);
+  expect(siteRule["text-overflow"]).toBe("ellipsis");
+  expect(siteRule["min-width"]).toBe("0");
+  const css = (sel: string) =>
+    cssRule(import.meta.dirname, "link-card.css", sel);
+  expect(css(".lcard .reason-text")["overflow-wrap"]).toBe("anywhere");
+  expect(css(".lcard .reason")["flex-wrap"]).toBe("wrap");
+  // The tag list stays a plain list in the card, never the tag input's box, and never wider.
+  expect(css(".lcard .tags")).toMatchObject({
+    border: "0",
+    "max-width": "100%",
+  });
 });

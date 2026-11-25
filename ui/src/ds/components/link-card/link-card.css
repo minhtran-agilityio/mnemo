@@ -75,6 +75,54 @@
   white-space: normal;
 }
 
+/* The site (host) on the meta line: one line, cut with an ellipsis, full host in the tooltip, with
+   room for stacked Vietnamese marks. */
+.lcard .site,
+.row .site {
+  min-width: 0;
+  max-width: 100%;
+  padding-block: var(--border-2);
+  margin-block: calc(-1 * var(--border-2));
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The tag list in a card is the plain tag list. The tag input part also uses the class .tags (a
+   box with a border); this keeps its box off the card wherever both style sheets are loaded. */
+.lcard .tags {
+  max-width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+/* Why the link was saved, with its Guess label after the text. A long reason wraps. */
+.lcard .reason {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  color: var(--ink2);
+  font-size: var(--text-md);
+}
+
+.lcard .reason-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The one action of the card. The button keeps its own hover, focus, active and disabled looks. */
+.lcard .lcard-action {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: var(--space-1);
+}
+
 .views {
   display: grid;
   gap: var(--space-3);

@@ -36,7 +36,11 @@ test("Records shows the Bookmarks view switch and changes the view", () => {
 test("Records shows the link card states, a guess label and the missing source mark", () => {
   const text = mount(renderRecords).textContent ?? "";
   expect(text).toContain("Link only. Mnemo could not read this page.");
-  expect(text).toContain("No summary: AI is off.");
+  expect(text).toContain("No summary yet: AI is off.");
+  expect(text).toContain("Saved. Mnemo has not read the page yet.");
+  expect(text).toContain("It may matter for the Mnemo command allow-list.");
+  expect(text).toContain("Summarize later");
+  expect(text).toContain("Paste the text");
   expect(text).toContain("Guess");
   expect(mount(renderRecords).querySelector(".cite.missing")).not.toBeNull();
 });
