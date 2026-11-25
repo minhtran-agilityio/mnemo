@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test } from "vitest";
 import { cssRule, MARKS_ROOM } from "../../../css-rule";
 import { createButton } from "../button/button";
@@ -8,6 +10,7 @@ import {
   createLinkRow,
   createLinkView,
   type LinkItem,
+  linkHost,
   noSummaryText,
 } from "./link-card";
 
@@ -496,9 +499,10 @@ test("an empty site or saved date falls back: the url host, and the age", () => 
   const card = createLinkCard(document, item);
   expect(card.querySelector(".site")).toBeNull();
   expect(card.querySelector(".meta")?.textContent).toBe("2 d");
-  expect(
-    createLinkRow(document, item).querySelector(".meta")?.textContent,
-  ).toBe("2 d");
+  // The List row shows the host of the URL too (issue 172), as the Compact row does.
+  const row = createLinkRow(document, item);
+  expect(row.querySelector(".site")?.textContent).toBe("v2.tauri.app");
+  expect(row.querySelector(".meta")?.textContent).toBe("v2.tauri.app·2 d");
 });
 
 test("in the List view the body gives way first, and only the site in the meta line shrinks", () => {
@@ -507,7 +511,8 @@ test("in the List view the body gives way first, and only the site in the meta l
   expect(row.classList.contains("link-row")).toBe(true);
   expect(row.querySelector(":scope > .link-main > .row-body")).not.toBeNull();
   expect(
-    row.querySelector(":scope > .link-main > .meta > .site")?.textContent,
+    row.querySelector(":scope > .link-main > .meta > .link-host > .site")
+      ?.textContent,
   ).toBe(site);
   const css = (sel: string) =>
     cssRule(import.meta.dirname, "link-card.css", sel);
@@ -520,21 +525,34 @@ test("in the List view the body gives way first, and only the site in the meta l
     gap: "var(--space-1) var(--space-3)",
   });
   // A long summary starts from its smallest width, so it never squeezes a short site. That width
-  // holds a whole trust label and is at least half the line.
+  // holds a whole trust label and is at least half the line, and never more than the whole line
+  // (issue 172: with no cap, a list of 140px or less overflowed).
   expect(css(".link-main > .row-body")).toMatchObject({
     flex: "1 1 0",
-    "min-width": "max(var(--size-link-sub-min), 50%)",
+    "min-width": "min(max(var(--size-link-sub-min), 50%), 100%)",
   });
-  // The meta line stays on one line with no cap, so on its own line it has the full width.
+  // The meta line has no cap, so on its own line it has the full width. It wraps only between the
+  // badge and .link-host (the site and the date, one piece).
   expect(css(".link-main > .meta")).toMatchObject({
     flex: "0 1 auto",
-    "flex-wrap": "nowrap",
+    "flex-wrap": "wrap",
     "min-width": "0",
   });
   expect(css(".link-main > .meta")["max-width"]).toBeUndefined();
-  // Badge, dots and date never shrink; the site does.
-  expect(css(".link-main > .meta > :not(.site)").flex).toBe("none");
-  expect(css(".link-main > .meta > .site").flex).toBe("0 1 auto");
+  expect(css(".link-main > .meta > .app").flex).toBe("none");
+  // Dots and date never shrink; the site does, from --size-link-site-min up to its own width, so
+  // the date wraps only when even that much site has no room.
+  expect(css(".link-main .link-host")).toMatchObject({
+    flex: "0 1 auto",
+    gap: "var(--space-1)",
+    "min-width": "0",
+  });
+  expect(css(".link-main .link-host > :not(.site)").flex).toBe("none");
+  expect(css(".link-main .link-host > .site")).toMatchObject({
+    flex: "1 1 var(--size-link-site-min)",
+    "min-width": "min(var(--size-link-site-min), 100%)",
+    "max-width": "max-content",
+  });
   expect(css(".link-row .site")).toMatchObject({
     ...MARKS_ROOM,
     "min-width": "0",
@@ -558,7 +576,13 @@ test("a link with no app, site, saved date or age has no empty meta line", () =>
   const card = createLinkCard(document, bare);
   expect(card.querySelector(".meta")).toBeNull();
   expect(card.firstElementChild?.className).toBe("title");
-  expect(createLinkRow(document, bare).querySelector(".meta")).toBeNull();
+  // The rows show the host of the URL; with no URL either, the List row has no meta line.
+  expect(
+    createLinkRow(document, bare).querySelector(".meta")?.textContent,
+  ).toBe("example.com");
+  expect(
+    createLinkRow(document, { ...bare, url: "" }).querySelector(".meta"),
+  ).toBeNull();
   const compact = createCompactRow(document, bare);
   expect(compact.querySelector(".row-meta")).toBeNull();
   expect(compact.querySelector(".dom")?.textContent).toBe("example.com");
@@ -691,7 +715,8 @@ test("overflow: a long Vietnamese summary is cut with its ellipsis and the label
   // The issue 170 rule still holds: the body gives way first, so the site keeps its width.
   expect(rowCss(".link-main > .row-body").flex).toBe("1 1 0");
   expect(
-    row.querySelector(":scope > .link-main > .meta > .site")?.textContent,
+    row.querySelector(":scope > .link-main > .meta > .link-host > .site")
+      ?.textContent,
   ).toBe("v2.tauri.app");
 });
 
@@ -704,7 +729,7 @@ test("the List row holds the icon, then .link-main with the body and the meta li
   const main = [...(kids[1]?.children ?? [])].map((k) => k.className);
   expect(main).toEqual(["row-body", "meta"]);
   // With no meta line, .link-main holds the body alone.
-  const bare = createLinkRow(document, { title: "Untitled", url: "x.com/a" });
+  const bare = createLinkRow(document, { title: "Untitled", url: "" });
   expect(
     [...(bare.querySelector(".link-main")?.children ?? [])].map(
       (k) => k.className,
@@ -805,4 +830,108 @@ test("reading: the Compact row shows a spinner after the title, a status named b
     const quiet = createCompactRow(document, { ...pasted, status: other });
     expect(quiet.querySelector("[role='status']")).toBeNull();
   }
+});
+
+// Issue 172: the host without the scheme, the full site for keyboard users, and room for a short
+// host in a narrow List row.
+test("the host of a link with no site never shows the scheme", () => {
+  const host = (url: string, site?: string) =>
+    linkHost({ title: "t", url, site });
+  expect(host("https://v2.tauri.app/security/capabilities")).toBe(
+    "v2.tauri.app",
+  );
+  expect(host("v2.tauri.app/security/capabilities")).toBe("v2.tauri.app");
+  expect(host("http://user:pw@example.com:8080/a?b#c")).toBe(
+    "example.com:8080",
+  );
+  expect(host("https://example.com?q=1")).toBe("example.com");
+  expect(host("localhost:1420/a")).toBe("localhost:1420");
+  expect(host("  https://viblo.asia/p  ")).toBe("viblo.asia");
+  // A host with Vietnamese letters stays as written, not punycode.
+  expect(host("https://tài-liệu.vn/a")).toBe("tài-liệu.vn");
+  expect(host("tài-liệu.vn/a")).toBe("tài-liệu.vn");
+  // The site wins; an empty or blank site falls back to the URL.
+  expect(host("https://a.example/x", "b.example")).toBe("b.example");
+  expect(host("https://a.example/x", "  ")).toBe("a.example");
+  expect(host("")).toBe("");
+  for (const make of [createCompactRow, createLinkRow]) {
+    const row = make(document, {
+      ...pasted,
+      site: undefined,
+      url: "https://v2.tauri.app/security/capabilities",
+    });
+    expect(row.textContent).not.toContain("https:");
+    expect(row.textContent).toContain("v2.tauri.app");
+  }
+});
+
+test("the List row's meta line: the badge, then the site and the date as one piece, no dot after the badge", () => {
+  const row = createLinkRow(document, { ...pasted, app: "telegram" });
+  const meta = row.querySelector(":scope > .link-main > .meta");
+  expect([...(meta?.children ?? [])].map((c) => c.className)).toEqual([
+    "app app-telegram",
+    "meta link-host",
+  ]);
+  const host = meta?.querySelector(":scope > .link-host");
+  expect([...(host?.children ?? [])].map((c) => c.className)).toEqual([
+    "site",
+    "sep",
+    "",
+  ]);
+  expect(host?.textContent).toBe("v2.tauri.app·25 Nov 2026");
+  expect(meta?.querySelectorAll(":scope > .sep")).toHaveLength(0);
+  // With no app, the meta line holds the site and the date alone; with only an app, the badge.
+  const plain = createLinkRow(document, pasted).querySelector(".meta");
+  expect([...(plain?.children ?? [])].map((c) => c.className)).toEqual([
+    "meta link-host",
+  ]);
+  const badgeOnly = createLinkRow(document, {
+    title: "t",
+    url: "",
+    app: "zalo",
+  }).querySelector(".meta");
+  expect(badgeOnly?.textContent).toBe("Zalo");
+  expect(badgeOnly?.querySelector(".link-host")).toBeNull();
+});
+
+test("keyboard focus shows the full site: a cut host wraps in place instead of its ellipsis", () => {
+  const site = `${"rất-nhiều-tên-miền-con.".repeat(4)}tài-liệu.v2.tauri.app`;
+  const row = createLinkRow(document, { ...pasted, site });
+  const compact = createCompactRow(document, { ...pasted, site });
+  // The full host is in the text (a screen reader reads it all) and in the tooltip.
+  expect(row.querySelector(".site")?.textContent).toBe(site);
+  expect(row.querySelector<HTMLElement>(".site")?.title).toBe(site);
+  expect(row.textContent).toContain(site);
+  expect(compact.querySelector(".dom")?.textContent).toBe(site);
+  // The rows take keyboard focus; focus-visible (or the catalog's drawn focus) unwraps the host.
+  document.body.replaceChildren(row, compact);
+  row.focus();
+  expect(document.activeElement).toBe(row);
+  compact.focus();
+  expect(document.activeElement).toBe(compact);
+  document.body.replaceChildren();
+  for (const sel of [
+    ".link-row:focus-visible .site",
+    ".link-row.is-focus .site",
+    ".compact-row:focus-visible .dom",
+    ".compact-row.is-focus .dom",
+  ]) {
+    expect(rowCss(sel)).toMatchObject({
+      "overflow-wrap": "anywhere",
+      "white-space": "normal",
+    });
+  }
+  // In the Compact row the wrapped host keeps its marks room inside the row, off the focus ring.
+  expect(rowCss(".compact-row.is-focus .dom")["margin-block"]).toBe("0");
+  expect(rowCss(".compact-row").padding).toBe("var(--space-1) var(--space-3)");
+});
+
+test("the smallest widths of the List row are tokens: a whole trust label, and a readable site", () => {
+  const tokens = readFileSync(
+    resolve(import.meta.dirname, "..", "..", "tokens.css"),
+    "utf8",
+  );
+  // 6.75rem (108px) holds the 104.5px "Written by AI" label; 6rem (96px) did not.
+  expect(tokens).toMatch(/--size-link-sub-min: 6\.75rem;/);
+  expect(tokens).toMatch(/--size-link-site-min: 8ch;/);
 });

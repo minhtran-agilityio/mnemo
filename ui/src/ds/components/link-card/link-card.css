@@ -150,13 +150,14 @@
 
 /* A link's List row: the icon, then .link-main, which holds the body (title and summary) and the
    meta line (app, site, date). Flex wraps on each item's starting size. The body starts at
-   max(--size-link-sub-min, half of .link-main): the smallest width that holds a whole trust label,
-   and never less than half. The meta starts at its own width. So the meta shares the line only when
-   it fits whole next to that half; else it wraps to its own line, where it has the full width and
-   only its site is cut with an ellipsis. While they share a line, the body takes the room that is
-   left and gives way first (cut with its own ellipsis), so a long summary never squeezes a short
-   site. .link-main starts after the icon, so a wrapped meta lines up with the title. A long host at
-   a wide width takes its own meta line too, which makes the row taller.
+   max(--size-link-sub-min, half of .link-main), capped at the whole of .link-main:
+   --size-link-sub-min (6.75rem, 108px) holds a whole "Written by AI" label (104.5px in Chrome), and
+   the body is never less than half. The meta starts at its own width. So the meta shares the line
+   only when it fits whole next to that half; else it wraps to its own line, where it has the full
+   width. While they share a line, the body takes the room that is left and gives way first (cut
+   with its own ellipsis), so a long summary never squeezes a short site. .link-main starts after
+   the icon, so a wrapped meta lines up with the title. A long host at a wide width takes its own
+   meta line too, which makes the row taller.
    Unverified on WebKitGTK: the 50% inside max() resolves against the definite width of .link-main
    (checked in Chrome by tests/acceptance/ds-09-limits.test.mjs). */
 .link-main {
@@ -170,7 +171,7 @@
 
 .link-main > .row-body {
   flex: 1 1 0;
-  min-width: max(var(--size-link-sub-min), 50%);
+  min-width: min(max(var(--size-link-sub-min), 50%), 100%);
 }
 
 /* The summary line of a List row and its trust label. Nothing here is clipped without an ellipsis.
@@ -210,21 +211,57 @@
   vertical-align: middle;
 }
 
-/* The meta line stays on one line at its own width, with no cap: on a shared line it is as wide as
-   its content, and on its own line it may take the full width. Only the site in it may shrink, so
-   a long host is cut with its ellipsis and the badge, dots and date stay whole. */
+/* The meta line: the app badge, then .link-host (the site, a dot and the date). It is as wide as its
+   content, with no cap: on a shared line it is as wide as its content, and on its own line it may
+   take the full width. When the badge and the whole of .link-host do not fit on one line,
+   .link-host wraps under the badge as one piece, so the site and the date stay together. The badge
+   never shrinks. */
 .link-main > .meta {
   flex: 0 1 auto;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   min-width: 0;
 }
 
-.link-main > .meta > :not(.site) {
+.link-main > .meta > .app {
   flex: none;
 }
 
-.link-main > .meta > .site {
+/* The site, a dot and the date. A dot sits a space (--space-1) from its words, so a short host and
+   its date fit the narrowest example column of the UI Catalog (161px at 800 x 560, 158px at 200%
+   zoom). Only the site shrinks: it starts at --size-link-site-min and grows up to its own width,
+   so the line breaks only when even that much site does not fit; then the date goes under the
+   site, and nothing spills out of the line. */
+.link-main .link-host {
   flex: 0 1 auto;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.link-main .link-host > :not(.site) {
+  flex: none;
+}
+
+.link-main .link-host > .site {
+  flex: 1 1 var(--size-link-site-min);
+  min-width: min(var(--size-link-site-min), 100%);
+  max-width: max-content;
+}
+
+/* Keyboard focus shows the full site: a cut host wraps in place, at any character, instead of its
+   ellipsis, so the row grows taller while it has focus. The pointer gets the same full value in the
+   tooltip. A screen reader reads the whole host from the text in any case. */
+.link-row:focus-visible .site,
+.link-row.is-focus .site,
+.compact-row:focus-visible .dom,
+.compact-row.is-focus .dom {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* A wrapped host takes its room for stacked marks inside the row, not over the row's edge. */
+.compact-row:focus-visible .dom,
+.compact-row.is-focus .dom {
+  margin-block: 0;
 }
 
 .compact-row {
@@ -232,7 +269,9 @@
   align-items: center;
   gap: var(--space-2);
   min-height: var(--size-tap-sm);
-  padding: 0 var(--space-3);
+  /* The block padding fits inside the minimum height, so a one-line row keeps its height; it keeps
+     a host wrapped on focus (below) off the focus ring. */
+  padding: var(--space-1) var(--space-3);
   background: var(--card);
   font-size: var(--text-md);
 }
