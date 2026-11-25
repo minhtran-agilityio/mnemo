@@ -343,7 +343,7 @@ pub(super) fn required_chars(field: &str, v: &str, max: usize) -> Result<(), Sto
 }
 
 /// Long text that must be given: not blank, at most 1 MB.
-fn required_text(field: &str, v: &str) -> Result<(), StorageError> {
+pub(super) fn required_text(field: &str, v: &str) -> Result<(), StorageError> {
     if v.trim().is_empty() {
         return Err(invalid(format!("The {field} cannot be empty.")));
     }

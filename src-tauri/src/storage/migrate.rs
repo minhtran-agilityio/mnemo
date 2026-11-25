@@ -45,6 +45,10 @@ pub const MIGRATIONS: &[Migration] = &[
         number: 8,
         sql: include_str!("../../migrations/0008_run_state.sql"),
     },
+    Migration {
+        number: 9,
+        sql: include_str!("../../migrations/0009_bookmark_save.sql"),
+    },
 ];
 
 /// Reads the schema version stored in the database (0 for a new file).
@@ -103,7 +107,7 @@ mod tests {
     fn real_migrations_set_the_version() {
         let mut c = mem();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 8);
+        assert_eq!(current_version(&c).unwrap(), 9);
     }
 
     /// `run` skips every number at or below the stored version, so a gap that is filled
@@ -183,7 +187,7 @@ mod tests {
             err,
             StorageError::SchemaTooNew {
                 found: 99,
-                supported: 8
+                supported: 9
             }
         );
     }
@@ -377,7 +381,7 @@ mod tests {
         )
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 8);
+        assert_eq!(current_version(&c).unwrap(), 9);
         for t in KINDS.iter().chain(["item_link", "settings"].iter()) {
             assert!(table_exists(&c, t), "table {t} missing");
         }
@@ -399,7 +403,7 @@ mod tests {
         ))
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 8);
+        assert_eq!(current_version(&c).unwrap(), 9);
         let cols = columns(&c, "idea");
         for col in [
             "body",
@@ -497,7 +501,7 @@ mod tests {
              INSERT INTO run (id, created_at, updated_at, task_type, started_at) VALUES ('r-going', '{T}', '{U}', 'summary', '{T}');"
         ))
         .unwrap();
-        run(&mut c, MIGRATIONS).unwrap();
+        run(&mut c, &MIGRATIONS[..8]).unwrap();
         assert_eq!(current_version(&c).unwrap(), 8);
         let cols = columns(&c, "run");
         for col in [
@@ -584,5 +588,65 @@ mod tests {
             )
             .unwrap();
         assert_eq!(indexes, 2);
+    }
+
+    #[test]
+    fn migration_9_adds_bookmark_site_status_and_tags_to_a_database_built_by_migration_8() {
+        let mut c = mem();
+        run(&mut c, &MIGRATIONS[..8]).unwrap();
+        c.execute_batch(&format!(
+            "INSERT INTO bookmark (id, created_at, updated_at, url, title, summary, reason, reason_is_guess)
+                 VALUES ('b-sum', '{T}', '{T}', 'https://a.example', 'A', 'A summary', 'Why', 1);
+             INSERT INTO bookmark (id, created_at, updated_at, url) VALUES ('b-link', '{T}', '{T}', 'https://b.example');"
+        ))
+        .unwrap();
+        run(&mut c, MIGRATIONS).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 9);
+        let row = |id: &str| -> (Option<String>, String, Option<String>) {
+            c.query_row(
+                "SELECT site, summary_status, summary FROM bookmark WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap()
+        };
+        // Old rows keep their data: a summary means done; no summary means not read yet.
+        assert_eq!(
+            row("b-sum"),
+            (None, "done".into(), Some("A summary".into()))
+        );
+        assert_eq!(row("b-link"), (None, "pending".into(), None));
+        // A new row starts as pending, and the check refuses an unknown status.
+        c.execute(
+            "INSERT INTO bookmark (id, created_at, updated_at, url) VALUES ('b-new', ?1, ?1, 'https://c.example')",
+            [T],
+        )
+        .unwrap();
+        assert_eq!(row("b-new").1, "pending");
+        assert!(c
+            .execute(
+                "UPDATE bookmark SET summary_status = 'odd' WHERE id = 'b-new'",
+                []
+            )
+            .is_err());
+        // bookmark_label is shaped like note_label: one live link per pair, indexes on both sides.
+        assert!(table_exists(&c, "bookmark_label"));
+        let mut want = columns(&c, "note_label");
+        want.iter_mut()
+            .for_each(|n| *n = n.replace("note_id", "bookmark_id"));
+        assert_eq!(columns(&c, "bookmark_label"), want);
+        c.execute_batch(&format!(
+            "INSERT INTO label (id, created_at, updated_at, name) VALUES ('l', '{T}', '{T}', 'rust');
+             INSERT INTO bookmark_label (id, bookmark_id, label_id, created_at, updated_at) VALUES ('bl1', 'b-sum', 'l', '{T}', '{T}');"
+        ))
+        .unwrap();
+        assert!(c
+            .execute(
+                "INSERT INTO bookmark_label (id, bookmark_id, label_id, created_at, updated_at) VALUES ('bl2', 'b-sum', 'l', ?1, ?1)",
+                [T],
+            )
+            .is_err());
+        assert!(index_exists(&c, "idx_bookmark_label_label"));
+        assert!(index_exists(&c, "idx_bookmark_label_bookmark"));
     }
 }

@@ -6,7 +6,9 @@ use std::sync::{Mutex, MutexGuard};
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
+use crate::ai::bookmark_save::{self, BookmarkStore, SaveContext, SaveError, SaveResult};
 use crate::ai::claude::error_kind;
+use crate::ai::fetch::HttpReader;
 use crate::ai::health::{self, AiHealth};
 use crate::ai::models::{self, AiModelTable, ModelChoices, ModelError, ModelRow};
 use crate::ai::runner::AiError;
@@ -15,8 +17,11 @@ use crate::scheduler::ai_control::{
     AiControl, ControlError, ControlStore, ControlStoreError, Decision, DenyReason, WindowNow,
     THRESHOLDS_MESSAGE,
 };
-use crate::scheduler::queue::{CancelOutcome, Priority, RunLog, RunLogError, RunQueue};
+use crate::scheduler::queue::{
+    CancelOutcome, Priority, QueuedRunner, RunLog, RunLogError, RunQueue,
+};
 use crate::storage::ai_control::{StoredAiControl, StoredPause, StoredReading};
+use crate::storage::bookmarks::SavedBookmark;
 use crate::storage::export::{ExportError, ExportSummary, FolderState};
 use crate::storage::files::OrphanReport;
 use crate::storage::ideas::{Idea, IdeaInput, IdeaProject};
@@ -2687,5 +2692,226 @@ mod tests {
             }
         }
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+// ---- Save a link (#25, BM-01) ----
+
+/// The event sent with the bookmark after each step of a save or a summary.
+pub const BOOKMARK_EVENT: &str = "bookmark-changed";
+
+/// The longest bookmark id the commands take. Ids are UUIDs (36 characters).
+const MAX_BOOKMARK_ID_LEN: usize = 100;
+
+impl BookmarkStore for AppStorage {
+    fn with_storage(
+        &self,
+        call: &mut dyn FnMut(&mut Storage) -> Result<SavedBookmark, StorageError>,
+    ) -> Result<SavedBookmark, SaveError> {
+        let mut guard = self.get().map_err(|e| SaveError::Unavailable(e.message))?;
+        Ok(call(&mut guard)?)
+    }
+}
+
+/// The error the UI sees for a save or a summary.
+fn save_failed(e: SaveError) -> AppError {
+    match e {
+        SaveError::Invalid(message) => AppError {
+            code: "invalid_input",
+            message,
+        },
+        SaveError::NotFound => AppError {
+            code: "not_found",
+            message: "There is no such bookmark. It may have been deleted.".to_string(),
+        },
+        SaveError::Unavailable(message) => AppError {
+            code: "storage_unavailable",
+            message,
+        },
+        SaveError::Storage(detail) => {
+            log::error!("bookmark storage call failed: {detail}");
+            AppError {
+                code: "storage_error",
+                message: "Mnemo could not save this bookmark. Nothing was deleted.".to_string(),
+            }
+        }
+    }
+}
+
+/// Runs one step of save a link on this (blocking) thread: the app's storage, the real page
+/// reader, the run queue as the AI runner, the AI control, and the `bookmark-changed` event.
+fn with_save_context<T>(
+    app: &tauri::AppHandle,
+    work: impl FnOnce(&SaveContext<'_>) -> Result<T, SaveError>,
+) -> Result<T, AppError> {
+    use tauri::Emitter;
+    let storage = app.state::<AppStorage>();
+    let queue = app.state::<RunQueue>().inner().clone();
+    let control = queue.control();
+    let runner = QueuedRunner(queue);
+    let reader = HttpReader::default();
+    let ai_on = || {
+        matches!(
+            control.may_run(Priority::Owner, control.now()),
+            Decision::Allow
+        )
+    };
+    let emit = |b: &SavedBookmark| {
+        if let Err(e) = app.emit(BOOKMARK_EVENT, b) {
+            log::error!("could not send the bookmark event of {}: {e}", b.base.id);
+        }
+    };
+    let ctx = SaveContext {
+        store: storage.inner(),
+        reader: &reader,
+        runner: &runner,
+        ai_on: &ai_on,
+        emit: &emit,
+    };
+    work(&ctx).map_err(save_failed)
+}
+
+fn check_bookmark_id(id: &str) -> Result<(), AppError> {
+    if id.trim().is_empty() || id.len() > MAX_BOOKMARK_ID_LEN {
+        return Err(AppError {
+            code: "invalid_input",
+            message: "That is not a bookmark id.".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Saves a link: stores it at once, then reads the page and asks Claude for a summary, tags
+/// and a reason. Progress goes out as `bookmark-changed` events. A page that cannot be read, AI
+/// off, or a failed run still keeps the link (see the status of the returned bookmark).
+#[tauri::command]
+pub async fn save_link(app: tauri::AppHandle, url: String) -> Result<SaveResult, AppError> {
+    task_result(
+        tauri::async_runtime::spawn_blocking(move || {
+            with_save_context(&app, |ctx| bookmark_save::save_link(ctx, &url))
+        })
+        .await,
+    )
+}
+
+/// Makes the summary of a stored bookmark: from `pasted_text` ("Paste the text") or by reading
+/// the page again ("Summarize later").
+#[tauri::command]
+pub async fn summarize_bookmark(
+    app: tauri::AppHandle,
+    id: String,
+    pasted_text: Option<String>,
+) -> Result<SaveResult, AppError> {
+    check_bookmark_id(&id)?;
+    task_result(
+        tauri::async_runtime::spawn_blocking(move || {
+            with_save_context(&app, |ctx| {
+                bookmark_save::summarize(ctx, &id, pasted_text.as_deref())
+            })
+        })
+        .await,
+    )
+}
+
+/// One page of bookmarks with their site, summary status and tags, newest first.
+#[tauri::command]
+pub async fn list_bookmark_cards(
+    app: tauri::AppHandle,
+    page: PageRequest,
+) -> Result<Page<SavedBookmark>, AppError> {
+    off_main_thread(app, move |storage| {
+        storage
+            .get()?
+            .list_bookmark_cards(&page)
+            .map_err(item_failed)
+    })
+    .await
+}
+
+#[cfg(test)]
+mod bookmark_command_tests {
+    use super::*;
+    use crate::ai::fake::{FakeResult, FakeRunner};
+    use crate::ai::fetch::{FetchError, PageReader, PageText};
+    use crate::storage::bookmarks::SummaryStatus;
+
+    struct Unreadable;
+    impl PageReader for Unreadable {
+        fn read(&self, _url: &str) -> Result<PageText, FetchError> {
+            Err(FetchError::TooLittleText)
+        }
+    }
+
+    fn app_storage() -> (AppStorage, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("mnemo-bm-cmd-{}", uuid::Uuid::new_v4()));
+        let s = Storage::open(&dir.join("mnemo.db")).unwrap();
+        (AppStorage::new(Ok(s)), dir)
+    }
+
+    #[test]
+    fn save_link_through_the_app_storage_keeps_an_unreadable_link_and_lists_it() {
+        let (state, dir) = app_storage();
+        let runner = FakeRunner::new(FakeResult::Timeout);
+        let ai_on = || true;
+        let emit = |_: &SavedBookmark| {};
+        let ctx = SaveContext {
+            store: &state,
+            reader: &Unreadable,
+            runner: &runner,
+            ai_on: &ai_on,
+            emit: &emit,
+        };
+        let got = bookmark_save::save_link(&ctx, "https://example.org/x").unwrap();
+        assert_eq!(got.bookmark.summary_status, SummaryStatus::Unreadable);
+        let page = state
+            .get()
+            .unwrap()
+            .list_bookmark_cards(&PageRequest {
+                limit: 10,
+                after: None,
+            })
+            .unwrap();
+        assert_eq!(page.items.len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_save_with_no_storage_gives_storage_unavailable_without_a_path() {
+        let state = AppStorage::new(Err(StartupError {
+            code: "open",
+            detail: "unable to open /home/someone/mnemo.db".into(),
+        }));
+        let runner = FakeRunner::new(FakeResult::Timeout);
+        let ai_on = || true;
+        let emit = |_: &SavedBookmark| {};
+        let ctx = SaveContext {
+            store: &state,
+            reader: &Unreadable,
+            runner: &runner,
+            ai_on: &ai_on,
+            emit: &emit,
+        };
+        let err = save_failed(bookmark_save::save_link(&ctx, "https://example.org/").unwrap_err());
+        assert_eq!(err.code, "storage_unavailable");
+        assert!(!err.message.contains('/'));
+    }
+
+    #[test]
+    fn save_errors_map_to_stable_codes_and_hide_storage_detail() {
+        assert_eq!(
+            save_failed(SaveError::Invalid("Bad link.".into())).code,
+            "invalid_input"
+        );
+        assert_eq!(save_failed(SaveError::NotFound).code, "not_found");
+        let e = save_failed(SaveError::Storage("disk I/O error at /x/y".into()));
+        assert_eq!(e.code, "storage_error");
+        assert!(!e.message.contains("/x/y"));
+    }
+
+    #[test]
+    fn a_bookmark_id_must_be_given_and_short() {
+        assert!(check_bookmark_id("4b1f").is_ok());
+        assert!(check_bookmark_id(" ").is_err());
+        assert!(check_bookmark_id(&"a".repeat(101)).is_err());
     }
 }

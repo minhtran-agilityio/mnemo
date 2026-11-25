@@ -1,5 +1,6 @@
 // Owns persistence: reading and writing Mnemo's local data. The only module that touches SQLite.
 pub mod ai_control;
+pub mod bookmarks;
 #[cfg(test)]
 mod concurrency;
 mod error;
@@ -92,6 +93,12 @@ impl Storage {
             Ok(0) => {}
             Ok(n) => log::info!("marked {n} interrupted AI runs as failed (app closed)"),
             Err(e) => log::error!("could not mark interrupted AI runs as failed: {e}"),
+        }
+        // The same for a page read a closed app left going: back to "no summary yet".
+        match storage.reset_reading_bookmarks_at(&record::now_iso()) {
+            Ok(0) => {}
+            Ok(n) => log::info!("{n} bookmarks left reading were set back to pending"),
+            Err(e) => log::error!("could not reset bookmarks left reading: {e}"),
         }
         Ok(storage)
     }
@@ -193,7 +200,7 @@ mod tests {
         assert_eq!(s.journal_mode().unwrap(), "wal");
         assert_eq!(s.busy_timeout_ms().unwrap(), 5000);
         assert_eq!(s.synchronous_level().unwrap(), 1, "NORMAL");
-        assert_eq!(s.schema_version().unwrap(), 8);
+        assert_eq!(s.schema_version().unwrap(), 9);
     }
 
     #[test]
@@ -201,7 +208,7 @@ mod tests {
         let (_d, p) = temp_db();
         drop(Storage::open(&p).unwrap());
         let s = Storage::open(&p).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 8);
+        assert_eq!(s.schema_version().unwrap(), 9);
     }
 
     #[test]

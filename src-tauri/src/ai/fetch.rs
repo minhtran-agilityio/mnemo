@@ -1,0 +1,906 @@
+// Reads a web page for "save a link" (#25). The Rust core fetches the page and keeps only its
+// text; Claude gets that text and no tools (owner decision 1).
+//
+// The page is untrusted, and so is the link. The reader:
+// - follows at most 5 redirects by hand, and checks every hop again;
+// - fetches http and https only, and refuses a link with a user name or password;
+// - refuses localhost and every private, local or reserved address (IPv4 and IPv6, also an
+//   IPv4 address inside IPv6). A host name is resolved once, every address is checked, and the
+//   connection is pinned to those checked addresses, so a second DNS answer cannot point
+//   somewhere else. No proxy and no cookies;
+// - stops after 15 seconds in total, reads at most 2 MB of body (and uses what it read);
+// - reads only text/html and text/plain;
+// - calls a page with under 200 characters of text unreadable, and gives Claude at most
+//   20 000 characters.
+// Every failure means "link only": the caller stores no summary and invents nothing.
+
+use std::fmt;
+use std::io::{self, Read};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+use reqwest::blocking::Client;
+use reqwest::header::{CONTENT_TYPE, LOCATION};
+use reqwest::redirect::Policy;
+use reqwest::Url;
+use scraper::{Html, Node};
+
+use crate::storage::items::MAX_TITLE_CHARS;
+
+/// The limits of one page read. All tunable values of the reader live here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchLimits {
+    /// The whole read, every redirect included.
+    pub timeout: Duration,
+    /// Most redirects followed.
+    pub max_redirects: usize,
+    /// Most body bytes read. A longer page is read up to here and the rest is left.
+    pub max_body_bytes: u64,
+    /// Most characters of text given to Claude.
+    pub max_text_chars: usize,
+    /// Less text than this means the page could not be read.
+    pub min_text_chars: usize,
+    /// Tests only: lets the reader reach a loopback test server. Every other address is still
+    /// checked. A release build has no such switch.
+    #[cfg(test)]
+    allow_loopback: bool,
+    /// Tests only: a host name and the address it resolves to, instead of DNS.
+    #[cfg(test)]
+    fake_dns: Option<(String, IpAddr)>,
+}
+
+/// The owner-confirmed limits (decision 5).
+pub const DEFAULT_LIMITS: FetchLimits = FetchLimits {
+    timeout: Duration::from_secs(15),
+    max_redirects: 5,
+    max_body_bytes: 2 * 1024 * 1024,
+    max_text_chars: 20_000,
+    min_text_chars: 200,
+    #[cfg(test)]
+    allow_loopback: false,
+    #[cfg(test)]
+    fake_dns: None,
+};
+
+/// The text of a page that could be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageText {
+    /// The `<title>` of an HTML page, at most 500 characters. `None` when it has none.
+    pub title: Option<String>,
+    /// The visible text, at most `max_text_chars` characters.
+    pub text: String,
+    /// True when the text was cut to `max_text_chars`.
+    pub cut: bool,
+}
+
+/// Why a page could not be read. Every case means "link only".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchError {
+    /// Not an http or https link.
+    NotWebLink,
+    /// The link points at this computer or a private or reserved network, or carries a user
+    /// name or password.
+    Refused,
+    /// More than `max_redirects` redirects.
+    TooManyRedirects,
+    /// The read took longer than `timeout`.
+    Timeout,
+    /// The server answered with this error status.
+    Status(u16),
+    /// The page is not text/html or text/plain.
+    NotText,
+    /// The page has under `min_text_chars` characters of text.
+    TooLittleText,
+    /// The host could not be found or reached.
+    Network,
+}
+
+impl fmt::Display for FetchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FetchError::NotWebLink => write!(f, "not an http or https link"),
+            FetchError::Refused => write!(f, "a local, private or reserved address"),
+            FetchError::TooManyRedirects => write!(f, "too many redirects"),
+            FetchError::Timeout => write!(f, "the page took too long"),
+            FetchError::Status(code) => write!(f, "the server answered {code}"),
+            FetchError::NotText => write!(f, "not an HTML or text page"),
+            FetchError::TooLittleText => write!(f, "too little text on the page"),
+            FetchError::Network => write!(f, "the site could not be reached"),
+        }
+    }
+}
+
+impl std::error::Error for FetchError {}
+
+/// Reads the text of a page. The app uses `HttpReader`; tests pass a fake.
+pub trait PageReader: Send + Sync {
+    fn read(&self, url: &str) -> Result<PageText, FetchError>;
+}
+
+/// The real reader: blocking HTTP with the limits above. Call it off the main thread.
+pub struct HttpReader {
+    limits: FetchLimits,
+}
+
+impl HttpReader {
+    pub fn new(limits: FetchLimits) -> Self {
+        HttpReader { limits }
+    }
+}
+
+impl Default for HttpReader {
+    fn default() -> Self {
+        HttpReader::new(DEFAULT_LIMITS)
+    }
+}
+
+impl PageReader for HttpReader {
+    fn read(&self, url: &str) -> Result<PageText, FetchError> {
+        let deadline = Instant::now() + self.limits.timeout;
+        let mut url = Url::parse(url.trim()).map_err(|_| FetchError::NotWebLink)?;
+        let mut redirects = 0;
+        loop {
+            let hop = self.hop(&url, deadline)?;
+            match hop {
+                Hop::Redirect(next) => {
+                    redirects += 1;
+                    if redirects > self.limits.max_redirects {
+                        return Err(FetchError::TooManyRedirects);
+                    }
+                    url = next;
+                }
+                Hop::Page { body, content_type } => {
+                    return text_within(body, content_type, &self.limits, deadline);
+                }
+            }
+        }
+    }
+}
+
+enum Hop {
+    Redirect(Url),
+    Page { body: Vec<u8>, content_type: String },
+}
+
+impl HttpReader {
+    /// One request: check the link, pin its checked addresses, and read the answer.
+    fn hop(&self, url: &Url, deadline: Instant) -> Result<Hop, FetchError> {
+        let target = self.checked_target(url, deadline)?;
+        let left = remaining(deadline)?;
+        let mut builder = Client::builder()
+            .redirect(Policy::none())
+            .no_proxy()
+            .timeout(left)
+            .connect_timeout(left)
+            .user_agent(concat!(
+                "Mnemo/",
+                env!("CARGO_PKG_VERSION"),
+                " (link reader)"
+            ));
+        if let Target::Name { host, addrs } = &target {
+            builder = builder.resolve_to_addrs(host, addrs);
+        }
+        let client = builder.build().map_err(|e| {
+            log::error!("the page reader could not start its HTTP client: {e}");
+            FetchError::Network
+        })?;
+        let response = client
+            .get(url.clone())
+            .header(reqwest::header::ACCEPT, "text/html, text/plain;q=0.9")
+            .send()
+            .map_err(request_failed)?;
+        let status = response.status();
+        if status.is_redirection() {
+            let next = response
+                .headers()
+                .get(LOCATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|l| url.join(l).ok())
+                .ok_or(FetchError::Status(status.as_u16()))?;
+            return Ok(Hop::Redirect(next));
+        }
+        if !status.is_success() {
+            return Err(FetchError::Status(status.as_u16()));
+        }
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        if text_kind(&content_type).is_none() {
+            return Err(FetchError::NotText);
+        }
+        let body = read_capped(response, self.limits.max_body_bytes).map_err(read_failed)?;
+        Ok(Hop::Page { body, content_type })
+    }
+
+    /// The addresses this link may reach, or why it is refused. A literal IP is checked as it
+    /// is; a host name is resolved (within the time left) and all its addresses are checked.
+    fn checked_target(&self, url: &Url, deadline: Instant) -> Result<Target, FetchError> {
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err(FetchError::NotWebLink);
+        }
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err(FetchError::Refused);
+        }
+        let port = url.port_or_known_default().ok_or(FetchError::NotWebLink)?;
+        let ip_target = |ip: IpAddr| {
+            if self.allowed(ip) {
+                Ok(Target::Ip)
+            } else {
+                Err(FetchError::Refused)
+            }
+        };
+        match url.host() {
+            None => Err(FetchError::NotWebLink),
+            Some(url::Host::Ipv4(ip)) => ip_target(IpAddr::V4(ip)),
+            Some(url::Host::Ipv6(ip)) => ip_target(IpAddr::V6(ip)),
+            Some(url::Host::Domain(name)) => {
+                let host = name.trim_end_matches('.').to_ascii_lowercase();
+                if host.is_empty() || host == "localhost" || host.ends_with(".localhost") {
+                    return Err(FetchError::Refused);
+                }
+                let addrs = self.resolve(name, port, deadline)?;
+                if addrs.is_empty() {
+                    return Err(FetchError::Network);
+                }
+                if !addrs.iter().all(|a| self.allowed(a.ip())) {
+                    return Err(FetchError::Refused);
+                }
+                Ok(Target::Name {
+                    host: name.to_string(),
+                    addrs,
+                })
+            }
+        }
+    }
+
+    fn allowed(&self, ip: IpAddr) -> bool {
+        #[cfg(test)]
+        if self.limits.allow_loopback && ip.is_loopback() {
+            return true;
+        }
+        is_public(ip)
+    }
+
+    /// Resolves `host` on a helper thread so a slow DNS answer cannot pass the deadline.
+    fn resolve(
+        &self,
+        host: &str,
+        port: u16,
+        deadline: Instant,
+    ) -> Result<Vec<SocketAddr>, FetchError> {
+        #[cfg(test)]
+        if let Some((name, ip)) = &self.limits.fake_dns {
+            return if name == host {
+                Ok(vec![SocketAddr::new(*ip, port)])
+            } else {
+                Err(FetchError::Network)
+            };
+        }
+        let left = remaining(deadline)?;
+        let (tx, rx) = mpsc::channel();
+        let query = (host.to_string(), port);
+        std::thread::spawn(move || {
+            let _ = tx.send(query.to_socket_addrs().map(|a| a.collect::<Vec<_>>()));
+        });
+        match rx.recv_timeout(left) {
+            Ok(Ok(addrs)) => Ok(addrs),
+            Ok(Err(_)) => Err(FetchError::Network),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(FetchError::Timeout),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(FetchError::Network),
+        }
+    }
+}
+
+/// Where a request may connect: a literal IP (checked) or a name pinned to checked addresses.
+enum Target {
+    Ip,
+    Name {
+        host: String,
+        addrs: Vec<SocketAddr>,
+    },
+}
+
+fn remaining(deadline: Instant) -> Result<Duration, FetchError> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|d| !d.is_zero())
+        .ok_or(FetchError::Timeout)
+}
+
+fn request_failed(e: reqwest::Error) -> FetchError {
+    if e.is_timeout() {
+        FetchError::Timeout
+    } else {
+        FetchError::Network
+    }
+}
+
+fn read_failed(e: io::Error) -> FetchError {
+    if e.kind() == io::ErrorKind::TimedOut {
+        FetchError::Timeout
+    } else {
+        FetchError::Network
+    }
+}
+
+/// `page_text` on a helper thread, given only the time left. A page built to be slow to parse
+/// (very deep nesting) then ends as a timeout instead of holding the save; the helper stops on
+/// its own when the parse ends (the body is at most `max_body_bytes`).
+fn text_within(
+    body: Vec<u8>,
+    content_type: String,
+    limits: &FetchLimits,
+    deadline: Instant,
+) -> Result<PageText, FetchError> {
+    let left = remaining(deadline)?;
+    let limits = limits.clone();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(page_text(&body, &content_type, &limits));
+    });
+    match rx.recv_timeout(left) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(FetchError::Timeout),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(FetchError::Network),
+    }
+}
+
+/// Reads at most `cap` bytes; the rest of the body is left unread.
+pub fn read_capped<R: Read>(reader: R, cap: u64) -> io::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    reader.take(cap).read_to_end(&mut out)?;
+    Ok(out)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextKind {
+    Html,
+    Plain,
+}
+
+/// The kind of a Content-Type value, or `None` when it is not text/html or text/plain.
+fn text_kind(content_type: &str) -> Option<TextKind> {
+    let essence = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    match essence.as_str() {
+        "text/html" => Some(TextKind::Html),
+        "text/plain" => Some(TextKind::Plain),
+        _ => None,
+    }
+}
+
+/// The charset parameter of a Content-Type value, when there is one.
+fn charset(content_type: &str) -> Option<&'static encoding_rs::Encoding> {
+    content_type.split(';').skip(1).find_map(|p| {
+        let (k, v) = p.split_once('=')?;
+        if k.trim().eq_ignore_ascii_case("charset") {
+            encoding_rs::Encoding::for_label(v.trim().trim_matches('"').as_bytes())
+        } else {
+            None
+        }
+    })
+}
+
+/// The text of a page body: decoded, the visible text kept, checked and cut to the limits.
+pub fn page_text(
+    body: &[u8],
+    content_type: &str,
+    limits: &FetchLimits,
+) -> Result<PageText, FetchError> {
+    let kind = text_kind(content_type).ok_or(FetchError::NotText)?;
+    let encoding = charset(content_type).unwrap_or(encoding_rs::UTF_8);
+    let (decoded, _, _) = encoding.decode(body);
+    let (title, text) = match kind {
+        TextKind::Html => html_text(&decoded),
+        TextKind::Plain => (None, tidy(&decoded)),
+    };
+    if text.chars().count() < limits.min_text_chars {
+        return Err(FetchError::TooLittleText);
+    }
+    let (text, cut) = cut_chars(&text, limits.max_text_chars);
+    let title = title
+        .map(|t| cut_chars(&t, MAX_TITLE_CHARS).0)
+        .filter(|t| !t.is_empty());
+    Ok(PageText { title, text, cut })
+}
+
+/// At most `max` characters of `text`, and whether it was cut.
+pub fn cut_chars(text: &str, max: usize) -> (String, bool) {
+    match text.char_indices().nth(max) {
+        Some((at, _)) => (text[..at].to_string(), true),
+        None => (text.to_string(), false),
+    }
+}
+
+/// Elements whose content is not page text: code, styles, and the site's own navigation.
+const SKIP: [&str; 12] = [
+    "script", "style", "noscript", "template", "svg", "nav", "header", "footer", "aside", "form",
+    "iframe", "head",
+];
+
+/// Elements that start a new line of text.
+const BLOCK: [&str; 18] = [
+    "p",
+    "div",
+    "br",
+    "li",
+    "ul",
+    "ol",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "tr",
+    "table",
+    "section",
+    "article",
+    "pre",
+    "blockquote",
+];
+
+/// The `<title>` and the visible text of an HTML document. The walk is a loop, not a
+/// recursion, so a deeply nested page cannot overflow the stack.
+fn html_text(source: &str) -> (Option<String>, String) {
+    let doc = Html::parse_document(source);
+    let root = doc.root_element();
+    let title = root
+        .descendent_elements()
+        .find(|e| e.value().name() == "title")
+        .map(|e| tidy(&e.text().collect::<String>()));
+    let mut out = String::new();
+    let mut skipping = 0usize;
+    for edge in root.traverse() {
+        match edge {
+            ego_tree::iter::Edge::Open(node) => match node.value() {
+                Node::Element(e) if SKIP.contains(&e.name()) => skipping += 1,
+                Node::Element(e) if skipping == 0 && BLOCK.contains(&e.name()) => out.push('\n'),
+                Node::Text(t) if skipping == 0 => out.push_str(&t[..]),
+                _ => {}
+            },
+            ego_tree::iter::Edge::Close(node) => {
+                if let Node::Element(e) = node.value() {
+                    if SKIP.contains(&e.name()) {
+                        skipping = skipping.saturating_sub(1);
+                    } else if skipping == 0 && BLOCK.contains(&e.name()) {
+                        out.push('\n');
+                    }
+                }
+            }
+        }
+    }
+    (title, tidy(&out))
+}
+
+/// Spaces collapsed inside each line, blank lines dropped, ends trimmed.
+fn tidy(text: &str) -> String {
+    text.lines()
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// True for an address on the public internet. Loopback, private, link-local, shared (CGNAT),
+/// unspecified, broadcast, multicast, documentation, benchmarking and reserved ranges are not,
+/// and an IPv4 address carried inside IPv6 is checked as IPv4.
+pub fn is_public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => is_public_v4(v4),
+        IpAddr::V6(v6) => is_public_v6(v6),
+    }
+}
+
+fn is_public_v4(ip: Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    !(a == 0 // 0.0.0.0/8 "this network"
+        || ip.is_loopback() // 127/8
+        || ip.is_private() // 10/8, 172.16/12, 192.168/16
+        || ip.is_link_local() // 169.254/16
+        || (a == 100 && (64..=127).contains(&b)) // 100.64/10 shared (CGNAT)
+        || (a == 192 && b == 0 && c == 0) // 192.0.0/24 protocol assignments
+        || ip.is_documentation() // 192.0.2/24, 198.51.100/24, 203.0.113/24
+        || (a == 198 && (18..=19).contains(&b)) // 198.18/15 benchmarking
+        || ip.is_multicast() // 224/4
+        || a >= 240) // 240/4 reserved and 255.255.255.255
+}
+
+fn is_public_v6(ip: Ipv6Addr) -> bool {
+    let s = ip.segments();
+    let v4_at =
+        |hi: u16, lo: u16| Ipv4Addr::new((hi >> 8) as u8, hi as u8, (lo >> 8) as u8, lo as u8);
+    if let Some(v4) = ip.to_ipv4_mapped() {
+        return is_public_v4(v4); // ::ffff:a.b.c.d
+    }
+    if s[..6] == [0; 6] {
+        // ::, ::1 and the old IPv4-compatible ::a.b.c.d
+        return !ip.is_unspecified() && !ip.is_loopback() && is_public_v4(v4_at(s[6], s[7]));
+    }
+    if s[0] == 0x64 && s[1] == 0xff9b && s[2..6] == [0; 4] {
+        return is_public_v4(v4_at(s[6], s[7])); // 64:ff9b::/96 NAT64
+    }
+    if s[0] == 0x2002 {
+        return is_public_v4(v4_at(s[1], s[2])); // 2002::/16 6to4
+    }
+    !((s[0] & 0xfe00) == 0xfc00 // fc00::/7 unique local
+        || (s[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
+        || (s[0] & 0xffc0) == 0xfec0 // fec0::/10 old site-local
+        || (s[0] & 0xff00) == 0xff00 // ff00::/8 multicast
+        || (s[0] == 0x2001 && s[1] == 0x0db8) // 2001:db8::/32 documentation
+        || (s[0] == 0x2001 && s[1] == 0) // 2001::/32 Teredo
+        || (s[0] == 0x0100 && s[1..4] == [0; 3])) // 100::/64 discard
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::net::TcpListener;
+
+    /// A test server on 127.0.0.1. `answer(path)` gives the raw HTTP response for each request;
+    /// it serves `count` requests, then stops.
+    fn serve(count: usize, answer: impl Fn(&str) -> Vec<u8> + Send + 'static) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().take(count) {
+                let Ok(mut stream) = stream else { continue };
+                let mut buf = [0u8; 4096];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = head.split_whitespace().nth(1).unwrap_or("/").to_string();
+                let _ = stream.write_all(&answer(&path));
+            }
+        });
+        port
+    }
+
+    fn response(status: &str, content_type: &str, body: &str) -> Vec<u8> {
+        format!(
+            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .into_bytes()
+    }
+
+    fn redirect(to: &str) -> Vec<u8> {
+        format!("HTTP/1.1 302 Found\r\nLocation: {to}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            .into_bytes()
+    }
+
+    fn long_text() -> String {
+        "Rust ownership means every value has one owner at a time. ".repeat(10)
+    }
+
+    fn page(title: &str, body: &str) -> String {
+        format!("<html><head><title>{title}</title><style>p{{color:red}}</style></head><body><nav>Home | About</nav><script>var x = 1;</script><p>{body}</p><footer>Copyright</footer></body></html>")
+    }
+
+    // The default limits never let the reader reach loopback (checked when the tests build).
+    const _: () = assert!(!DEFAULT_LIMITS.allow_loopback);
+
+    fn local_limits() -> FetchLimits {
+        FetchLimits {
+            allow_loopback: true,
+            timeout: Duration::from_secs(5),
+            ..DEFAULT_LIMITS
+        }
+    }
+
+    fn local_reader() -> HttpReader {
+        HttpReader::new(local_limits())
+    }
+
+    #[test]
+    fn the_default_limits_are_the_owner_confirmed_ones() {
+        assert_eq!(DEFAULT_LIMITS.timeout, Duration::from_secs(15));
+        assert_eq!(DEFAULT_LIMITS.max_redirects, 5);
+        assert_eq!(DEFAULT_LIMITS.max_body_bytes, 2 * 1024 * 1024);
+        assert_eq!(DEFAULT_LIMITS.max_text_chars, 20_000);
+        assert_eq!(DEFAULT_LIMITS.min_text_chars, 200);
+        assert_eq!(
+            DEFAULT_LIMITS.allow_loopback,
+            HttpReader::default().limits.allow_loopback
+        );
+        assert_eq!(HttpReader::default().limits, DEFAULT_LIMITS);
+    }
+
+    #[test]
+    fn refuses_localhost_and_private_addresses() {
+        for ip in [
+            "127.0.0.1",
+            "127.1.2.3",
+            "10.0.0.1",
+            "172.16.5.4",
+            "192.168.1.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "0.0.0.0",
+            "0.1.2.3",
+            "255.255.255.255",
+            "224.0.0.1",
+            "192.0.2.1",
+            "198.18.0.1",
+            "240.0.0.1",
+            "::1",
+            "::",
+            "fc00::1",
+            "fd12::1",
+            "fe80::1",
+            "ff02::1",
+            "2001:db8::1",
+            "::ffff:127.0.0.1",
+            "::ffff:10.0.0.1",
+            "64:ff9b::a00:1",
+            "2002:c0a8:0101::1",
+            "::127.0.0.1",
+            "2001::1",
+            "fec0::1",
+        ] {
+            assert!(!is_public(ip.parse().unwrap()), "{ip} must be refused");
+        }
+        for ip in [
+            "93.184.216.34",
+            "1.1.1.1",
+            "2606:4700::1111",
+            "::ffff:93.184.216.34",
+            "2002:5db8:d822::1",
+        ] {
+            assert!(is_public(ip.parse().unwrap()), "{ip} is public");
+        }
+        // The default reader refuses these before any connection.
+        let reader = HttpReader::default();
+        for url in [
+            "http://localhost/",
+            "http://LOCALHOST./x",
+            "http://app.localhost/",
+            "http://127.0.0.1/",
+            "http://2130706433/",
+            "http://0x7f.0.0.1/",
+            "http://10.0.0.1/",
+            "http://[::1]/",
+            "http://[::ffff:192.168.0.1]/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://user:pw@example.org/",
+            "http://user@example.org/",
+        ] {
+            assert_eq!(reader.read(url), Err(FetchError::Refused), "{url}");
+        }
+    }
+
+    #[test]
+    fn refuses_a_loopback_test_server_with_the_default_limits() {
+        let port = serve(1, |_| {
+            response("200 OK", "text/html", &page("T", &long_text()))
+        });
+        let url = format!("http://127.0.0.1:{port}/");
+        assert_eq!(HttpReader::default().read(&url), Err(FetchError::Refused));
+    }
+
+    #[test]
+    fn a_redirect_to_a_private_address_is_refused() {
+        let port = serve(1, |_| redirect("http://10.0.0.1/admin"));
+        let url = format!("http://127.0.0.1:{port}/");
+        assert_eq!(local_reader().read(&url), Err(FetchError::Refused));
+    }
+
+    #[test]
+    fn refuses_a_scheme_that_is_not_http_or_https() {
+        let reader = HttpReader::default();
+        for url in [
+            "ftp://example.org/file",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "data:text/html,hello",
+            "mailto:a@example.org",
+            "not a link",
+        ] {
+            assert_eq!(reader.read(url), Err(FetchError::NotWebLink), "{url}");
+        }
+        // A redirect to another scheme is refused too.
+        let port = serve(1, |_| redirect("file:///etc/passwd"));
+        assert_eq!(
+            local_reader().read(&format!("http://127.0.0.1:{port}/")),
+            Err(FetchError::NotWebLink)
+        );
+    }
+
+    #[test]
+    fn refuses_a_content_type_that_is_not_html_or_text() {
+        for ct in [
+            "application/pdf",
+            "image/png",
+            "application/json",
+            "application/octet-stream",
+            "",
+        ] {
+            let ct2 = ct.to_string();
+            let port = serve(1, move |_| response("200 OK", &ct2, &long_text()));
+            assert_eq!(
+                local_reader().read(&format!("http://127.0.0.1:{port}/")),
+                Err(FetchError::NotText),
+                "{ct}"
+            );
+        }
+        assert_eq!(text_kind("Text/HTML; charset=utf-8"), Some(TextKind::Html));
+        assert_eq!(text_kind("text/plain"), Some(TextKind::Plain));
+    }
+
+    #[test]
+    fn reads_the_title_and_the_visible_text_of_an_html_page() {
+        let body = page("  Rust &amp; ownership ", &long_text());
+        let port = serve(1, move |_| {
+            response("200 OK", "text/html; charset=utf-8", &body)
+        });
+        let got = local_reader()
+            .read(&format!("http://127.0.0.1:{port}/"))
+            .unwrap();
+        assert_eq!(got.title.as_deref(), Some("Rust & ownership"));
+        assert!(got.text.starts_with("Rust ownership means"));
+        for gone in ["var x", "color:red", "Home | About", "Copyright"] {
+            assert!(!got.text.contains(gone), "{gone} must not be page text");
+        }
+        assert!(!got.cut);
+    }
+
+    #[test]
+    fn decodes_the_charset_of_the_content_type() {
+        let mut body = b"Caf\xe9 au lait. ".repeat(30);
+        body.extend_from_slice(b"End.");
+        let got = page_text(&body, "text/plain; charset=ISO-8859-1", &DEFAULT_LIMITS).unwrap();
+        assert!(got.text.starts_with("Café au lait."));
+    }
+
+    #[test]
+    fn text_under_200_chars_is_unreadable() {
+        let short = page("Sign in", "Please sign in to continue.");
+        assert_eq!(
+            page_text(short.as_bytes(), "text/html", &DEFAULT_LIMITS),
+            Err(FetchError::TooLittleText)
+        );
+        assert_eq!(
+            page_text(b"   ", "text/plain", &DEFAULT_LIMITS),
+            Err(FetchError::TooLittleText)
+        );
+        let exactly = "a".repeat(200);
+        assert!(page_text(exactly.as_bytes(), "text/plain", &DEFAULT_LIMITS).is_ok());
+        let under = "a".repeat(199);
+        assert_eq!(
+            page_text(under.as_bytes(), "text/plain", &DEFAULT_LIMITS),
+            Err(FetchError::TooLittleText)
+        );
+    }
+
+    #[test]
+    fn caps_the_body_at_2_mb() {
+        let big = vec![b'a'; 3 * 1024 * 1024];
+        let read = read_capped(&big[..], DEFAULT_LIMITS.max_body_bytes).unwrap();
+        assert_eq!(read.len(), 2 * 1024 * 1024);
+        // Through the reader: a 3 MB page is read up to the cap and still gives its text.
+        let port = serve(1, |_| {
+            let body = "word ".repeat(3 * 1024 * 1024 / 5);
+            response("200 OK", "text/plain", &body)
+        });
+        let got = local_reader()
+            .read(&format!("http://127.0.0.1:{port}/"))
+            .unwrap();
+        assert!(got.cut);
+        assert_eq!(got.text.chars().count(), 20_000);
+    }
+
+    #[test]
+    fn stops_after_5_redirects() {
+        // /r/n redirects to /r/(n+1); /r/6 is the page. From /r/1 that is 5 redirects (read),
+        // from /r/0 it is 6 (refused).
+        let answer = |path: &str| {
+            let n: usize = path.trim_start_matches("/r/").parse().unwrap_or(0);
+            if n >= 6 {
+                response("200 OK", "text/plain", &long_text())
+            } else {
+                redirect(&format!("/r/{}", n + 1))
+            }
+        };
+        let port = serve(6, answer);
+        assert!(local_reader()
+            .read(&format!("http://127.0.0.1:{port}/r/1"))
+            .is_ok());
+        let port = serve(6, answer);
+        assert_eq!(
+            local_reader().read(&format!("http://127.0.0.1:{port}/r/0")),
+            Err(FetchError::TooManyRedirects)
+        );
+    }
+
+    #[test]
+    fn gives_up_at_the_timeout() {
+        let port = serve(1, |_| {
+            std::thread::sleep(Duration::from_secs(3));
+            response("200 OK", "text/plain", &long_text())
+        });
+        let reader = HttpReader::new(FetchLimits {
+            timeout: Duration::from_millis(300),
+            ..local_limits()
+        });
+        let started = Instant::now();
+        assert_eq!(
+            reader.read(&format!("http://127.0.0.1:{port}/")),
+            Err(FetchError::Timeout)
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn sends_at_most_20k_chars_to_claude() {
+        let text = "é".repeat(30_000);
+        let got = page_text(text.as_bytes(), "text/plain", &DEFAULT_LIMITS).unwrap();
+        assert_eq!(got.text.chars().count(), 20_000);
+        assert!(got.cut);
+        assert_eq!(cut_chars("abc", 2), ("ab".to_string(), true));
+        assert_eq!(cut_chars("abc", 3), ("abc".to_string(), false));
+    }
+
+    #[test]
+    fn an_error_status_is_unreadable() {
+        let port = serve(1, |_| response("403 Forbidden", "text/html", &long_text()));
+        assert_eq!(
+            local_reader().read(&format!("http://127.0.0.1:{port}/")),
+            Err(FetchError::Status(403))
+        );
+    }
+
+    #[test]
+    fn a_host_name_is_pinned_to_its_checked_address_and_keeps_the_port_of_the_link() {
+        let port = serve(1, |_| response("200 OK", "text/plain", &long_text()));
+        let reader = HttpReader::new(FetchLimits {
+            fake_dns: Some(("pinned.test".into(), IpAddr::V4(Ipv4Addr::LOCALHOST))),
+            ..local_limits()
+        });
+        let got = reader.read(&format!("http://pinned.test:{port}/")).unwrap();
+        assert!(got.text.starts_with("Rust ownership"));
+        // A name that resolves to a private address is refused.
+        let reader = HttpReader::new(FetchLimits {
+            fake_dns: Some(("inside.test".into(), "192.168.0.10".parse().unwrap())),
+            ..local_limits()
+        });
+        assert_eq!(reader.read("http://inside.test/"), Err(FetchError::Refused));
+    }
+
+    #[test]
+    fn a_deeply_nested_page_does_not_overflow_the_stack() {
+        let depth = 3_000;
+        let html = format!(
+            "{}{}{}",
+            "<div>".repeat(depth),
+            long_text(),
+            "</div>".repeat(depth)
+        );
+        let got = page_text(html.as_bytes(), "text/html", &DEFAULT_LIMITS).unwrap();
+        assert!(got.text.contains("Rust ownership"));
+    }
+
+    #[test]
+    fn a_page_that_parses_too_slowly_ends_as_a_timeout() {
+        let html = format!("{}{}", "<div>".repeat(40_000), long_text());
+        let deadline = Instant::now() + Duration::from_millis(200);
+        let started = Instant::now();
+        assert_eq!(
+            text_within(
+                html.into_bytes(),
+                "text/html".into(),
+                &DEFAULT_LIMITS,
+                deadline
+            ),
+            Err(FetchError::Timeout)
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+}
