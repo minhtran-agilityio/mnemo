@@ -147,6 +147,10 @@ function linkCardRow(ctx: TabContext) {
     ),
     card({ ...pasted, reason: undefined }, "partial: tags, no reason"),
     card(
+      { ...pasted, tagsKind: "owner", reasonKind: "owner" },
+      "the owner's tags and reason: no label",
+    ),
+    card(
       {
         ...pasted,
         title:

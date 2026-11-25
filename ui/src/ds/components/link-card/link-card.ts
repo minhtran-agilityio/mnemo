@@ -1,6 +1,7 @@
 // A saved link in the three Bookmarks views: a card (Cards), a row (List) and a compact row
 // (Compact). Honest failure: a page Mnemo could not read keeps the link only, with no summary. A
-// summary the app wrote is labelled "Written by AI", and a reason it guessed is labelled "Guess".
+// summary the app wrote and tags it chose are labelled "Written by AI", and a reason it guessed is
+// labelled "Guess". The status decides what shows: only a `done` link shows its summary.
 // A long title wraps (card) or is cut off with its full text in the tooltip (rows); a long URL or
 // host is cut off with the full value in the tooltip. A card has one action slot: the screen
 // passes the one button that fits the card's status (for example "Paste the text").
@@ -44,10 +45,15 @@ export interface LinkItem {
   readonly summary?: string;
   /** Who wrote the summary. A guess is labelled as one. Default `ai`. */
   readonly summaryKind?: "ai" | "guess";
-  /** Where the link is. Without a summary the default is `unreadable`. */
+  /**
+   * Where the link is. It decides what shows: a summary shows only when the status is `done` (or
+   * left out). Left out, the status is `done` with a summary and `unreadable` without one.
+   */
   readonly status?: LinkStatus;
   /** The top-level label names, shown with the tag list part. */
   readonly tags?: readonly string[];
+  /** Who chose the tags. `ai` (the app chose them) is labelled Written by AI. Default `ai`. */
+  readonly tagsKind?: "ai" | "owner";
   /** Why the link was saved. */
   readonly reason?: string;
   /** Who wrote the reason. `guess` (the app wrote it) is labelled Guess. Default `guess`. */
@@ -84,9 +90,23 @@ const NO_SUMMARY = {
   "ai-off": "No summary yet: AI is off.",
 } as const satisfies Record<LinkStatus, string>;
 
-/** The honest line under a link that has no summary: why there is none. */
+/** The status that decides what the link shows. Left out: `done` with a summary, else `unreadable`. */
+export function linkStatus(item: LinkItem): LinkStatus {
+  return item.status ?? (item.summary ? "done" : "unreadable");
+}
+
+/**
+ * The summary to show, or undefined. Shared rule 1: only a `done` link shows one, so a link that
+ * is pending, reading, unreadable or AI off never shows a summary as if it were read. An empty
+ * summary counts as none.
+ */
+function shownSummary(item: LinkItem): string | undefined {
+  return linkStatus(item) === "done" && item.summary ? item.summary : undefined;
+}
+
+/** The honest line under a link that shows no summary: why there is none. */
 export function noSummaryText(item: LinkItem): string {
-  return NO_SUMMARY[item.status ?? "unreadable"];
+  return NO_SUMMARY[linkStatus(item)];
 }
 
 function reading(doc: Document): HTMLElement {
@@ -112,15 +132,12 @@ function metaLine(doc: Document, item: LinkItem): HTMLDivElement {
 }
 
 function noSummary(doc: Document, item: LinkItem): HTMLElement {
-  if (item.status === "reading") return reading(doc);
+  const status = linkStatus(item);
+  if (status === "reading") return reading(doc);
   const none = doc.createElement("div");
   none.className = "nosum";
   const icon =
-    item.status === "ai-off"
-      ? PowerOff
-      : item.status === "pending"
-        ? Clock
-        : Link;
+    status === "ai-off" ? PowerOff : status === "pending" ? Clock : Link;
   none.append(createIcon(icon), doc.createTextNode(noSummaryText(item)));
   return none;
 }
@@ -134,6 +151,15 @@ function reasonLine(doc: Document, item: LinkItem): HTMLElement {
   return line;
 }
 
+/** The tags, with the Written by AI label when the app chose them. */
+function tagLine(doc: Document, item: LinkItem): HTMLElement {
+  const line = doc.createElement("div");
+  line.className = "tagline";
+  line.append(createTagList(doc, item.tags ?? [], { max: MAX_TAGS }));
+  if ((item.tagsKind ?? "ai") === "ai") line.append(buildTrustLabel("ai"));
+  return line;
+}
+
 export function createLinkCard(
   doc: Document,
   item: LinkItem,
@@ -141,7 +167,7 @@ export function createLinkCard(
 ): HTMLElement {
   const card = doc.createElement("article");
   card.className = "lcard";
-  card.dataset.status = item.summary ? "done" : (item.status ?? "unreadable");
+  card.dataset.status = linkStatus(item);
   if (options.thumb) {
     const thumb = doc.createElement("div");
     thumb.className = "thumb";
@@ -154,16 +180,16 @@ export function createLinkCard(
   const url = textEl(doc, "div", "url", item.url);
   url.title = item.url;
   card.append(title, url);
-  if (item.summary) {
+  const summary = shownSummary(item);
+  if (summary) {
     card.append(
-      textEl(doc, "div", "sum", item.summary),
+      textEl(doc, "div", "sum", summary),
       buildTrustLabel(item.summaryKind ?? "ai"),
     );
   } else {
     card.append(noSummary(doc, item));
   }
-  if (item.tags && item.tags.length > 0)
-    card.append(createTagList(doc, item.tags, { max: MAX_TAGS }));
+  if (item.tags && item.tags.length > 0) card.append(tagLine(doc, item));
   if (item.reason) card.append(reasonLine(doc, item));
   if (options.action) {
     const slot = doc.createElement("div");
@@ -178,7 +204,7 @@ export function createLinkCard(
 export function createLinkRow(doc: Document, item: LinkItem): HTMLLIElement {
   const row = createListRow(doc, {
     title: item.title,
-    sub: item.summary ?? noSummaryText(item),
+    sub: shownSummary(item) ?? noSummaryText(item),
     icon: Link,
   });
   row.append(metaLine(doc, item));

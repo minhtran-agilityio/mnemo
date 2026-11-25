@@ -20,6 +20,7 @@ export const RECORDS = [
       "AI summary",
       "guessed summary",
       "partial",
+      "owner tags and reason",
       "action",
       "action busy",
       "action disabled",
@@ -28,7 +29,7 @@ export const RECORDS = [
     ],
     source: "ds",
     className: "lcard",
-    notes: `The Bookmarks views: List, Cards, Compact. A pasted link has no app: the meta line shows the site and the saved date. A page that could not be read keeps the link only. A summary is labelled Written by AI; the reason is its own line, labelled Guess when the app wrote it. Tags use the tag list part. One action slot takes the button the screen passes for the status (its hover, focus-visible, active and disabled looks are the button's). Empty does not apply: the empty list uses the state box in the screen. A long title, URL, host or reason wraps or is cut off with the full text in its tooltip. Site, tags, reason, action and pending added in ${ref(169)}.`,
+    notes: `The Bookmarks views: List, Cards, Compact. A pasted link has no app: the meta line shows the site and the saved date. The status decides what shows: only a done link shows its summary, and a page that could not be read keeps the link only. A summary is labelled Written by AI; the reason is its own line, labelled Guess when the app wrote it. Tags use the tag list part and are labelled Written by AI when the app chose them. One action slot takes the button the screen passes for the status (its hover, focus-visible, active and disabled looks are the button's). Empty does not apply: the empty list uses the state box in the screen. A long title, URL, host or reason wraps or is cut off with the full text in its tooltip. Site, tags, reason, action and pending added in ${ref(169)}.`,
   },
   {
     name: "note row",

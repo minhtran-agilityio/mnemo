@@ -235,32 +235,125 @@ test("the action slot holds the one button the screen passes, reachable by keybo
 });
 
 test("a busy or disabled action stays in the slot and ignores clicks", () => {
-  let clicks = 0;
+  let busyClicks = 0;
+  let offClicks = 0;
   const busy = createButton(document, {
     label: "Summarize later",
     busy: true,
-    onClick: () => clicks++,
+    onClick: () => busyClicks++,
   });
   const off = createButton(document, {
     label: "Paste the text",
     disabled: true,
+    onClick: () => offClicks++,
   });
-  createLinkCard(
+  const busyCard = createLinkCard(
     document,
     { ...pasted, ...noSum, status: "ai-off" },
     { action: busy },
   );
+  expect(busyCard.querySelector(":scope > .lcard-action > button")).toBe(busy);
   busy.click();
-  expect(clicks).toBe(0);
+  expect(busyClicks).toBe(0);
   expect(busy.getAttribute("aria-busy")).toBe("true");
-  const card = createLinkCard(
+  const offCard = createLinkCard(
     document,
     { ...pasted, ...noSum },
     { action: off },
   );
+  document.body.append(offCard);
+  expect(offCard.querySelector(":scope > .lcard-action > button")).toBe(off);
+  expect(off.disabled).toBe(true);
+  off.click();
+  expect(offClicks).toBe(0);
+  offCard.remove();
+});
+
+test("the status decides: a summary shows only when the link is done", () => {
+  for (const status of [
+    "unreadable",
+    "reading",
+    "pending",
+    "ai-off",
+  ] as const) {
+    const item: LinkItem = { ...pasted, status, summary: "Made-up text." };
+    const card = createLinkCard(document, item);
+    expect(card.dataset.status).toBe(status);
+    expect(card.querySelector(".sum")).toBeNull();
+    expect(card.querySelector(":scope > .trust")).toBeNull();
+    expect(card.textContent).not.toContain("Made-up text.");
+    const sub = createLinkRow(document, item).querySelector(".row-sub");
+    expect(sub?.textContent).toBe(noSummaryText(item));
+  }
+  const unreadable = createLinkCard(document, {
+    ...pasted,
+    status: "unreadable",
+  });
+  expect(unreadable.querySelector(".nosum")?.textContent).toBe(
+    "Link only. Mnemo could not read this page.",
+  );
+  const reading = createLinkCard(document, { ...pasted, status: "reading" });
+  expect(reading.querySelector('[role="status"]')?.textContent).toBe(
+    "Reading the page",
+  );
+  // Left out, the status follows the summary.
+  const noStatus: LinkItem = { ...pasted, status: undefined };
+  expect(createLinkCard(document, noStatus).dataset.status).toBe("done");
   expect(
-    card.querySelector<HTMLButtonElement>(".lcard-action button")?.disabled,
-  ).toBe(true);
+    createLinkCard(document, { ...noStatus, summary: undefined }).dataset
+      .status,
+  ).toBe("unreadable");
+});
+
+test("an empty summary counts as none, in the card and in the list row alike", () => {
+  const item: LinkItem = { ...unread, summary: "" };
+  const card = createLinkCard(document, item);
+  expect(card.dataset.status).toBe("unreadable");
+  expect(card.querySelector(".sum")).toBeNull();
+  expect(card.querySelector(".nosum")?.textContent).toBe(noSummaryText(item));
+  expect(
+    createLinkRow(document, item).querySelector(".row-sub")?.textContent,
+  ).toBe("Link only. Mnemo could not read this page.");
+  const done: LinkItem = { ...pasted, ...noSum, summary: "" };
+  expect(
+    createLinkRow(document, done).querySelector(".row-sub")?.textContent,
+  ).toBe("No summary.");
+});
+
+test("tags the app chose are labelled Written by AI; the owner's tags are not", () => {
+  const card = createLinkCard(document, pasted);
+  const line = card.querySelector(":scope > .tagline") as HTMLElement;
+  expect(line.querySelector("ul.tags")).not.toBeNull();
+  expect(line.querySelector(".trust-ai")?.textContent).toBe("Written by AI");
+  const own = createLinkCard(document, { ...pasted, tagsKind: "owner" });
+  expect(own.querySelector(".tagline .tags")).not.toBeNull();
+  expect(own.querySelector(".tagline .trust")).toBeNull();
+  const css = (sel: string) =>
+    cssRule(import.meta.dirname, "link-card.css", sel);
+  expect(css(".lcard .tags").gap).toBe("var(--space-2)");
+  expect(css(".lcard .tagline")["flex-wrap"]).toBe("wrap");
+});
+
+test("a long site in a compact row shrinks and is cut with an ellipsis", () => {
+  const site = `${"rất-dài-".repeat(12)}ẪẬẲỖỮỰ.example.vn`;
+  const row = createCompactRow(document, { ...pasted, site });
+  const dom = row.querySelector<HTMLElement>(".dom");
+  expect(dom?.textContent).toBe(site);
+  expect(dom?.title).toBe(pasted.url);
+  const rule = cssRule(
+    import.meta.dirname,
+    "link-card.css",
+    ".compact-row .dom",
+  );
+  expect(rule).toMatchObject({
+    ...MARKS_ROOM,
+    "min-width": "0",
+    overflow: "hidden",
+    "text-overflow": "ellipsis",
+    "white-space": "nowrap",
+  });
+  expect(rule.flex).not.toBe("none");
+  expect(rule.flex.split(" ")[1]).toBe("1");
 });
 
 test("AI off keeps the link with the ticket's words, and the list row says the same", () => {
