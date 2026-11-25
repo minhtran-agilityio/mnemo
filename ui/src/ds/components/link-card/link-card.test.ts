@@ -643,7 +643,7 @@ test("the Compact row shows no summary and so no label", () => {
   expect(compact.querySelector(".trust")).toBeNull();
 });
 
-test("the rows are reached by keyboard and named by their text, label included", () => {
+test("the rows take keyboard focus, and the List row's text holds the title, the summary and its label", () => {
   const row = createLinkRow(document, pasted);
   const compact = createCompactRow(document, pasted);
   expect(row.tabIndex).toBe(0);
@@ -688,10 +688,67 @@ test("hover, focus-visible and active can be drawn for a still view, and have a 
     const compact = createCompactRow(document, pasted, { forceState: state });
     expect(compact.classList.contains(`is-${state}`)).toBe(true);
   }
-  expect(rowCss(".compact-row.is-active").background).toBe("var(--line)");
-  expect(rowCss(".link-row.is-active").background).toBe("var(--line)");
+  // Pressed differs from hover and from the row dividers (--line), so a divider stays visible.
+  for (const sel of [".compact-row.is-active", ".link-row.is-active"]) {
+    expect(rowCss(sel).background).toBe("var(--tint-info)");
+  }
+  expect(rowCss(".compact-row + .compact-row")["border-top"]).toContain(
+    "var(--line)",
+  );
   expect(rowCss(".compact-row.is-hover").background).toBe("var(--head)");
   expect(rowCss(".compact-row.is-focus").outline).toBe(
     "var(--focus-ring) solid var(--accent)",
   );
+});
+
+test("a narrow List row clips its summary line: the label shrinks to the line last and never spills over the meta", () => {
+  // The line clips what does not fit, and keeps room for stacked Vietnamese marks.
+  expect(rowCss(".link-row .link-sub")).toMatchObject({
+    ...MARKS_ROOM,
+    "min-width": "0",
+    overflow: "hidden",
+  });
+  // The summary shrinks first (the label does not shrink while the line is wider than it).
+  expect(rowCss(".link-row .link-sub > .row-sub").flex).toBe("0 1 auto");
+  // Narrower than the label, the label is capped at the line's width and clipped.
+  expect(rowCss(".link-row .link-sub > .trust")).toMatchObject({
+    flex: "none",
+    "min-width": "0",
+    "max-width": "100%",
+    overflow: "hidden",
+  });
+});
+
+test("reading: the List row's second line is a status with a spinner and the words", () => {
+  const item: LinkItem = { ...pasted, ...noSum, status: "reading" };
+  const row = createLinkRow(document, item);
+  const status = row.querySelector(".row-sub > [role='status']");
+  expect(status?.textContent).toBe("Reading the page");
+  expect(status?.querySelector(".spinner")?.getAttribute("aria-hidden")).toBe(
+    "true",
+  );
+  expect(row.querySelector(".row-sub")?.textContent).toBe(noSummaryText(item));
+  for (const other of ["pending", "done", "unreadable", "ai-off"] as const) {
+    const quiet = createLinkRow(document, { ...pasted, status: other });
+    expect(quiet.querySelector("[role='status']")).toBeNull();
+    expect(quiet.querySelector(".spinner")).toBeNull();
+  }
+});
+
+test("reading: the Compact row shows a spinner and the words after the title, as a status", () => {
+  const item: LinkItem = { ...pasted, ...noSum, status: "reading" };
+  const compact = createCompactRow(document, item);
+  const status = compact.querySelector(":scope > [role='status']");
+  expect(status?.textContent).toBe("Reading the page");
+  expect(status?.querySelector(".spinner")).not.toBeNull();
+  expect(status?.previousElementSibling?.className).toBe("row-title");
+  expect(status?.nextElementSibling?.className).toBe("dom");
+  expect(rowCss(".compact-row .rec-reading")).toMatchObject({
+    flex: "none",
+    "white-space": "nowrap",
+  });
+  for (const other of ["pending", "done", "unreadable", "ai-off"] as const) {
+    const quiet = createCompactRow(document, { ...pasted, status: other });
+    expect(quiet.querySelector("[role='status']")).toBeNull();
+  }
 });

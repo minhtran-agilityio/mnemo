@@ -156,13 +156,19 @@
   min-width: 0;
 }
 
-/* The summary line of a List row and its trust label. The summary shrinks and is cut with its
-   ellipsis (full text in its tooltip); the label after it stays whole on the same line. */
+/* The summary line of a List row and its trust label. The summary shrinks first and is cut with
+   its ellipsis (full text in its tooltip); the label after it stays whole. Only when the line is
+   narrower than the label does the label shrink, to the line's width, and the line clips it, so
+   it never spills over the meta line. The line keeps room above and below for stacked Vietnamese
+   marks, taken back by the margin, so the clip never cuts them. */
 .link-row .link-sub {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+  padding-block: var(--border-2);
+  margin-block: calc(-1 * var(--border-2));
+  overflow: hidden;
 }
 
 .link-row .link-sub > .row-sub {
@@ -172,6 +178,9 @@
 
 .link-row .link-sub > .trust {
   flex: none;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 /* The meta line stays on one line at its own width, at most half the row. Only the site in it may
@@ -210,12 +219,20 @@
   background: var(--head);
 }
 
-/* Pressed: one step darker than hover, as a tree node. */
+/* Pressed: the soft info tint, as a pressed label picker item. It differs from the hover surface
+   (--head) and from the row dividers (--line), so the dividers stay visible on press. */
 .link-row:active,
 .link-row.is-active,
 .compact-row:active,
 .compact-row.is-active {
-  background: var(--line);
+  background: var(--tint-info);
+}
+
+/* While Mnemo reads the page: the spinner and "Reading the page" after the title, kept whole on
+   one line; the title gives way first. */
+.compact-row .rec-reading {
+  flex: none;
+  white-space: nowrap;
 }
 
 .compact-row:focus-visible,

@@ -236,7 +236,10 @@ function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
       "done: guessed summary, labelled Guess",
     ],
     [{ ...pasted, ...unread, status: "pending" }, "pending: no label"],
-    [{ ...pasted, ...unread, status: "reading" }, "reading: no label"],
+    [
+      { ...pasted, ...unread, status: "reading" },
+      "reading: spinner and words as a status, no label",
+    ],
     [
       { ...pasted, ...unread, status: "unreadable" },
       "could not read: link only, no label",
@@ -265,7 +268,10 @@ function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
   const compactCases: Case[] = [
     [pasted, "done: title, site, date; nothing the app wrote, so no label"],
     [{ ...pasted, ...unread, status: "pending" }, "pending"],
-    [{ ...pasted, ...unread, status: "reading" }, "reading"],
+    [
+      { ...pasted, ...unread, status: "reading" },
+      "reading: spinner and words after the title",
+    ],
     [{ ...pasted, ...unread, status: "unreadable" }, "could not read"],
     [{ ...pasted, ...unread, status: "ai-off" }, "AI off"],
     [overflow, "overflow: long Vietnamese title and host"],

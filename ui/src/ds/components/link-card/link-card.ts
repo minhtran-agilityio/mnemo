@@ -253,6 +253,9 @@ export function createLinkRow(
     line.className = "link-sub";
     sub.replaceWith(line);
     line.append(sub, buildTrustLabel(item.summaryKind ?? "ai"));
+  } else if (linkStatus(item) === "reading" && sub) {
+    // Reading is an AI task in progress: the spinner and the words, as a status region.
+    sub.replaceChildren(reading(doc));
   }
   const meta = metaLine(doc, item);
   if (meta) row.append(meta);
@@ -260,9 +263,9 @@ export function createLinkRow(
 }
 
 /**
- * The Compact view: the title, the site and the saved date on one line. It shows nothing the app
- * wrote (no summary, tags or reason), so it needs no trust label; the List and Cards views show
- * them, labelled (issue 171).
+ * The Compact view: the title, the site and the saved date on one line, and "Reading the page"
+ * with a spinner while Mnemo reads it. It shows nothing the app wrote (no summary, tags or
+ * reason), so it needs no trust label; the List and Cards views show them, labelled (issue 171).
  */
 export function createCompactRow(
   doc: Document,
@@ -279,7 +282,10 @@ export function createCompactRow(
   const host = item.site || item.url.split("/")[0];
   const dom = textEl(doc, "span", "dom", host);
   dom.title = item.url;
-  li.append(title, dom);
+  li.append(title);
+  // While Mnemo reads the page, the spinner and the words sit after the title, as a status region.
+  if (linkStatus(item) === "reading") li.append(reading(doc));
+  li.append(dom);
   const when = item.saved || item.age;
   if (when) li.append(textEl(doc, "span", "row-meta", when));
   return li;
