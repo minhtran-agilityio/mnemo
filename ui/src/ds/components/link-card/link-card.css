@@ -75,6 +75,66 @@
   white-space: normal;
 }
 
+/* The site (host) on the meta line: one line, cut with an ellipsis, full host in the tooltip, with
+   room for stacked Vietnamese marks. */
+.lcard .site,
+.link-row .site {
+  min-width: 0;
+  max-width: 100%;
+  padding-block: var(--border-2);
+  margin-block: calc(-1 * var(--border-2));
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The tag list the card builds, inside its own .lcard-tags wrapper. The tag input part also uses
+   the class .tags (a box with a border); this keeps that box off the card's tag list, wherever both
+   style sheets load. The selector names only the card's own wrapper, so a tag input placed inside a
+   card keeps its own look. */
+.lcard-tags > .tags {
+  max-width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  gap: var(--space-2);
+}
+
+/* The tags and, when the app chose them, their Written by AI label. */
+.lcard .lcard-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+}
+
+/* Why the link was saved, with its Guess label after the text. A long reason wraps. */
+.lcard .reason {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  color: var(--ink2);
+  font-size: var(--text-md);
+}
+
+.lcard .reason-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The one action of the card. The button keeps its own hover, focus, active and disabled looks. */
+.lcard .lcard-action {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: var(--space-1);
+}
+
 .views {
   display: grid;
   gap: var(--space-3);
@@ -86,6 +146,31 @@
       auto-fill,
       minmax(min(var(--size-basis-column), 100%), 1fr)
     );
+}
+
+/* A link's List row. Flex shares the shrink in proportion to each item's own width, so a long
+   summary would squeeze a short site. Instead the body (title and summary) starts from zero width
+   and takes the room that is left: it is the side that gives way, cut with its own ellipsis. */
+.link-row > .row-body {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* The meta line stays on one line at its own width, at most half the row. Only the site in it may
+   shrink, so a long host is cut with its ellipsis and the badge, dots and date stay whole. */
+.link-row > .meta {
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  min-width: 0;
+  max-width: 50%;
+}
+
+.link-row > .meta > :not(.site) {
+  flex: none;
+}
+
+.link-row > .meta > .site {
+  flex: 0 1 auto;
 }
 
 .compact-row {
@@ -111,12 +196,25 @@
   outline-offset: calc(var(--focus-ring) * -1);
 }
 
+/* The title starts from zero width and takes the room that is left, so a long title gives way
+   (cut with its ellipsis) and never squeezes a short site. */
 .compact-row .row-title {
+  flex: 1 1 0;
+  min-width: 0;
   font-weight: var(--weight-regular);
 }
 
+/* The site shrinks and is cut with an ellipsis (full URL in its tooltip), so a long host never
+   pushes the row wider than its list. At most half the row, so the title keeps room. */
 .compact-row .dom {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
+  padding-block: var(--border-2);
+  margin-block: calc(-1 * var(--border-2));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
