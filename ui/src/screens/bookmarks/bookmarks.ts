@@ -58,9 +58,8 @@ export function renderBookmarks(
   const doc = container.ownerDocument;
   let left = false;
   let unlisten: (() => void) | null = null;
-  // The one place this screen keeps its state: the saved links, newest first. A link keeps the
-  // reason of its last save or summary result (`aiError`) until the core sends it again.
-  let items: (SavedBookmark | SaveResult)[] = [];
+  // The one place this screen keeps its state: the saved links, newest first.
+  let items: SavedBookmark[] = [];
   /** Bookmarks with a summary call going, so their action is not sent twice. */
   const busy = new Set<string>();
 
@@ -139,7 +138,7 @@ export function renderBookmarks(
       });
   }
 
-  function put(b: SavedBookmark | SaveResult): void {
+  function put(b: SavedBookmark): void {
     items = upsert(items, b);
     draw();
   }
@@ -213,7 +212,7 @@ export function renderBookmarks(
   }
 
   /** The card's one action button (several wait on UI request issue 179). */
-  function actionsOf(b: SavedBookmark | SaveResult): Node | undefined {
+  function actionsOf(b: SavedBookmark): Node | undefined {
     const action = shownAction(b);
     return action ? actionButton(b, action) : undefined;
   }

@@ -1,13 +1,10 @@
 // The plain rules of the Bookmarks screen (#25): how a saved link becomes a link card, which
 // actions its card offers, the saved date, and how a changed bookmark joins the list.
 import type { LinkItem, LinkStatus } from "../../ds";
-import type { AppError, SavedBookmark, SummaryStatus } from "../../shared/api";
+import type { SavedBookmark, SummaryStatus } from "../../shared/api";
 
 /** An action a card offers. */
 export type CardAction = "paste" | "later";
-
-/** The code the core gives when the page could not be reached for now (site down, slow, busy). */
-export const PAGE_NOT_REACHED = "page_not_reached";
 
 /** The visible name of each action. The acceptance tests find the buttons by these names. */
 export const ACTION_LABELS = {
@@ -67,21 +64,16 @@ export function toLinkItem(b: SavedBookmark): LinkItem {
 
 /**
  * The actions of a card, in order. Unreadable: "Paste the text". No summary yet (pending or AI
- * off): "Summarize later". A page that could not be reached for now (pending with the core's
- * `page_not_reached` reason) offers both (owner decision on #25: "Offer both"). The reason comes
- * with the save or summary result only, so after the screen is opened again such a card offers
- * "Summarize later" alone.
+ * off): "Summarize later". A page that could not be reached for now (pending with the stored
+ * `pageNotReached`) offers both (owner decision on #25: "Offer both"). The flag is on the stored
+ * row, so a list reload or a restart keeps both actions.
  */
-export function actionsFor(
-  b: SavedBookmark & { aiError?: AppError },
-): CardAction[] {
+export function actionsFor(b: SavedBookmark): CardAction[] {
   switch (b.summaryStatus) {
     case "unreadable":
       return ["paste"];
     case "pending":
-      return b.aiError?.code === PAGE_NOT_REACHED
-        ? ["later", "paste"]
-        : ["later"];
+      return b.pageNotReached === true ? ["later", "paste"] : ["later"];
     case "ai_off":
       return ["later"];
     default:
@@ -94,9 +86,7 @@ export function actionsFor(
  * text" when it is among the actions (the acceptance criterion names it for a link the app could
  * not read), else the first.
  */
-export function shownAction(
-  b: SavedBookmark & { aiError?: AppError },
-): CardAction | null {
+export function shownAction(b: SavedBookmark): CardAction | null {
   const actions = actionsFor(b);
   return actions.includes("paste") ? "paste" : (actions[0] ?? null);
 }

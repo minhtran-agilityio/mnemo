@@ -26,6 +26,7 @@ function bm(over: Partial<SavedBookmark> = {}): SavedBookmark {
     reason: "It may matter for the command allow-list.",
     reasonIsGuess: true,
     summaryStatus: "done",
+    pageNotReached: false,
     tags: ["security", "tauri"],
     labels: [],
     ...over,
@@ -107,13 +108,16 @@ test("each status has its actions", () => {
 });
 
 test("a page that could not be reached offers both Summarize later and Paste the text", () => {
-  const notReached = {
-    ...bm({ summaryStatus: "pending", summary: null, tags: [] }),
-    aiError: { code: "page_not_reached", message: "The site was down." },
-  };
+  // Read from the stored row, so it holds after a list reload or a restart (no aiError).
+  const notReached = bm({
+    summaryStatus: "pending",
+    pageNotReached: true,
+    summary: null,
+    tags: [],
+  });
   expect(actionsFor(notReached)).toEqual(["later", "paste"]);
   // Another AI failure keeps the one action.
-  const timeout = { ...notReached, aiError: { code: "timeout", message: "x" } };
+  const timeout = { ...notReached, pageNotReached: false };
   expect(actionsFor(timeout)).toEqual(["later"]);
   // Done or being read: no action, whatever the last error was.
   expect(actionsFor({ ...notReached, summaryStatus: "reading" })).toEqual([]);
@@ -281,6 +285,7 @@ test("a link whose page could not be reached offers Paste the text, and pasted t
         id: "n1",
         url,
         summaryStatus: "pending",
+        pageNotReached: true,
         summary: null,
         tags: [],
       }),
@@ -315,6 +320,27 @@ test("a link whose page could not be reached offers Paste the text, and pasted t
   expect(box.textContent).toContain("Summary made from the pasted text.");
   expect(button(box, "Paste the text")).toBeUndefined();
   expect(button(box, "Summarize later")).toBeUndefined();
+});
+
+test("a not-reached link loaded from the list offers Paste the text, with no toast", async () => {
+  const { d } = deps({
+    listBookmarkCards: vi.fn(async () =>
+      page([
+        bm({
+          id: "r1",
+          summaryStatus: "pending",
+          pageNotReached: true,
+          summary: null,
+          tags: [],
+        }),
+      ]),
+    ),
+  });
+  const { box } = mount(d);
+  await flush();
+  const card = box.querySelector("article") as HTMLElement;
+  expect(card.textContent).toMatch(/no summary yet/i);
+  expect(button(card, "Paste the text")).toBeDefined();
 });
 
 test("a load failure says so, and leaving stops the event listener", async () => {

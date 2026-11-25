@@ -756,6 +756,11 @@ export interface SavedBookmark extends Bookmark {
   /** The host of the link, for example "example.org". Null when unknown. */
   site: string | null;
   summaryStatus: SummaryStatus;
+  /**
+   * True when the bookmark is pending because the last read could not reach the page for now
+   * (site down, slow or busy). Always false in any other status.
+   */
+  pageNotReached: boolean;
   tags: string[];
   labels: BookmarkTag[];
 }

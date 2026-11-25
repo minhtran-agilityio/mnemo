@@ -314,7 +314,7 @@ fn summarize_claimed(
                 // The link is user content and is not logged.
                 log::info!("bookmark {id}: the page could not be reached ({e}), no summary yet");
                 return result(
-                    ctx.release(&id, SummaryStatus::Pending)?,
+                    ctx.write(&mut |s| s.release_not_reached(&id))?,
                     Some(not_reached()),
                 );
             }
@@ -570,8 +570,11 @@ mod tests {
             );
             let got = w.run(|c| save_link(c, "https://example.org/")).unwrap();
             let b = &got.bookmark;
-            // Honest failure: link only, no summary, Claude never asked.
+            // Honest failure: link only, no summary, Claude never asked. The stored row says
+            // the page was not reached, so the card offers both actions after a restart too.
             assert_eq!(b.summary_status, Pending, "{e:?}");
+            assert!(b.page_not_reached);
+            assert_eq!(&w.stored(&b.base.id), b);
             assert_eq!((b.summary.clone(), b.reason.clone()), (None, None));
             assert!(w.runner.requests().is_empty());
             let problem = got.ai_error.clone().unwrap();
@@ -580,9 +583,10 @@ mod tests {
                 problem.message.contains("summarize it later"),
                 "{problem:?}"
             );
-            // A new read is allowed ("Summarize later").
+            // A new read is allowed ("Summarize later") and ends not reached again.
             let again = w.run(|c| summarize(c, &b.base.id, None)).unwrap();
             assert_eq!(again.bookmark.summary_status, Pending);
+            assert!(again.bookmark.page_not_reached);
             assert_eq!(w.reader.calls(), 2);
         }
     }

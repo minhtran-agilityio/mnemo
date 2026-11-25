@@ -502,7 +502,8 @@ impl Item for Bookmark {
         insert: "?3, ?4, ?5, ?6, ?7, ?8, CASE WHEN ?5 IS NULL THEN 'pending' ELSE 'done' END",
         set: "url = ?3, title = ?4, summary = ?5, reason = ?6, reason_is_guess = ?7, site = ?8,
             summary_status = CASE WHEN ?5 IS NOT NULL THEN 'done'
-                WHEN summary_status = 'done' THEN 'pending' ELSE summary_status END"
+                WHEN summary_status = 'done' THEN 'pending' ELSE summary_status END,
+            page_not_reached = CASE WHEN ?5 IS NOT NULL THEN 0 ELSE page_not_reached END"
     );
 
     fn validate(i: &BookmarkInput) -> Result<(), StorageError> {

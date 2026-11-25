@@ -49,6 +49,10 @@ pub const MIGRATIONS: &[Migration] = &[
         number: 9,
         sql: include_str!("../../migrations/0009_bookmark_save.sql"),
     },
+    Migration {
+        number: 10,
+        sql: include_str!("../../migrations/0010_bookmark_not_reached.sql"),
+    },
 ];
 
 /// Reads the schema version stored in the database (0 for a new file).
@@ -107,7 +111,7 @@ mod tests {
     fn real_migrations_set_the_version() {
         let mut c = mem();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 9);
+        assert_eq!(current_version(&c).unwrap(), 10);
     }
 
     /// `run` skips every number at or below the stored version, so a gap that is filled
@@ -187,7 +191,7 @@ mod tests {
             err,
             StorageError::SchemaTooNew {
                 found: 99,
-                supported: 9
+                supported: 10
             }
         );
     }
@@ -381,7 +385,7 @@ mod tests {
         )
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 9);
+        assert_eq!(current_version(&c).unwrap(), 10);
         for t in KINDS.iter().chain(["item_link", "settings"].iter()) {
             assert!(table_exists(&c, t), "table {t} missing");
         }
@@ -403,7 +407,7 @@ mod tests {
         ))
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 9);
+        assert_eq!(current_version(&c).unwrap(), 10);
         let cols = columns(&c, "idea");
         for col in [
             "body",
@@ -601,7 +605,7 @@ mod tests {
         ))
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 9);
+        assert_eq!(current_version(&c).unwrap(), 10);
         let row = |id: &str| -> (Option<String>, String, Option<String>) {
             c.query_row(
                 "SELECT site, summary_status, summary FROM bookmark WHERE id = ?1",
@@ -648,5 +652,47 @@ mod tests {
             .is_err());
         assert!(index_exists(&c, "idx_bookmark_label_label"));
         assert!(index_exists(&c, "idx_bookmark_label_bookmark"));
+    }
+
+    #[test]
+    fn migration_10_adds_the_page_not_reached_flag_to_a_database_built_by_migration_9() {
+        let mut c = mem();
+        run(&mut c, &MIGRATIONS[..9]).unwrap();
+        c.execute_batch(&format!(
+            "INSERT INTO bookmark (id, created_at, updated_at, url, summary_status)
+                 VALUES ('b-old', '{T}', '{T}', 'https://a.example', 'pending');"
+        ))
+        .unwrap();
+        run(&mut c, MIGRATIONS).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 10);
+        let flag = |id: &str| -> i64 {
+            c.query_row(
+                "SELECT page_not_reached FROM bookmark WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        // Old rows keep their data and are not marked.
+        assert_eq!(flag("b-old"), 0);
+        // The flag goes only on a pending row, and is 0 or 1.
+        c.execute(
+            "UPDATE bookmark SET page_not_reached = 1 WHERE id = 'b-old'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(flag("b-old"), 1);
+        for bad in [
+            "UPDATE bookmark SET summary_status = 'done' WHERE id = 'b-old'",
+            "UPDATE bookmark SET summary_status = 'unreadable' WHERE id = 'b-old'",
+            "UPDATE bookmark SET page_not_reached = 2 WHERE id = 'b-old'",
+        ] {
+            assert!(c.execute(bad, []).is_err(), "{bad}");
+        }
+        c.execute(
+            "UPDATE bookmark SET summary_status = 'reading', page_not_reached = 0 WHERE id = 'b-old'",
+            [],
+        )
+        .unwrap();
     }
 }

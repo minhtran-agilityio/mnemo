@@ -97,6 +97,10 @@ pub struct SavedBookmark {
     /// True when the app wrote the reason: it is shown as a guess.
     pub reason_is_guess: bool,
     pub summary_status: SummaryStatus,
+    /// True when the bookmark is `pending` because the last read could not reach the page for
+    /// now (site down, slow or busy): its card offers "Paste the text" as well as "Summarize
+    /// later". Always false in any other status (a database check holds it).
+    pub page_not_reached: bool,
     /// The tag names, in name order.
     pub tags: Vec<String>,
     /// The same tags with their label ids.
@@ -129,35 +133,40 @@ const INSERT_SQL: &str = "INSERT INTO bookmark
 
 const GET_SQL: &str =
     "SELECT b.id, b.created_at, b.updated_at, b.deleted_at, b.url, b.title, b.site,
-         b.summary, b.reason, b.reason_is_guess, b.summary_status
+         b.summary, b.reason, b.reason_is_guess, b.summary_status, b.page_not_reached
      FROM bookmark b WHERE b.id = ?1 AND b.deleted_at IS NULL";
 
 // ?1 and ?2 the cursor (or NULL), ?3 the row limit. Newest first; idx_bookmark_list serves it.
 const LIST_SQL: &str =
     "SELECT b.id, b.created_at, b.updated_at, b.deleted_at, b.url, b.title, b.site,
-         b.summary, b.reason, b.reason_is_guess, b.summary_status
+         b.summary, b.reason, b.reason_is_guess, b.summary_status, b.page_not_reached
      FROM bookmark b
      WHERE b.deleted_at IS NULL AND (?1 IS NULL OR (b.created_at, b.id) < (?1, ?2))
      ORDER BY b.created_at DESC, b.id DESC LIMIT ?3";
 
 // Tests only: any status, claim or not.
 #[cfg(test)]
-const SET_STATUS_SQL: &str = "UPDATE bookmark SET summary_status = ?3, updated_at = ?2
+const SET_STATUS_SQL: &str =
+    "UPDATE bookmark SET summary_status = ?3, page_not_reached = 0, updated_at = ?2
      WHERE id = ?1 AND deleted_at IS NULL";
 
 // Ends a claim with a status other than done; the summary, reason and tags stay as they are.
-const RELEASE_SQL: &str = "UPDATE bookmark SET summary_status = ?3, updated_at = ?2
+// ?4: 1 when the page was not reached (only with pending; the table check holds it).
+const RELEASE_SQL: &str =
+    "UPDATE bookmark SET summary_status = ?3, page_not_reached = ?4, updated_at = ?2
      WHERE id = ?1 AND deleted_at IS NULL AND summary_status = 'reading'";
 
 // Starts a new summary: only a live bookmark that is not done and not being read already.
-const CLAIM_SQL: &str = "UPDATE bookmark SET summary_status = 'reading', updated_at = ?2
+const CLAIM_SQL: &str = "UPDATE bookmark
+     SET summary_status = 'reading', page_not_reached = 0, updated_at = ?2
      WHERE id = ?1 AND deleted_at IS NULL AND summary_status NOT IN ('reading', 'done')";
 
 const SET_TITLE_SQL: &str = "UPDATE bookmark SET title = ?3, updated_at = ?2
      WHERE id = ?1 AND deleted_at IS NULL AND summary_status = 'reading'";
 
 const SET_SUMMARY_SQL: &str = "UPDATE bookmark
-     SET summary = ?3, reason = ?4, reason_is_guess = 1, summary_status = 'done', updated_at = ?2
+     SET summary = ?3, reason = ?4, reason_is_guess = 1, summary_status = 'done',
+         page_not_reached = 0, updated_at = ?2
      WHERE id = ?1 AND deleted_at IS NULL AND summary_status = 'reading'";
 
 // Rows a closed app left in reading go back to pending ("no summary yet").
@@ -252,6 +261,7 @@ fn row_without_tags(r: &Row<'_>) -> rusqlite::Result<SavedBookmark> {
         reason: r.get(8)?,
         reason_is_guess: r.get(9)?,
         summary_status,
+        page_not_reached: r.get(11)?,
         tags: Vec::new(),
         labels: Vec::new(),
     })
@@ -444,7 +454,21 @@ impl Storage {
         }
         let n = self
             .conn
-            .execute(RELEASE_SQL, params![id, now, status.as_str()])?;
+            .execute(RELEASE_SQL, params![id, now, status.as_str(), false])?;
+        self.held(n, id)
+    }
+
+    /// Ends the claim as `pending` with `page_not_reached` set: the page could not be reached
+    /// for now. Only while the bookmark is still `reading`, as `release_bookmark`.
+    pub fn release_not_reached(&self, id: &str) -> Result<Held, StorageError> {
+        self.release_not_reached_at(&now_iso(), id)
+    }
+
+    pub(crate) fn release_not_reached_at(&self, now: &str, id: &str) -> Result<Held, StorageError> {
+        let n = self.conn.execute(
+            RELEASE_SQL,
+            params![id, now, SummaryStatus::Pending.as_str(), true],
+        )?;
         self.held(n, id)
     }
 
@@ -964,6 +988,53 @@ mod tests {
         assert_eq!(
             s.release_bookmark_at(T3, &d.base.id, SummaryStatus::Pending),
             Ok(Held::Lost(None))
+        );
+    }
+
+    #[test]
+    fn page_not_reached_is_set_only_with_pending_and_cleared_by_every_other_status() {
+        let (mut s, _d) = open_temp();
+        let b = s.save_link_to_read_at(T1, "https://a.example").unwrap();
+        assert!(!b.page_not_reached);
+        let b = written(s.release_not_reached_at(T2, &b.base.id));
+        assert_eq!(b.summary_status, SummaryStatus::Pending);
+        assert!(b.page_not_reached);
+        // Read back from the stored row (a list reload or a restart).
+        let listed = s.list_bookmark_cards(&PageRequest::first(10)).unwrap();
+        assert!(listed.items[0].page_not_reached);
+        let json = serde_json::to_value(&listed.items[0]).unwrap();
+        assert_eq!(json["pageNotReached"], true);
+        // A new claim clears it; any other end leaves it off.
+        let b = s.claim_bookmark_for_summary_at(T2, &b.base.id).unwrap();
+        assert!(!b.page_not_reached);
+        for status in [
+            SummaryStatus::Unreadable,
+            SummaryStatus::AiOff,
+            SummaryStatus::Pending,
+        ] {
+            let r = written(s.release_bookmark_at(T2, &b.base.id, status));
+            assert!(!r.page_not_reached, "{status:?}");
+            s.set_bookmark_status_at(T2, &b.base.id, SummaryStatus::Reading)
+                .unwrap();
+        }
+        written(s.release_not_reached_at(T2, &b.base.id));
+        let done = summarized(&mut s, T3, &b.base.id, &summary(&["a"]));
+        assert!(!done.page_not_reached);
+        // A summary from the #14 item path clears it too.
+        let c = s.save_link_to_read_at(T1, "https://c.example").unwrap();
+        written(s.release_not_reached_at(T2, &c.base.id));
+        let mine = BookmarkInput {
+            summary: Some("Mine.".into()),
+            ..bookmark("https://c.example/")
+        };
+        let _: Bookmark = s.update_at(T3, &c.base.id, &mine).unwrap();
+        let c = s.get_saved_bookmark(&c.base.id).unwrap();
+        assert_eq!(c.summary_status, SummaryStatus::Done);
+        assert!(!c.page_not_reached);
+        // Only a run that holds the claim sets it.
+        assert_eq!(
+            s.release_not_reached_at(T3, &c.base.id),
+            Ok(Held::Lost(Some(c)))
         );
     }
 
