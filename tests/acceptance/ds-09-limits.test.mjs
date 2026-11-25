@@ -467,7 +467,7 @@ for (const scheme of ['light', 'dark']) {
 // - a meta line that wrapped under the body, and a .link-host that wrapped under the badge, start at the title's edge.
 // The counts make sure each check ran.
 const ROW_WIDTHS = [280, 320, 360, 400, 420, 440, 480, 500, 520, 540, 560, 600, 640, 680, 720, 760, 800];
-const ROW_SEEN = ['rows', 'filled', 'wrapped', 'shared', 'cut', 'metas', 'dates', 'badges', 'hostUnderBadge'];
+const ROW_SEEN = ['rows', 'filled', 'wrapped', 'shared', 'cut', 'metaParts', 'dates', 'badges', 'hostUnderBadge'];
 const ROW_AUDIT = `(() => {
   const bad = [];
   const x = (n) => Math.round(n * 100) / 100;
@@ -476,11 +476,13 @@ const ROW_AUDIT = `(() => {
   const range = document.createRange();
   // The widest line box of a text, not the sum: Chrome gives a cut text more than one rect.
   const widest = (node) => { range.selectNodeContents(node); return Math.max(0, ...[...range.getClientRects()].map((r) => r.width)); };
-  // --size-link-site-min in the site's own font (it is in ch).
+  // --size-link-site-min in the site's own font (it is in ch, so it must resolve in the site's 11px mono, not in
+  // the 12.5px body font around it): the probe goes inside the site and inherits its font. Call it after the
+  // site's text is measured.
   const siteMin = (site) => {
     const probe = document.createElement('span');
     probe.style.cssText = 'position:absolute;width:var(--size-link-site-min)';
-    site.after(probe);
+    site.append(probe);
     const w = probe.getBoundingClientRect().width;
     probe.remove();
     return w;
@@ -525,11 +527,11 @@ const ROW_AUDIT = `(() => {
         }
       }
       // Nothing spills: the meta line stays in .link-main, and every part of it stays in the meta line.
-      seen.metas++;
       if (mr.left < mainR.left - 0.5 || mr.right > mainR.right + 0.5) bad.push(at + ': meta x' + x(mr.left) + '-' + x(mr.right) + ' leaves .link-main x' + x(mainR.left) + '-' + x(mainR.right));
       for (const part of meta.querySelectorAll('*')) {
         const pr = part.getBoundingClientRect();
         if (pr.width < 1) continue;
+        seen.metaParts++;
         if (pr.left < mr.left - 0.5 || pr.right > mr.right + 0.5) bad.push(at + ': "' + part.textContent.slice(0, 20) + '" x' + x(pr.left) + '-' + x(pr.right) + ' spills out of its meta line x' + x(mr.left) + '-' + x(mr.right));
       }
       // scrollWidth and clientWidth are whole pixels, so a site short by a fraction of a pixel (still cut, with an
@@ -599,11 +601,37 @@ for (const scheme of ['light', 'dark']) {
     assert.ok(seen.dates > 0, 'no date seen, so the date checks never ran');
     assert.ok(seen.badges > 0, 'no row with an app badge seen');
     assert.ok(seen.hostUnderBadge > 0, 'no site and date seen wrapped under a badge, so that edge check never ran');
-    assert.equal(seen.metas, seen.rows, 'a row was left out of the spill check');
+    assert.ok(seen.metaParts > 0, 'no meta part measured, so the spill check never ran');
     assert.deepEqual(bad, []);
     assert.equal(seen.filled, seen.rows, 'a .link-main does not fill its row after the icon');
   });
 }
+
+// Control for the smallest-width check above: a style injected into the page holds every List row site at a fixed
+// width. At exactly --size-link-site-min (8ch of the site's 11px mono font) no site is reported under its
+// smallest width; at 1px less, a cut site is. A probe that resolved 8ch in the 12.5px body font (about 55px) would
+// fail the first half, and a check that never ran would fail the second.
+test('AC3: control, the List row audit reports a site held 1px under --size-link-site-min, and none held at it', UI, () =>
+  withApp({}, async (app) => {
+    await app.goto('/#/ui-catalog', CATALOG_READY);
+    assert.ok(await app.click('Records'), 'no Records tab');
+    await sleep(500);
+    const under = (r) => r.bad.filter((b) => b.includes('under its smallest width'));
+    const hold = (width) => app.eval(`(() => {
+      let s = document.getElementById('ds09-site-hold');
+      if (!s) { s = document.createElement('style'); s.id = 'ds09-site-hold'; document.head.append(s); }
+      s.textContent = '.link-main .link-host > .site { flex: none !important; min-width: 0 !important; width: ${width} !important; max-width: none !important; }';
+      return true;
+    })()`);
+    await hold('var(--size-link-site-min)');
+    const at = await app.eval(ROW_AUDIT);
+    assert.ok(at.seen.cut > 0, 'no cut site seen with the sites held at their smallest width');
+    assert.deepEqual(under(at), []);
+    await hold('calc(var(--size-link-site-min) - 1px)');
+    const below = await app.eval(ROW_AUDIT);
+    assert.ok(below.seen.cut > 0, 'no cut site seen with the sites held under their smallest width');
+    assert.ok(under(below).length > 0, 'a site held 1px under its smallest width was not reported');
+  }));
 
 // ---------------------------------------------------------------- AC4
 test('AC4: the 1000-row catalog list builds in under 1.5 s and scrolls with no frame stall over 250 ms', UI, () =>

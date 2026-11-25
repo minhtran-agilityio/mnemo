@@ -145,12 +145,24 @@ function metaLine(doc: Document, item: LinkItem): HTMLDivElement | null {
   return parts.length > 0 ? createMetaLine(doc, parts) : null;
 }
 
-/** A scheme with an authority, as in `https://`. */
-const SCHEME = /^[a-z][a-z\d+.-]*:\/\//i;
+/** A scheme with an authority, as in `https://`. Group 1 is the scheme's name. */
+const SCHEME = /^([a-z][a-z\d+.-]*):\/\//i;
 
-/** The authority of a URL written as text: after the scheme, before the path, without a user. */
+/** The port a scheme uses when the URL names none; `new URL()` leaves it out of the host. */
+const DEFAULT_PORT: Readonly<Record<string, string>> = {
+  http: "80",
+  https: "443",
+  ws: "80",
+  wss: "443",
+  ftp: "21",
+};
+
+/**
+ * The authority of a URL written as text: after the scheme (or a protocol-relative `//`), before
+ * the path, without a user. Empty when the URL has none (`file:///a`).
+ */
 function authority(url: string): string {
-  const rest = url.replace(SCHEME, "");
+  const rest = url.replace(SCHEME, "").replace(/^\/\//, "");
   const end = rest.search(/[/?#]/);
   const auth = end < 0 ? rest : rest.slice(0, end);
   return auth.slice(auth.lastIndexOf("@") + 1);
@@ -158,25 +170,36 @@ function authority(url: string): string {
 
 /**
  * The host to show for a link: its site, else the host of its URL, never the scheme
- * ("https://v2.tauri.app/a" and "v2.tauri.app/a" both give "v2.tauri.app"). The URL is parsed with
- * `new URL()`; a URL with no scheme does not parse and falls back to the text before the path,
- * with any scheme stripped. A URL with letters outside ASCII is read from the text as written,
- * since `new URL()` turns such a host into punycode ("xn--..."), which the owner cannot read.
+ * ("https://v2.tauri.app/a" and "v2.tauri.app/a" both give "v2.tauri.app"). Empty when the URL has
+ * no host (`file:///a`). Only the host text decides how it is read:
+ * - an ASCII host is parsed with `new URL()`, which lowercases it and drops a default port; a URL
+ *   with no scheme does not parse, and its host text is lowercased as written;
+ * - a host with letters outside ASCII is lowercased as written, with a default port dropped here,
+ *   since `new URL()` turns it into punycode ("xn--..."), which the owner cannot read.
+ * A path with letters outside ASCII changes nothing.
  */
 export function linkHost(item: LinkItem): string {
   const site = item.site?.trim();
   if (site) return site;
   const url = item.url.trim();
-  let host: string;
-  try {
-    host = new URL(url).host;
-  } catch {
-    // Not an absolute URL ("v2.tauri.app/a"): the text before the path is the host.
-    return authority(url);
+  const auth = authority(url);
+  if (!auth) return "";
+  if (/^[\x20-\x7e]*$/.test(auth)) {
+    try {
+      // A URL with no authority ("localhost:1420/a" parses with the scheme "localhost:") has no
+      // host; the host text below is used then.
+      const host = new URL(url).host;
+      if (host) return host;
+    } catch {
+      // Not an absolute URL ("v2.tauri.app/a"): the host text below is used.
+    }
   }
-  // A URL with no authority ("localhost:1420/a" parses with the scheme "localhost:") has no host.
-  if (!host || !/^[\x20-\x7e]*$/.test(url)) return authority(url);
-  return host;
+  const scheme = SCHEME.exec(url)?.[1]?.toLowerCase() ?? "";
+  const port = DEFAULT_PORT[scheme];
+  const host = auth.toLowerCase();
+  return port && host.endsWith(`:${port}`)
+    ? host.slice(0, -(port.length + 1))
+    : host;
 }
 
 /**
@@ -354,8 +377,6 @@ export function createCompactRow(
   li.tabIndex = 0;
   const title = textEl(doc, "span", "row-title", item.title);
   title.title = item.title;
-  const dom = textEl(doc, "span", "dom", linkHost(item));
-  dom.title = item.url;
   li.append(title);
   // While Mnemo reads the page, a spinner sits after the title, as a status region. Its words are
   // in the tooltip and hidden text, so the one-line row keeps room for the site and the date.
@@ -370,7 +391,13 @@ export function createCompactRow(
     );
     li.append(box);
   }
-  li.append(dom);
+  // A URL with no host (`file:///a`) shows no site, not an empty one.
+  const host = linkHost(item);
+  if (host) {
+    const dom = textEl(doc, "span", "dom", host);
+    dom.title = item.url;
+    li.append(dom);
+  }
   const when = item.saved || item.age;
   if (when) li.append(textEl(doc, "span", "row-meta", when));
   return li;

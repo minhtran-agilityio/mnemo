@@ -850,6 +850,19 @@ test("the host of a link with no site never shows the scheme", () => {
   // A host with Vietnamese letters stays as written, not punycode.
   expect(host("https://tài-liệu.vn/a")).toBe("tài-liệu.vn");
   expect(host("tài-liệu.vn/a")).toBe("tài-liệu.vn");
+  // Only the host text decides: a path outside ASCII leaves an ASCII host to new URL(), which
+  // lowercases it and drops a default port.
+  expect(host("https://VnExpress.net/thời-sự")).toBe("vnexpress.net");
+  expect(host("https://vnexpress.net/a")).toBe("vnexpress.net");
+  expect(host("https://example.com:443/tức")).toBe("example.com");
+  expect(host("V2.Tauri.App/x")).toBe("v2.tauri.app");
+  // A host outside ASCII is lowercased here, and its default port dropped; another port stays.
+  expect(host("https://Tài-Liệu.vn:443/tức")).toBe("tài-liệu.vn");
+  expect(host("http://tài-liệu.vn:80/a")).toBe("tài-liệu.vn");
+  expect(host("https://tài-liệu.vn:8443/a")).toBe("tài-liệu.vn:8443");
+  // A protocol-relative URL has a host; a file URL has none.
+  expect(host("//v2.tauri.app/x")).toBe("v2.tauri.app");
+  expect(host("file:///home/me/notes.txt")).toBe("");
   // The site wins; an empty or blank site falls back to the URL.
   expect(host("https://a.example/x", "b.example")).toBe("b.example");
   expect(host("https://a.example/x", "  ")).toBe("a.example");
@@ -863,6 +876,21 @@ test("the host of a link with no site never shows the scheme", () => {
     expect(row.textContent).not.toContain("https:");
     expect(row.textContent).toContain("v2.tauri.app");
   }
+  // A URL with no host renders no site at all, not an empty span.
+  const noHost = { ...pasted, site: undefined, url: "file:///home/me/a.txt" };
+  const compact = createCompactRow(document, noHost);
+  expect(compact.querySelector(".dom")).toBeNull();
+  expect(compact.querySelector(".row-meta")?.textContent).toBe("25 Nov 2026");
+  const list = createLinkRow(document, noHost);
+  expect(list.querySelector(".site")).toBeNull();
+  expect(list.querySelector(".meta")?.textContent).toBe("25 Nov 2026");
+  const relative = { ...noHost, url: "//v2.tauri.app/x" };
+  expect(
+    createCompactRow(document, relative).querySelector(".dom")?.textContent,
+  ).toBe("v2.tauri.app");
+  expect(
+    createLinkRow(document, relative).querySelector(".site")?.textContent,
+  ).toBe("v2.tauri.app");
 });
 
 test("the List row's meta line: the badge, then the site and the date as one piece, no dot after the badge", () => {
