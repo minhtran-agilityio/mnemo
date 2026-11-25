@@ -548,9 +548,11 @@ test("in the List view the body gives way first, and only the site in the meta l
     "min-width": "0",
   });
   expect(css(".link-main .link-host > :not(.site)").flex).toBe("none");
+  // The 8ch floor is on the flex basis only, capped by the site's own width: a min-width would win
+  // over max-width and give a host shorter than 8ch ("t.me") an 8ch box with a gap after it.
   expect(css(".link-main .link-host > .site")).toMatchObject({
     flex: "1 1 var(--size-link-site-min)",
-    "min-width": "min(var(--size-link-site-min), 100%)",
+    "min-width": "0",
     "max-width": "max-content",
   });
   expect(css(".link-row .site")).toMatchObject({
@@ -863,6 +865,31 @@ test("the host of a link with no site never shows the scheme", () => {
   // A protocol-relative URL has a host; a file URL has none.
   expect(host("//v2.tauri.app/x")).toBe("v2.tauri.app");
   expect(host("file:///home/me/notes.txt")).toBe("");
+  // A scheme that parses with no host shows no site, never the scheme or the text after it.
+  expect(host("about:blank")).toBe("");
+  expect(host("file:/a")).toBe("");
+  expect(host("javascript:alert(1)")).toBe("");
+  expect(host("mailto:me@x.com")).toBe("");
+  // Where URL.canParse is missing (an older web view), the text is read alone, with the same hosts.
+  const canParse = URL.canParse;
+  try {
+    Object.defineProperty(URL, "canParse", {
+      value: undefined,
+      configurable: true,
+    });
+    expect(host("https://VnExpress.net:443/thời-sự")).toBe("vnexpress.net");
+    expect(host("https://tài-liệu.vn/a")).toBe("tài-liệu.vn");
+    expect(host("v2.tauri.app/x")).toBe("v2.tauri.app");
+    expect(host("//v2.tauri.app/x")).toBe("v2.tauri.app");
+    expect(host("localhost:1420/a")).toBe("localhost:1420");
+    for (const none of ["about:blank", "file:/a", "mailto:me@x.com"])
+      expect(host(none)).toBe("");
+  } finally {
+    Object.defineProperty(URL, "canParse", {
+      value: canParse,
+      configurable: true,
+    });
+  }
   // The site wins; an empty or blank site falls back to the URL.
   expect(host("https://a.example/x", "b.example")).toBe("b.example");
   expect(host("https://a.example/x", "  ")).toBe("a.example");

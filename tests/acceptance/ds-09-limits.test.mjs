@@ -462,12 +462,14 @@ for (const scheme of ['light', 'dark']) {
 //   the row's content edge), so the checks below that use .link-main are checks against the row;
 // - a cut site has the whole line of the row after the icon (its .link-host spans it), and keeps at least
 //   --size-link-site-min (or the whole line, when that is narrower): no cap leaves room unused;
+// - a site's box is never wider than its text (+1px), so a host shorter than --size-link-site-min ("t.me") leaves no
+//   gap before its dot (a focused row, whose host wraps, is left out of this one);
 // - nothing spills out of the meta line, and the meta line stays inside .link-main;
 // - the date is one piece, on the site's row;
 // - a meta line that wrapped under the body, and a .link-host that wrapped under the badge, start at the title's edge.
 // The counts make sure each check ran.
 const ROW_WIDTHS = [280, 320, 360, 400, 420, 440, 480, 500, 520, 540, 560, 600, 640, 680, 720, 760, 800];
-const ROW_SEEN = ['rows', 'filled', 'wrapped', 'shared', 'cut', 'metaParts', 'dates', 'badges', 'hostUnderBadge'];
+const ROW_SEEN = ['rows', 'filled', 'wrapped', 'shared', 'cut', 'metaParts', 'dates', 'badges', 'hostUnderBadge', 'sites', 'shortHosts'];
 const ROW_AUDIT = `(() => {
   const bad = [];
   const x = (n) => Math.round(n * 100) / 100;
@@ -538,16 +540,24 @@ const ROW_AUDIT = `(() => {
       // ellipsis) would pass unseen. Compare the text's own width with the site's box instead.
       let siteBox = 0;
       let siteText = 0;
+      let floor = 0;
       if (site) {
         siteBox = site.getBoundingClientRect().width;
         siteText = widest(site);
+        floor = siteMin(site);
+        seen.sites++;
+        if (siteText < floor - 0.5) seen.shortHosts++;
+        // The box hugs the text: no gap after a short host. A focused row wraps its host, so its widest line is
+        // narrower than the box by design.
+        if (!row.matches('.is-focus, :focus-visible') && siteBox > siteText + 1)
+          bad.push(at + ': site "' + site.textContent.slice(0, 20) + '" box ' + x(siteBox) + 'px is wider than its text ' + x(siteText) + 'px');
       }
       if (site && siteText > siteBox + 0.05) {
         seen.cut++;
         // A cut site has the row's whole line after the icon, and at least its smallest width.
         if (Math.abs(hr.left - lineLeft) > 0.5 || Math.abs(hr.right - lineRight) > 1)
           bad.push(at + ': site cut (' + x(siteBox) + ' of ' + x(siteText) + 'px) while its site and date have x' + x(hr.left) + '-' + x(hr.right) + ' of the row line x' + x(lineLeft) + '-' + x(lineRight));
-        const least = Math.min(siteMin(site), hr.width);
+        const least = Math.min(floor, hr.width);
         if (siteBox < least - 0.5) bad.push(at + ': site cut to ' + x(siteBox) + 'px, under its smallest width ' + x(least) + 'px');
       }
       const date = host?.lastElementChild;
@@ -602,16 +612,20 @@ for (const scheme of ['light', 'dark']) {
     assert.ok(seen.badges > 0, 'no row with an app badge seen');
     assert.ok(seen.hostUnderBadge > 0, 'no site and date seen wrapped under a badge, so that edge check never ran');
     assert.ok(seen.metaParts > 0, 'no meta part measured, so the spill check never ran');
+    assert.ok(seen.sites > 0, 'no site measured, so the box-hugs-text check never ran');
+    assert.ok(seen.shortHosts > 0, 'no host shorter than --size-link-site-min seen, so a short host was never checked');
     assert.deepEqual(bad, []);
     assert.equal(seen.filled, seen.rows, 'a .link-main does not fill its row after the icon');
   });
 }
 
-// Control for the smallest-width check above: a style injected into the page holds every List row site at a fixed
-// width. At exactly --size-link-site-min (8ch of the site's 11px mono font) no site is reported under its
-// smallest width; at 1px less, a cut site is. A probe that resolved 8ch in the 12.5px body font (about 55px) would
-// fail the first half, and a check that never ran would fail the second.
-test('AC3: control, the List row audit reports a site held 1px under --size-link-site-min, and none held at it', UI, () =>
+// Control for the site checks above: a style injected into the page sets the List row sites.
+// - Held at exactly --size-link-site-min (8ch of the site's 11px mono font), no site is reported under its smallest
+//   width; held 1px under it, a cut site is. A probe that resolved 8ch in the meta line's 12.5px body font (about
+//   50px) let 51.8px pass, and fails the second half.
+// - With the 8ch floor put back on min-width (min-width wins over max-width: max-content), a short host gets an 8ch
+//   box, and the box-hugs-text check reports it.
+test('AC3: control, the List row audit reports a site 1px under --size-link-site-min, none at it, and a short host in an 8ch box', UI, () =>
   withApp({}, async (app) => {
     await app.goto('/#/ui-catalog', CATALOG_READY);
     assert.ok(await app.click('Records'), 'no Records tab');
@@ -631,6 +645,13 @@ test('AC3: control, the List row audit reports a site held 1px under --size-link
     const below = await app.eval(ROW_AUDIT);
     assert.ok(below.seen.cut > 0, 'no cut site seen with the sites held under their smallest width');
     assert.ok(under(below).length > 0, 'a site held 1px under its smallest width was not reported');
+    await app.eval(`(() => {
+      document.getElementById('ds09-site-hold').textContent = '.link-main .link-host > .site { min-width: min(var(--size-link-site-min), 100%) !important; }';
+      return true;
+    })()`);
+    const floored = await app.eval(ROW_AUDIT);
+    assert.ok(floored.seen.shortHosts > 0, 'no short host seen with the old 8ch min-width floor');
+    assert.ok(floored.bad.some((b) => b.includes('is wider than its text')), 'a short host in an 8ch box was not reported');
   }));
 
 // ---------------------------------------------------------------- AC4

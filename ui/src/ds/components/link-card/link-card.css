@@ -228,9 +228,13 @@
 
 /* The site, a dot and the date. A dot sits a space (--space-1) from its words, so a short host and
    its date fit the narrowest example column of the UI Catalog (161px at 800 x 560, 158px at 200%
-   zoom). Only the site shrinks: it starts at --size-link-site-min and grows up to its own width,
-   so the line breaks only when even that much site does not fit; then the date goes under the
-   site, and nothing spills out of the line. */
+   zoom). Only the site shrinks. Its flex basis is --size-link-site-min, capped by its own width
+   (max-width: max-content clamps the basis), so the line breaks only when that much site does not
+   fit: 8ch of a long host, or the whole of a host shorter than 8ch, whose box is its text width
+   ("t.me" has no gap after it). Then the date goes under the site, and nothing spills out of the
+   line. While the site shares its line, it grows up to its own width. The floor is on the basis
+   only, not on min-width (a min-width wins over max-width and gave a short host an 8ch box); a
+   site alone on a line narrower than 8ch shrinks to that line. */
 .link-main .link-host {
   flex: 0 1 auto;
   gap: var(--space-1);
@@ -243,7 +247,7 @@
 
 .link-main .link-host > .site {
   flex: 1 1 var(--size-link-site-min);
-  min-width: min(var(--size-link-site-min), 100%);
+  min-width: 0;
   max-width: max-content;
 }
 

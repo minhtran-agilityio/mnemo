@@ -168,38 +168,61 @@ function authority(url: string): string {
   return auth.slice(auth.lastIndexOf("@") + 1);
 }
 
+/** A host and a port with no scheme ("localhost:1420/a"), which `new URL()` reads as a scheme. */
+const HOST_PORT = /^[^:/?#]+:\d+(?:[/?#]|$)/;
+
+/** A scheme with no authority after it, as in `mailto:`, `about:` or `file:/a`. */
+const BARE_SCHEME = /^[a-z][a-z\d+.-]*:(?!\/\/)/i;
+
+/** Text with only printable ASCII. */
+const ASCII = /^[\x20-\x7e]*$/;
+
+/** A host written as text, lowercased, without the default port of its scheme. */
+function foldHost(host: string, scheme: string): string {
+  const port = DEFAULT_PORT[scheme.toLowerCase()];
+  const low = host.toLowerCase();
+  return port && low.endsWith(`:${port}`)
+    ? low.slice(0, -(port.length + 1))
+    : low;
+}
+
+/**
+ * Whether `new URL()` takes the text as an absolute URL. `URL.canParse` is in WebKit since Safari 17
+ * and WebKitGTK 2.42 (2023); support in the WebKitGTK that Ubuntu 22.04 ships is **Unverified**.
+ * Where it is missing, the URL is read as text only (the same host for an http or https link).
+ */
+function parses(url: string): boolean {
+  return typeof URL.canParse === "function" && URL.canParse(url);
+}
+
 /**
  * The host to show for a link: its site, else the host of its URL, never the scheme
  * ("https://v2.tauri.app/a" and "v2.tauri.app/a" both give "v2.tauri.app"). Empty when the URL has
- * no host (`file:///a`). Only the host text decides how it is read:
- * - an ASCII host is parsed with `new URL()`, which lowercases it and drops a default port; a URL
- *   with no scheme does not parse, and its host text is lowercased as written;
+ * no host: `file:///a`, `about:blank`, `mailto:me@x.com`, `javascript:...`. Only the host text
+ * decides how it is read:
+ * - an ASCII host is parsed with `new URL()`, which lowercases it and drops a default port;
  * - a host with letters outside ASCII is lowercased as written, with a default port dropped here,
- *   since `new URL()` turns it into punycode ("xn--..."), which the owner cannot read.
+ *   since `new URL()` turns it into punycode ("xn--..."), which the owner cannot read;
+ * - a URL with no scheme ("v2.tauri.app/a", "//v2.tauri.app/a", "localhost:1420/a") is not an
+ *   absolute URL; its host text is lowercased as written.
  * A path with letters outside ASCII changes nothing.
  */
 export function linkHost(item: LinkItem): string {
   const site = item.site?.trim();
   if (site) return site;
   const url = item.url.trim();
-  const auth = authority(url);
-  if (!auth) return "";
-  if (/^[\x20-\x7e]*$/.test(auth)) {
-    try {
-      // A URL with no authority ("localhost:1420/a" parses with the scheme "localhost:") has no
-      // host; the host text below is used then.
-      const host = new URL(url).host;
-      if (host) return host;
-    } catch {
-      // Not an absolute URL ("v2.tauri.app/a"): the host text below is used.
-    }
+  if (HOST_PORT.test(url)) return foldHost(authority(url), "");
+  if (parses(url)) {
+    const parsed = new URL(url);
+    // A scheme with no host (about:, mailto:, javascript:, file:) shows no site.
+    if (!parsed.host) return "";
+    const text = authority(url);
+    return ASCII.test(text)
+      ? parsed.host
+      : foldHost(text, parsed.protocol.slice(0, -1));
   }
-  const scheme = SCHEME.exec(url)?.[1]?.toLowerCase() ?? "";
-  const port = DEFAULT_PORT[scheme];
-  const host = auth.toLowerCase();
-  return port && host.endsWith(`:${port}`)
-    ? host.slice(0, -(port.length + 1))
-    : host;
+  if (BARE_SCHEME.test(url)) return "";
+  return foldHost(authority(url), SCHEME.exec(url)?.[1] ?? "");
 }
 
 /**

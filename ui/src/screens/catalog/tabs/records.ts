@@ -237,12 +237,25 @@ function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
     ...noSite,
     url: "v2.tauri.app/security/capabilities",
   };
+  // Hosts shorter than --size-link-site-min (8ch): the site's box is its own text width.
+  const shortTg: LinkItem = {
+    ...telegram,
+    site: "t.me",
+    url: "https://t.me/tauri_apps/1234",
+  };
+  const shortX: LinkItem = {
+    ...pasted,
+    site: "x.com",
+    url: "https://x.com/tauriapps/status/1",
+  };
   const listCases: Case[] = [
     [pasted, "done: summary Written by AI; tags and reason left out"],
     [
       telegram,
       "Telegram badge, site and date: on a narrow line the site and date wrap under the badge, together",
     ],
+    [shortTg, "short host t.me with a Telegram badge: no gap before the date"],
+    [shortX, "short host x.com: no gap before the date"],
     [noSite, "partial: no site, the host from a URL with https://"],
     [noScheme, "partial: no site, the host from a URL with no scheme"],
     [
@@ -290,6 +303,8 @@ function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
   // The Compact row shows no summary, tags or reason, so it has no label in any status.
   const compactCases: Case[] = [
     [pasted, "done: title, site, date; nothing the app wrote, so no label"],
+    [shortTg, "short host t.me"],
+    [shortX, "short host x.com"],
     [noSite, "partial: no site, the host from a URL with https://"],
     [noScheme, "partial: no site, the host from a URL with no scheme"],
     [{ ...pasted, ...unread, status: "pending" }, "pending"],
