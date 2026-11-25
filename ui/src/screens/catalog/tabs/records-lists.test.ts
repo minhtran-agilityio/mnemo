@@ -53,6 +53,30 @@ test("Records shows the link card states, a guess label and the missing source m
   expect(mount(renderRecords).querySelector(".cite.missing")).not.toBeNull();
 });
 
+test("Records shows link cards with two actions: pending, narrow, busy, disabled and focus-visible", () => {
+  const panel = mount(renderRecords);
+  const slots = [...panel.querySelectorAll(".lcard .lcard-action")].filter(
+    (s) => s.children.length === 2,
+  );
+  const names = slots.map((s) =>
+    [...s.children].map((b) => b.textContent).join(" | "),
+  );
+  expect(names).toContain("Summarize later | Paste the text");
+  expect(names).toContain(
+    "Tóm tắt sau khi có mạng trở lại | Dán toàn bộ nội dung của trang vào đây",
+  );
+  expect(panel.querySelectorAll(".rec-narrow .lcard-action")).toHaveLength(2);
+  const firsts = slots.map((s) => s.children[0] as HTMLButtonElement);
+  expect(firsts.some((b) => b.getAttribute("aria-busy") === "true")).toBe(true);
+  expect(firsts.some((b) => b.disabled)).toBe(true);
+  expect(slots.some((s) => s.children[1].classList.contains("is-focus"))).toBe(
+    true,
+  );
+  // Each two-action card is pending: "No summary yet."
+  for (const s of slots)
+    expect(s.closest(".lcard")?.getAttribute("data-status")).toBe("pending");
+});
+
 test("Lists sorts the table, opens the tree and moves a kanban card", () => {
   const panel = mount(renderLists);
   const th = panel.querySelectorAll("th");

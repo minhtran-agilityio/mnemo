@@ -128,11 +128,34 @@
   overflow-wrap: anywhere;
 }
 
-/* The one action of the card. The button keeps its own hover, focus, active and disabled looks. */
+/* The actions of the card, in the order the screen gives them (the main one first), a --space-2 gap
+   apart. Each button keeps its own hover, focus, active, busy and disabled looks. They share a line
+   while they fit whole; else the next one wraps to a new line, starting at the slot's start edge
+   (no auto margin, no centring). Flex breaks a line on each button's own width, so a button shares
+   a line only when its whole label fits next to the others. Measured in Chrome (800 x 560 and 200%
+   zoom alike): the small buttons "Summarize later" (117px) and "Paste the text" (99px) share a line
+   in a card 259px or wider, and the second wraps in the 220-223px example columns and the 160px
+   narrow column of the UI Catalog (tests/acceptance/ds-09-limits.test.mjs; Unverified in WebKit and
+   WebKitGTK). */
 .lcard .lcard-action {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
   padding-top: var(--space-1);
+}
+
+/* A button wider than the card on its own (a long label on a narrow card) takes the slot's width and
+   wraps its label inside its box, at any character if a word is longer than the line, so nothing
+   spills out of the card. The block padding keeps a wrapped label off the button's border; a
+   one-line button keeps its own height (its minimum height is taller than the label and this
+   padding). */
+.lcard .lcard-action > * {
+  min-width: 0;
+  max-width: 100%;
+  padding-block: var(--space-1);
+  overflow-wrap: anywhere;
 }
 
 .views {

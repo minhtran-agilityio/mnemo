@@ -889,6 +889,154 @@ test('AC3: control, the Compact row audit reports a title 1px under its minimum,
     assert.ok(spill.bad.some((b) => b.includes('spills out of the row')), 'a site that never shrinks was not reported spilling');
   }));
 
+// Issue 179. The actions of a link card, in its .lcard-action slot. In the Records tab, at each card's own width in
+// the catalog (the example columns, and the narrow column of 160px, --size-basis-setting) and with every card that
+// has actions set to widths from 120 to 360px (120 and 140 narrower than any catalog column; 160 the narrow column;
+// 220 the Cards view's --size-basis-column; 260 the example basis; 360 --size-tags-max, the widest example):
+// - every button stays inside the card's content box, and the slot too: nothing spills out of the card;
+// - a button's label stays inside its button (a long label wraps in its box);
+// - no button sits over another, and two buttons on one line are at least --space-2 apart, in the given order;
+// - a button that wrapped to a new line starts at the slot's start edge.
+// The counts make sure each check ran: two-button cards, a pair on one line and a wrapped button.
+const ACTION_WIDTHS = [120, 140, 160, 200, 220, 260, 300, 360];
+const ACTION_SEEN = ['cards', 'buttons', 'twoButtons', 'sharedLine', 'wrapped', 'wrappedLabels'];
+const ACTION_AUDIT = `(() => {
+  const bad = [];
+  const x = (n) => Math.round(n * 100) / 100;
+  const seen = Object.fromEntries(${JSON.stringify(ACTION_SEEN)}.map((k) => [k, 0]));
+  const sample = [];
+  const range = document.createRange();
+  const shown = (e) => { const r = e.getBoundingClientRect(); return r.width >= 1 && r.height >= 1; };
+  const cards = [...document.querySelectorAll('.lcard')].filter((c) => shown(c) && c.querySelector(':scope > .lcard-action'));
+  const probe = document.createElement('span');
+  probe.style.cssText = 'position:absolute;width:var(--space-2)';
+  document.body.append(probe);
+  const gap = probe.getBoundingClientRect().width;
+  probe.remove();
+  const inner = (el) => {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    return { left: r.left + parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth), right: r.right - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth) };
+  };
+  const check = (width) => {
+    for (const card of cards) {
+      seen.cards++;
+      const slot = card.querySelector(':scope > .lcard-action');
+      const buttons = [...slot.children].filter(shown);
+      const names = buttons.map((b) => b.textContent.trim());
+      const at = '[' + names.join(' | ').slice(0, 60) + '] @ card ' + width;
+      const box = inner(card);
+      const sl = inner(slot);
+      const sr = slot.getBoundingClientRect();
+      if (sr.left < box.left - 0.5 || sr.right > box.right + 0.5) bad.push(at + ': the slot x' + x(sr.left) + '-' + x(sr.right) + ' spills out of the card x' + x(box.left) + '-' + x(box.right));
+      if (buttons.length >= 2) seen.twoButtons++;
+      let prev = null;
+      let wrappedHere = 0;
+      for (const b of buttons) {
+        seen.buttons++;
+        const br = b.getBoundingClientRect();
+        const name = '"' + b.textContent.trim().slice(0, 24) + '"';
+        if (br.left < box.left - 0.5 || br.right > box.right + 0.5) bad.push(at + ': ' + name + ' x' + x(br.left) + '-' + x(br.right) + ' spills out of the card x' + x(box.left) + '-' + x(box.right));
+        // The label stays inside its button.
+        let lines = 0;
+        for (const n of b.childNodes) {
+          if (n.nodeType !== 3 || !n.textContent.trim()) continue;
+          range.selectNodeContents(n);
+          const rects = [...range.getClientRects()].filter((r) => r.width >= 1);
+          lines += new Set(rects.map((r) => Math.round(r.top))).size;
+          for (const r of rects)
+            if (r.left < br.left - 0.5 || r.right > br.right + 0.5 || r.top < br.top - 0.5 || r.bottom > br.bottom + 0.5)
+              bad.push(at + ': the label of ' + name + ' x' + x(r.left) + '-' + x(r.right) + ' spills out of its button x' + x(br.left) + '-' + x(br.right));
+        }
+        if (lines > 1) seen.wrappedLabels++;
+        if (prev) {
+          const pr = prev.getBoundingClientRect();
+          const overlap = br.left < pr.right - 0.5 && br.right > pr.left + 0.5 && br.top < pr.bottom - 0.5 && br.bottom > pr.top + 0.5;
+          if (overlap) bad.push(at + ': ' + name + ' x' + x(br.left) + '-' + x(br.right) + ' sits over the button before it x' + x(pr.left) + '-' + x(pr.right));
+          const sameLine = br.top < pr.bottom - 0.5 && br.bottom > pr.top + 0.5;
+          if (sameLine) {
+            seen.sharedLine++;
+            if (br.left < pr.right + gap - 0.5) bad.push(at + ': ' + name + ' starts ' + x(br.left - pr.right) + 'px after the button before it, under the --space-2 gap ' + x(gap) + 'px');
+          } else if (br.top >= pr.bottom - 0.5) {
+            seen.wrapped++;
+            wrappedHere++;
+            if (Math.abs(br.left - sl.left) > 0.5) bad.push(at + ': ' + name + ' wrapped to x' + x(br.left) + ', not the slot edge x' + x(sl.left));
+          } else bad.push(at + ': ' + name + ' sits above the button before it');
+        }
+        prev = b;
+      }
+      if (buttons.length >= 2 && width === 'catalog') sample.push({ width, names: names.join(" | ").slice(0, 40), card: x(card.getBoundingClientRect().width), buttons: names.length, wrapped: wrappedHere, widths: buttons.map((b) => x(b.getBoundingClientRect().width)) });
+    }
+  };
+  check('catalog');
+  for (const w of ${JSON.stringify(ACTION_WIDTHS)}) {
+    for (const c of cards) c.style.width = w + 'px';
+    check(w);
+  }
+  for (const c of cards) c.style.width = '';
+  return { bad, seen, sample, gap };
+})()`;
+
+for (const scheme of ['light', 'dark']) {
+  test(`AC3: a link card's actions stay inside the card, apart and in order, and a wrapped one starts at the slot edge (${scheme})`, UI, async () => {
+    const bad = [];
+    const seen = Object.fromEntries(ACTION_SEEN.map((k) => [k, 0]));
+    for (const s of SIZES) {
+      await withApp({ ...s, scheme }, async (app) => {
+        await app.goto('/#/ui-catalog', CATALOG_READY);
+        assert.ok(await app.click('Records'), 'no Records tab');
+        await sleep(500);
+        const r = await app.eval(ACTION_AUDIT);
+        assert.ok(r.seen.cards > 0, `no link card with actions in the Records tab @ ${s.label}`);
+        assert.ok(r.gap > 0, `--space-2 did not resolve @ ${s.label}`);
+        for (const k of ACTION_SEEN) seen[k] += r.seen[k];
+        for (const b of r.bad) bad.push(`${b} @ ${s.label}`);
+        if (process.env.MNEMO_ACTION_SAMPLE) for (const line of r.sample) console.log(scheme, s.label, JSON.stringify(line));
+      });
+    }
+    assert.deepEqual(bad, []);
+    assert.ok(seen.twoButtons > 0, 'no card with two actions seen');
+    assert.ok(seen.sharedLine > 0, 'no two actions seen on one line, so the gap and order checks never ran');
+    assert.ok(seen.wrapped > 0, 'no wrapped action seen, so the slot-edge check never ran');
+    assert.ok(seen.wrappedLabels > 0, 'no label wrapped inside its button seen, so the label spill check never met a long label');
+  });
+}
+
+// Control for the action checks above, with a style injected into the page:
+// - the slot before issue 179 (one line, each button at least its longest word): buttons spill out of narrow cards;
+// - the buttons pushed to the end (justify-content: flex-end): a wrapped button off the slot edge is reported;
+// - a negative margin on the second button: it is reported over the first;
+// - a label that may not wrap (white-space: nowrap): it is reported spilling out of its button.
+test('AC3: control, the link card action audit reports the one-line slot spilling, a wrapped button off the edge, an overlap and a label out of its button', UI, () =>
+  withApp({}, async (app) => {
+    await app.goto('/#/ui-catalog', CATALOG_READY);
+    assert.ok(await app.click('Records'), 'no Records tab');
+    await sleep(500);
+    const style = (css) => app.eval(`(() => {
+      let s = document.getElementById('ds09-action-hold');
+      if (!s) { s = document.createElement('style'); s.id = 'ds09-action-hold'; document.head.append(s); }
+      s.textContent = ${JSON.stringify(css)};
+      return true;
+    })()`);
+    await style('');
+    const clean = await app.eval(ACTION_AUDIT);
+    assert.deepEqual(clean.bad, []);
+    assert.ok(clean.seen.wrapped > 0, 'no wrapped action seen with no style injected');
+    await style('.lcard .lcard-action { flex-wrap: nowrap !important; } .lcard .lcard-action > * { min-width: auto !important; overflow-wrap: normal !important; }');
+    const old = await app.eval(ACTION_AUDIT);
+    assert.equal(old.seen.wrapped, 0, 'a button wrapped with the slot held on one line');
+    assert.ok(old.bad.some((b) => b.includes('spills out of the card')), 'the one-line slot before issue 179 was not reported spilling out of a narrow card');
+    await style('.lcard .lcard-action { justify-content: flex-end !important; }');
+    const end = await app.eval(ACTION_AUDIT);
+    assert.ok(end.bad.some((b) => b.includes('not the slot edge')), 'a wrapped button pushed to the end was not reported');
+    await style('.lcard .lcard-action > * + * { margin-inline-start: -24px !important; }');
+    const over = await app.eval(ACTION_AUDIT);
+    assert.ok(over.bad.some((b) => b.includes('sits over the button before it')), 'a button over the one before it was not reported');
+    await style('.lcard .lcard-action > * { white-space: nowrap !important; }');
+    const nowrap = await app.eval(ACTION_AUDIT);
+    assert.ok(nowrap.bad.some((b) => b.includes('spills out of its button')), 'a label that may not wrap was not reported spilling out of its button');
+  }));
+
 // ---------------------------------------------------------------- AC4
 test('AC4: the 1000-row catalog list builds in under 1.5 s and scrolls with no frame stall over 250 ms', UI, () =>
   withApp({ w: 900, h: 640 }, async (app) => {
