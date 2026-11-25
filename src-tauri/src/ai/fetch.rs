@@ -21,11 +21,16 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use html5ever::tendril::StrTendril;
+use html5ever::tokenizer::states::RawKind;
+use html5ever::tokenizer::{
+    BufferQueue, Tag, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer, TokenizerOpts,
+};
 use reqwest::blocking::Client;
 use reqwest::header::{CONTENT_TYPE, LOCATION};
 use reqwest::redirect::Policy;
 use reqwest::Url;
-use scraper::{Html, Node};
+use std::cell::{Cell, RefCell};
 
 use super::limits;
 use crate::storage::items::MAX_TITLE_CHARS;
@@ -43,8 +48,8 @@ pub struct FetchLimits {
     pub max_text_chars: usize,
     /// Less text than this means the page could not be read.
     pub min_text_chars: usize,
-    /// Deepest element nesting parsed. A deeper page is too complex to read.
-    pub max_html_depth: usize,
+    /// Most attributes on one tag. A page with a bigger tag is too complex to read.
+    pub max_tag_attributes: usize,
     /// Tests only: lets the reader reach a loopback test server. Every other address is still
     /// checked. A release build has no such switch.
     #[cfg(test)]
@@ -61,7 +66,7 @@ pub const DEFAULT_LIMITS: FetchLimits = FetchLimits {
     max_body_bytes: limits::MAX_BODY_BYTES,
     max_text_chars: limits::MAX_TEXT_CHARS,
     min_text_chars: limits::MIN_TEXT_CHARS,
-    max_html_depth: limits::MAX_HTML_DEPTH,
+    max_tag_attributes: limits::MAX_TAG_ATTRIBUTES,
     #[cfg(test)]
     allow_loopback: false,
     #[cfg(test)]
@@ -97,7 +102,7 @@ pub enum FetchError {
     NotText,
     /// The page has under `min_text_chars` characters of text.
     TooLittleText,
-    /// The HTML nests deeper than `max_html_depth`: it is not parsed.
+    /// A tag has more than `max_tag_attributes` attributes: the page is not read.
     TooComplex,
     /// The host could not be found or reached.
     Network,
@@ -358,8 +363,9 @@ fn read_failed(e: io::Error) -> FetchError {
 /// Reads the body (at most `max_body_bytes`) and makes its text on a helper thread, given only
 /// the time left. The reqwest blocking client times each read on its own, so a server that
 /// sends one byte at a time could outlast the deadline: the read loop stops at the deadline,
-/// and the caller stops waiting then too. A page built to be slow to parse (very deep nesting)
-/// also ends as a timeout. Either way the bookmark keeps the link only.
+/// and the caller stops waiting then too. The HTML walk checks the same deadline between small
+/// chunks, so the helper thread itself ends within one chunk of the deadline. Either way the
+/// bookmark keeps the link only.
 fn text_within<R: Read + Send + 'static>(
     body: R,
     content_type: String,
@@ -371,7 +377,7 @@ fn text_within<R: Read + Send + 'static>(
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let result = read_until(body, limits.max_body_bytes, deadline)
-            .and_then(|bytes| page_text(&bytes, &content_type, &limits));
+            .and_then(|bytes| page_text_until(&bytes, &content_type, &limits, deadline));
         let _ = tx.send(result);
     });
     match rx.recv_timeout(left) {
@@ -430,21 +436,34 @@ fn charset(content_type: &str) -> Option<&'static encoding_rs::Encoding> {
     })
 }
 
-/// The text of a page body: decoded, the visible text kept, checked and cut to the limits.
-pub fn page_text(
+/// `page_text_until` with the whole read time as its deadline. Tests use it; the reader calls
+/// `page_text_until` with the deadline of the read.
+#[cfg(test)]
+fn page_text(
     body: &[u8],
     content_type: &str,
     limits: &FetchLimits,
+) -> Result<PageText, FetchError> {
+    page_text_until(body, content_type, limits, Instant::now() + limits.timeout)
+}
+
+/// The text of a page body: decoded, the visible text kept, checked and cut to the limits. It
+/// stops with `Timeout` once `deadline` has passed.
+fn page_text_until(
+    body: &[u8],
+    content_type: &str,
+    limits: &FetchLimits,
+    deadline: Instant,
 ) -> Result<PageText, FetchError> {
     let kind = text_kind(content_type).ok_or(FetchError::NotText)?;
     let encoding = charset(content_type).unwrap_or(encoding_rs::UTF_8);
     let (decoded, _, _) = encoding.decode(body);
     let (title, text) = match kind {
         TextKind::Html => {
-            if too_deep(&decoded, limits.max_html_depth) {
+            if too_many_attributes(&decoded, limits.max_tag_attributes) {
                 return Err(FetchError::TooComplex);
             }
-            html_text(&decoded)
+            html_text(&decoded, deadline)?
         }
         TextKind::Plain => (None, tidy(&decoded)),
     };
@@ -466,81 +485,85 @@ pub fn cut_chars(text: &str, max: usize) -> (String, bool) {
     }
 }
 
-/// Elements that never hold others (void) or whose end tag may be left out: the parser closes
-/// them itself, so they do not add to the nesting.
-const NO_NESTING: [&str; 33] = [
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track",
-    "wbr", "param", "keygen", "p", "li", "dt", "dd", "option", "optgroup", "tr", "td", "th",
-    "thead", "tbody", "tfoot", "colgroup", "caption", "rt", "rp", "html", "head",
-];
-
-/// Raw text elements: their content is not markup.
-const RAW_TEXT: [&str; 6] = ["script", "style", "textarea", "title", "xmp", "noscript"];
-
-/// True when the markup nests deeper than `max`, by a quick scan of the tags before any parse.
-/// The scan is linear and its count is an upper bound for most pages: it counts each start tag
-/// that can hold others and each end tag. Very deep nesting makes the HTML parser slow, so such
-/// a page is not parsed at all.
-pub fn too_deep(html: &str, max: usize) -> bool {
+/// True when some tag seems to carry more than `max` attributes. One forward pass over the
+/// bytes: inside a tag it counts the attribute names and jumps over quoted values. It only reads
+/// what looks like tags, so text that merely looks like a huge tag can make a page "too complex"
+/// (link only); it never changes what the tokenizer reads.
+fn too_many_attributes(html: &str, max: usize) -> bool {
     let b = html.as_bytes();
     let mut i = 0;
-    let mut depth = 0usize;
-    while let Some(off) = b[i..].iter().position(|&c| c == b'<') {
-        i += off + 1;
-        if b[i..].starts_with(b"!--") {
-            // A comment holds no markup: skip to its end.
-            match html[i..].find("-->") {
-                Some(at) => i += at + 3,
-                None => break,
-            }
+    while i < b.len() {
+        if b[i] != b'<' || !b.get(i + 1).is_some_and(u8::is_ascii_alphabetic) {
+            i += 1;
             continue;
         }
-        match b.get(i) {
-            Some(b'/') => {
-                depth = depth.saturating_sub(1);
-                continue;
-            }
-            Some(c) if c.is_ascii_alphabetic() => {}
-            _ => continue,
-        }
-        let start = i;
-        while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'-') {
+        // Skip the tag name.
+        i += 1;
+        while i < b.len() && !b[i].is_ascii_whitespace() && b[i] != b'>' && b[i] != b'/' {
             i += 1;
         }
-        let name = html[start..i].to_ascii_lowercase();
-        let Some(close) = b[i..].iter().position(|&c| c == b'>') else {
-            break;
-        };
-        let self_closing = close > 0 && b[i + close - 1] == b'/';
-        i += close + 1;
-        if RAW_TEXT.contains(&name.as_str()) {
-            // Skip to the end tag, so "<" inside a script is not read as a tag.
-            let end = format!("</{name}");
-            match html[i..].to_ascii_lowercase().find(&end) {
-                Some(at) => i += at,
-                None => break,
+        let mut count = 0usize;
+        let mut in_name = false;
+        while i < b.len() && b[i] != b'>' {
+            let c = b[i];
+            if c == b'=' {
+                in_name = false;
+                i += 1;
+                while i < b.len() && b[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+                if let Some(&q) = b.get(i).filter(|&&q| q == b'"' || q == b'\'') {
+                    // A quoted value: jump to its closing quote.
+                    match b[i + 1..].iter().position(|&x| x == q) {
+                        Some(at) => i += at + 2,
+                        None => return false,
+                    }
+                } else {
+                    while i < b.len() && !b[i].is_ascii_whitespace() && b[i] != b'>' {
+                        i += 1;
+                    }
+                }
+                continue;
             }
-            continue;
-        }
-        if self_closing || NO_NESTING.contains(&name.as_str()) {
-            continue;
-        }
-        depth += 1;
-        if depth > max {
-            return true;
+            if c.is_ascii_whitespace() || c == b'/' {
+                in_name = false;
+            } else if !in_name {
+                in_name = true;
+                count += 1;
+                if count > max {
+                    return true;
+                }
+            }
+            i += 1;
         }
     }
     false
 }
 
-/// Elements whose content is not page text: code, styles, and the site's own navigation.
-const SKIP: [&str; 12] = [
-    "script", "style", "noscript", "template", "svg", "nav", "header", "footer", "aside", "form",
-    "iframe", "head",
+/// How much decoded HTML the tokenizer gets between two deadline checks. Small, so one chunk
+/// of a hostile page (for example a tag with a huge number of attributes, whose duplicate
+/// check is quadratic) cannot run long past the deadline.
+const HTML_CHUNK_BYTES: usize = 4 * 1024;
+
+/// Elements whose content is not page text: the site's own navigation and furniture. A `<main>`
+/// or `<article>` start ends any of them left open, so an unclosed `<nav>` cannot hide the page.
+const SKIP: [&str; 9] = [
+    "nav", "header", "footer", "aside", "form", "svg", "template", "select", "button",
 ];
 
+/// Raw-text elements: their content is not markup and not page text (title aside). The tree
+/// builder normally switches the tokenizer into these states; this walk has no tree builder.
+fn raw_kind(name: &str) -> Option<RawKind> {
+    match name {
+        "script" => Some(RawKind::ScriptData),
+        "style" | "noscript" | "iframe" | "xmp" | "noembed" | "noframes" => Some(RawKind::Rawtext),
+        "title" | "textarea" => Some(RawKind::Rcdata),
+        _ => None,
+    }
+}
+
 /// Elements that start a new line of text.
-const BLOCK: [&str; 18] = [
+const BLOCK: [&str; 21] = [
     "p",
     "div",
     "br",
@@ -557,41 +580,136 @@ const BLOCK: [&str; 18] = [
     "table",
     "section",
     "article",
+    "main",
     "pre",
     "blockquote",
+    "dt",
+    "dd",
 ];
 
-/// The `<title>` and the visible text of an HTML document. The walk is a loop, not a
-/// recursion, so a deeply nested page cannot overflow the stack.
-fn html_text(source: &str) -> (Option<String>, String) {
-    let doc = Html::parse_document(source);
-    let root = doc.root_element();
-    let title = root
-        .descendent_elements()
-        .find(|e| e.value().name() == "title")
-        .map(|e| tidy(&e.text().collect::<String>()));
-    let mut out = String::new();
-    let mut skipping = 0usize;
-    for edge in root.traverse() {
-        match edge {
-            ego_tree::iter::Edge::Open(node) => match node.value() {
-                Node::Element(e) if SKIP.contains(&e.name()) => skipping += 1,
-                Node::Element(e) if skipping == 0 && BLOCK.contains(&e.name()) => out.push('\n'),
-                Node::Text(t) if skipping == 0 => out.push_str(&t[..]),
-                _ => {}
-            },
-            ego_tree::iter::Edge::Close(node) => {
-                if let Node::Element(e) = node.value() {
-                    if SKIP.contains(&e.name()) {
-                        skipping = skipping.saturating_sub(1);
-                    } else if skipping == 0 && BLOCK.contains(&e.name()) {
-                        out.push('\n');
+/// Longest title kept while reading (the stored title is cut to 500 characters later).
+const TITLE_BUFFER_BYTES: usize = 8 * 1024;
+
+/// Collects the title and the visible text from the tokens, in one forward pass with no tree:
+/// every token costs the same however the page nests, so the walk is linear in the page size.
+#[derive(Default)]
+struct TextSink {
+    text: RefCell<String>,
+    title: RefCell<String>,
+    /// The raw-text element the tokenizer is inside (its content is skipped).
+    raw: RefCell<Option<String>>,
+    /// True inside the first `<title>`.
+    in_title: Cell<bool>,
+    title_done: Cell<bool>,
+    /// True inside `<head>` (ended by `</head>` or `<body>`).
+    in_head: Cell<bool>,
+    /// How many `SKIP` elements are open.
+    skip: Cell<usize>,
+}
+
+impl TextSink {
+    fn shown(&self) -> bool {
+        self.skip.get() == 0 && !self.in_head.get() && self.raw.borrow().is_none()
+    }
+
+    fn tag(&self, tag: &Tag) -> TokenSinkResult<()> {
+        let name: &str = &tag.name;
+        match tag.kind {
+            TagKind::StartTag => {
+                match name {
+                    "head" => self.in_head.set(true),
+                    "body" => self.in_head.set(false),
+                    "main" | "article" => self.skip.set(0),
+                    _ => {}
+                }
+                if SKIP.contains(&name) && !tag.self_closing {
+                    self.skip.set(self.skip.get().saturating_add(1));
+                }
+                if self.shown() && BLOCK.contains(&name) {
+                    self.text.borrow_mut().push('\n');
+                }
+                if name == "plaintext" {
+                    // Everything after <plaintext> is text, as in a browser.
+                    return TokenSinkResult::Plaintext;
+                }
+                if let Some(kind) = raw_kind(name) {
+                    // Like a browser, a self-closing raw-text tag still starts raw text.
+                    if name == "title" && !self.title_done.get() && self.skip.get() == 0 {
+                        self.in_title.set(true);
                     }
+                    *self.raw.borrow_mut() = Some(name.to_string());
+                    return TokenSinkResult::RawData(kind);
+                }
+            }
+            TagKind::EndTag => {
+                let closes_raw = self.raw.borrow().as_deref() == Some(name);
+                if closes_raw {
+                    *self.raw.borrow_mut() = None;
+                    if name == "title" && self.in_title.get() {
+                        self.in_title.set(false);
+                        self.title_done.set(true);
+                    }
+                }
+                if name == "head" {
+                    self.in_head.set(false);
+                }
+                if SKIP.contains(&name) {
+                    self.skip.set(self.skip.get().saturating_sub(1));
+                }
+                if self.shown() && BLOCK.contains(&name) {
+                    self.text.borrow_mut().push('\n');
                 }
             }
         }
+        TokenSinkResult::Continue
     }
-    (title, tidy(&out))
+}
+
+impl TokenSink for TextSink {
+    type Handle = ();
+
+    fn process_token(&self, token: Token, _line: u64) -> TokenSinkResult<()> {
+        match token {
+            Token::TagToken(tag) => self.tag(&tag),
+            Token::CharacterTokens(t) => {
+                if self.in_title.get() {
+                    let mut title = self.title.borrow_mut();
+                    if title.len() < TITLE_BUFFER_BYTES {
+                        title.push_str(&t);
+                    }
+                } else if self.shown() {
+                    self.text.borrow_mut().push_str(&t);
+                }
+                TokenSinkResult::Continue
+            }
+            _ => TokenSinkResult::Continue,
+        }
+    }
+}
+
+/// The `<title>` and the visible text of an HTML document, by html5ever's tokenizer alone (owner
+/// decision, #25 review). The input goes in small chunks with a deadline check between them.
+fn html_text(source: &str, deadline: Instant) -> Result<(Option<String>, String), FetchError> {
+    let tokenizer = Tokenizer::new(TextSink::default(), TokenizerOpts::default());
+    let input = BufferQueue::default();
+    let mut rest = source;
+    while !rest.is_empty() {
+        remaining(deadline)?;
+        let mut cut = rest.len().min(HTML_CHUNK_BYTES);
+        while !rest.is_char_boundary(cut) {
+            cut += 1;
+        }
+        input.push_back(StrTendril::from_slice(&rest[..cut]));
+        rest = &rest[cut..];
+        // The sink never asks to run a script, so a feed only ends when the chunk is used up.
+        let _ = tokenizer.feed(&input);
+    }
+    remaining(deadline)?;
+    tokenizer.end();
+    let sink = &tokenizer.sink;
+    let title = Some(tidy(&sink.title.borrow())).filter(|t| !t.is_empty());
+    let text = tidy(&sink.text.borrow());
+    Ok((title, text))
 }
 
 /// Spaces collapsed inside each line, blank lines dropped, ends trimmed.
@@ -1033,49 +1151,185 @@ mod tests {
         assert_eq!(reader.read("http://inside.test/"), Err(FetchError::Refused));
     }
 
+    /// The bound of one hostile 2 MB page: well under a second in a release build. A debug build
+    /// is much slower, so there the bound only shows that the walk ends on its own.
+    const HOSTILE_PAGE_BOUND: Duration = if cfg!(debug_assertions) {
+        Duration::from_secs(20)
+    } else {
+        Duration::from_secs(1)
+    };
+
+    /// A page of about 2 MB made of `unit` repeated.
+    fn two_mb(unit: &str) -> String {
+        unit.repeat(2 * 1024 * 1024 / unit.len())
+    }
+
+    /// `page_text` with the 15 s deadline must give an answer (any) within the bound.
+    fn ends_in_time(name: &str, html: &str) -> Duration {
+        let started = Instant::now();
+        let _ = page_text(html.as_bytes(), "text/html", &DEFAULT_LIMITS);
+        let took = started.elapsed();
+        assert!(took < HOSTILE_PAGE_BOUND, "{name} took {took:?}");
+        took
+    }
+
     #[test]
-    fn a_page_nested_deeper_than_the_limit_is_not_parsed_and_ends_at_once() {
-        // 40 000 nested divs took minutes to parse; the scan refuses them before the parse, on
-        // this thread, so no parse is left running.
-        let html = format!("{}{}", "<div>".repeat(40_000), long_text());
+    fn hostile_pages_are_read_in_one_linear_pass() {
+        // The pages the review measured with the tree parser (16.9 s for 480 KB of <div/>, and
+        // a quadratic pre-scan), and the advisor's worst cases.
+        let attrs: String = (0..400_000).map(|i| format!(" a{i}")).collect();
+        let just_under: String = (0..999).map(|i| format!(" a{i}")).collect();
+        let pages = [
+            ("<div/> x 2 MB", two_mb("<div/>")),
+            (
+                "<b> and stray </b>, 2 MB",
+                two_mb("<b>x</b></b></i><div></b>"),
+            ),
+            ("<script></script> x 2 MB", two_mb("<script></script>")),
+            (
+                "350k nested <div>",
+                format!("{}{}", "<div>".repeat(350_000), long_text()),
+            ),
+            (
+                "one tag, 400k attributes",
+                format!("<p{attrs}>{}</p>", long_text()),
+            ),
+            (
+                "tags of 999 attributes, 2 MB",
+                two_mb(&format!("<p{}>x</p>", just_under)),
+            ),
+        ];
+        for (name, html) in &pages {
+            let took = ends_in_time(name, html);
+            eprintln!("{name}: {took:?}");
+        }
+    }
+
+    #[test]
+    fn a_tag_with_too_many_attributes_is_too_complex_at_once() {
+        let attrs: String = (0..400_000).map(|i| format!(" a{i}")).collect();
+        let html = format!("<p{attrs}>{}</p>", long_text());
         let started = Instant::now();
         assert_eq!(
             page_text(html.as_bytes(), "text/html", &DEFAULT_LIMITS),
             Err(FetchError::TooComplex)
         );
-        assert!(started.elapsed() < Duration::from_secs(1));
-        // The worst page under the cap: 2 MB nested to just under the depth limit, then flat.
-        let deep = "<span>".repeat(DEFAULT_LIMITS.max_html_depth - 10);
-        let flat = "<div>word word word</div>".repeat((2 * 1024 * 1024 - deep.len()) / 25);
-        let worst = format!("{deep}{flat}");
-        let started = Instant::now();
-        assert!(page_text(worst.as_bytes(), "text/html", &DEFAULT_LIMITS).is_ok());
-        // A debug build; a release build is many times faster. The point is that the parse
-        // ends by itself in a bounded time, so no thread is left busy.
         assert!(
-            started.elapsed() < Duration::from_secs(30),
-            "a 2 MB page under the cap parsed in {:?}",
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        // Normal tags, quoted values with spaces and ">" inside, and text are fine.
+        let ok = format!(
+            "<a href=\"/x?a=1&b=2\" title='a > b c d' data-x=1 hidden>link</a><p>{}</p>",
+            long_text()
+        );
+        assert!(page_text(ok.as_bytes(), "text/html", &DEFAULT_LIMITS).is_ok());
+        assert!(!too_many_attributes("<p a b c>", 3));
+        assert!(too_many_attributes("<p a b c d>", 3));
+        assert!(!too_many_attributes("<p a='x y z w'>", 1));
+    }
+
+    #[test]
+    fn the_html_walk_stops_at_the_deadline_on_its_own_thread() {
+        // page_text_until runs on the calling thread here, so its return is the end of the work.
+        let html = two_mb("<div/>");
+        let started = Instant::now();
+        let deadline = Instant::now() + Duration::from_millis(20);
+        assert_eq!(
+            page_text_until(html.as_bytes(), "text/html", &DEFAULT_LIMITS, deadline),
+            Err(FetchError::Timeout)
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
             started.elapsed()
         );
     }
 
     #[test]
-    fn the_depth_scan_skips_void_elements_optional_ends_and_script_text() {
-        let max = 3;
-        assert!(!too_deep(
-            "<div><p>a<p>b<p>c<p>d<br><img src=x><hr/></div>",
-            max
-        ));
-        assert!(!too_deep(
-            "<div><script>if (a<b) { x = '<div><div><div><div>'; }</script></div>",
-            max
-        ));
-        assert!(!too_deep(
-            "<div></div><div></div><div></div><div></div><div></div>",
-            max
-        ));
-        assert!(too_deep("<div><section><article><span>x", max));
-        assert!(!too_deep("<!-- <div><div><div><div> --> < not a tag", max));
+    fn an_unclosed_nav_or_header_does_not_hide_the_page() {
+        let body = long_text();
+        for html in [
+            format!("<body><nav><a href=/>Home</a><main><p>{body}</p></main></body>"),
+            format!("<body><header>Site<article><p>{body}</p></article></body>"),
+            format!("<head><title>T</title><body><p>{body}</p>"),
+        ] {
+            let got = page_text(html.as_bytes(), "text/html", &DEFAULT_LIMITS).unwrap();
+            assert!(got.text.contains("Rust ownership means"), "{html:.80}");
+            assert!(!got.text.contains("Home"));
+        }
+    }
+
+    #[test]
+    fn script_style_and_raw_text_never_become_page_text() {
+        let body = long_text();
+        let html = format!(
+            "<title>T &amp; U</title><script>var a = '<p>not text</p>';</script><style>p{{}}</style>\
+             <noscript>Enable JS</noscript><textarea>typed</textarea><svg><title>icon</title></svg>\
+             <p>{body}</p><script/>still script</script><p>after</p>"
+        );
+        let got = page_text(html.as_bytes(), "text/html", &DEFAULT_LIMITS).unwrap();
+        assert_eq!(got.title.as_deref(), Some("T & U"));
+        for gone in [
+            "not text",
+            "p{}",
+            "Enable JS",
+            "typed",
+            "icon",
+            "still script",
+        ] {
+            assert!(!got.text.contains(gone), "{gone}");
+        }
+        assert!(got.text.ends_with("after"));
+    }
+
+    #[test]
+    fn real_saved_pages_keep_their_title_and_main_text() {
+        // (page, title, first main sentence, a sentence near the end, least text characters)
+        let pages = [
+            (
+                include_str!("testdata/rust-home.html"),
+                "Rust Programming Language",
+                "Rust is blazingly fast and memory-efficient",
+                "The Rust project receives support from companies through the Rust Foundation.",
+                2_000,
+            ),
+            (
+                include_str!("testdata/rust-book-ownership.html"),
+                "What is Ownership? - The Rust Programming Language",
+                "Ownership is a set of rules that govern how a Rust pro",
+                "transferring ownership: references.",
+                20_000,
+            ),
+            (
+                include_str!("testdata/python-tutorial-intro.html"),
+                "3. An Informal Introduction to Python",
+                "Many of the examples in this manual",
+                "Of course, we can use Python for more complicated tasks",
+                15_000,
+            ),
+        ];
+        let far = Instant::now() + Duration::from_secs(60);
+        for (html, title, first, late, least) in pages {
+            let (got_title, text) = html_text(html, far).unwrap();
+            let got_title = got_title.unwrap_or_default();
+            assert!(got_title.starts_with(title), "{got_title}");
+            assert!(text.contains(first), "{title}: missing {first}");
+            assert!(text.contains(late), "{title}: missing {late}");
+            assert!(
+                text.chars().count() >= least,
+                "{title}: {}",
+                text.chars().count()
+            );
+            for code in ["function(", "var ", "</", "{display"] {
+                assert!(!text.contains(code), "{title}: code {code} in the text");
+            }
+            // Through the whole reader step: readable, and cut to the 20k limit.
+            let page =
+                page_text(html.as_bytes(), "text/html; charset=utf-8", &DEFAULT_LIMITS).unwrap();
+            assert!(page.text.chars().count() <= 20_000);
+        }
     }
 
     #[test]
@@ -1089,7 +1343,7 @@ mod tests {
 
     #[test]
     fn a_deeply_nested_page_does_not_overflow_the_stack() {
-        let depth = DEFAULT_LIMITS.max_html_depth - 6;
+        let depth = 350_000;
         let html = format!(
             "{}{}{}",
             "<div>".repeat(depth),
