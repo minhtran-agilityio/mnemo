@@ -12,11 +12,13 @@ export const ACTION_LABELS = {
   later: "Summarize later",
 } as const;
 
+/** The ds link card has five statuses; a site that was not reached shows as "No summary yet". */
 const STATUS: Record<SummaryStatus, LinkStatus> = {
   pending: "pending",
   reading: "reading",
   unreadable: "unreadable",
   ai_off: "ai-off",
+  not_reached: "pending",
   done: "done",
 };
 
@@ -64,16 +66,17 @@ export function toLinkItem(b: SavedBookmark): LinkItem {
 
 /**
  * The actions of a card, in order. Unreadable: "Paste the text". No summary yet (pending or AI
- * off): "Summarize later". A page that could not be reached for now (pending with the stored
- * `pageNotReached`) offers both (owner decision on #25: "Offer both"). The flag is on the stored
- * row, so a list reload or a restart keeps both actions.
+ * off): "Summarize later". A site that was not reached (`not_reached`, a stored status, so a
+ * list reload or a restart keeps it) offers both (owner decision on #25: "Offer both").
  */
 export function actionsFor(b: SavedBookmark): CardAction[] {
   switch (b.summaryStatus) {
     case "unreadable":
       return ["paste"];
+    case "not_reached":
+      return ["later", "paste"];
     case "pending":
-      return b.pageNotReached === true ? ["later", "paste"] : ["later"];
+      return ["later"];
     case "ai_off":
       return ["later"];
     default:
@@ -91,11 +94,15 @@ export function shownAction(b: SavedBookmark): CardAction | null {
   return actions.includes("paste") ? "paste" : (actions[0] ?? null);
 }
 
-/** The list with `b` in it: an existing bookmark is replaced in place, a new one goes first. */
+/**
+ * The list with `b` in it: an existing bookmark is replaced in place, a new one goes first. A
+ * deleted bookmark (the owner deleted it while it was read) leaves the list.
+ */
 export function upsert<T extends SavedBookmark>(
   items: readonly T[],
   b: T,
 ): T[] {
+  if (b.deletedAt) return items.filter((x) => x.id !== b.id);
   const at = items.findIndex((x) => x.id === b.id);
   if (at < 0) return [b, ...items];
   const next = items.slice();

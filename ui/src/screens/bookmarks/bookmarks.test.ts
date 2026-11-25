@@ -26,7 +26,6 @@ function bm(over: Partial<SavedBookmark> = {}): SavedBookmark {
     reason: "It may matter for the command allow-list.",
     reasonIsGuess: true,
     summaryStatus: "done",
-    pageNotReached: false,
     tags: ["security", "tauri"],
     labels: [],
     ...over,
@@ -108,16 +107,18 @@ test("each status has its actions", () => {
 });
 
 test("a page that could not be reached offers both Summarize later and Paste the text", () => {
-  // Read from the stored row, so it holds after a list reload or a restart (no aiError).
+  // Read from the stored status, so it holds after a list reload or a restart (no aiError).
   const notReached = bm({
-    summaryStatus: "pending",
-    pageNotReached: true,
+    summaryStatus: "not_reached",
     summary: null,
     tags: [],
   });
   expect(actionsFor(notReached)).toEqual(["later", "paste"]);
+  // The card says "No summary yet": the ds link card has no sixth status.
+  expect(toLinkItem(notReached).status).toBe("pending");
+  expect(toLinkItem(notReached).summary).toBeUndefined();
   // Another AI failure keeps the one action.
-  const timeout = { ...notReached, pageNotReached: false };
+  const timeout = { ...notReached, summaryStatus: "pending" as const };
   expect(actionsFor(timeout)).toEqual(["later"]);
   // Done or being read: no action, whatever the last error was.
   expect(actionsFor({ ...notReached, summaryStatus: "reading" })).toEqual([]);
@@ -284,8 +285,7 @@ test("a link whose page could not be reached offers Paste the text, and pasted t
       ...bm({
         id: "n1",
         url,
-        summaryStatus: "pending",
-        pageNotReached: true,
+        summaryStatus: "not_reached",
         summary: null,
         tags: [],
       }),
@@ -328,8 +328,7 @@ test("a not-reached link loaded from the list offers Paste the text, with no toa
       page([
         bm({
           id: "r1",
-          summaryStatus: "pending",
-          pageNotReached: true,
+          summaryStatus: "not_reached",
           summary: null,
           tags: [],
         }),
@@ -341,6 +340,30 @@ test("a not-reached link loaded from the list offers Paste the text, with no toa
   const card = box.querySelector("article") as HTMLElement;
   expect(card.textContent).toMatch(/no summary yet/i);
   expect(button(card, "Paste the text")).toBeDefined();
+});
+
+test("a bookmark deleted while it was read leaves the list quietly", async () => {
+  const { d, emit } = deps({
+    saveLink: vi.fn(async (url: string) =>
+      bm({
+        id: "g1",
+        url,
+        summaryStatus: "reading",
+        summary: null,
+        deletedAt: "2026-11-25T10:01:00Z",
+      }),
+    ),
+  });
+  const { box } = mount(d);
+  await flush();
+  emit(bm({ id: "g1", summaryStatus: "reading", summary: null }));
+  expect(box.querySelectorAll("article")).toHaveLength(1);
+  (box.querySelector("input") as HTMLInputElement).value = "https://g.example";
+  box.querySelector("form")?.dispatchEvent(new Event("submit"));
+  await flush();
+  expect(box.querySelectorAll("article")).toHaveLength(0);
+  expect(box.querySelector('[role="alert"]')).toBeNull();
+  expect(box.textContent).toContain("No saved links yet");
 });
 
 test("a load failure says so, and leaving stops the event listener", async () => {

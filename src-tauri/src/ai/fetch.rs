@@ -13,7 +13,10 @@
 // - reads only text/html and text/plain;
 // - calls a page with under 200 characters of text unreadable, and gives Claude at most
 //   20 000 characters.
-// Every failure means "link only": the caller stores no summary and invents nothing.
+// Every failure means "link only": the caller stores no summary and invents nothing. Errors are
+// sorted by the phase they happen in (`FetchError::is_not_reached`): a failure to reach the site
+// or to get the body in time is "not reached" (owner ruling on #25, "All network failures"); a
+// problem with the link or the content is "unreadable".
 
 use std::fmt;
 use std::io::{self, Read};
@@ -84,7 +87,8 @@ pub struct PageText {
     pub cut: bool,
 }
 
-/// Why a page could not be read. Every case means "link only".
+/// Why a page could not be read. Every case means "link only". `is_not_reached` sorts them: the
+/// site was not reached (the owner can ask for a new read), or the page itself cannot be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FetchError {
     /// Not an http or https link.
@@ -94,9 +98,7 @@ pub enum FetchError {
     Refused,
     /// More than `max_redirects` redirects.
     TooManyRedirects,
-    /// The read took longer than `timeout`.
-    Timeout,
-    /// The server answered with this error status.
+    /// The server answered with this status (not a success, not a redirect).
     Status(u16),
     /// The page is not text/html or text/plain.
     NotText,
@@ -104,12 +106,13 @@ pub enum FetchError {
     TooLittleText,
     /// A tag has more than `max_tag_attributes` attributes: the page is not read.
     TooComplex,
-    /// The connection broke or timed out on the way: the site may answer later.
-    Network,
-    /// The host could not be found, refused the connection, or failed TLS: a lasting answer.
-    Unreachable,
-    /// The page is too big or too slow to read within the time limit.
+    /// The whole page was read, but making its text passed the deadline: too big to read.
     TooSlow,
+    /// The site was not reached: DNS, the connection, TLS, the request or the body read failed,
+    /// or the deadline passed before the body was in. The text is one word for the log only.
+    NotReached(&'static str),
+    /// The reader itself failed (a helper thread panicked). Logged at error level.
+    ReaderFailed,
 }
 
 impl fmt::Display for FetchError {
@@ -118,14 +121,13 @@ impl fmt::Display for FetchError {
             FetchError::NotWebLink => write!(f, "not an http or https link"),
             FetchError::Refused => write!(f, "a local, private or reserved address"),
             FetchError::TooManyRedirects => write!(f, "too many redirects"),
-            FetchError::Timeout => write!(f, "the page took too long"),
             FetchError::Status(code) => write!(f, "the server answered {code}"),
             FetchError::NotText => write!(f, "not an HTML or text page"),
             FetchError::TooLittleText => write!(f, "too little text on the page"),
             FetchError::TooComplex => write!(f, "the page is too complex to read"),
-            FetchError::Network => write!(f, "the connection to the site broke"),
-            FetchError::Unreachable => write!(f, "the site could not be found or reached"),
-            FetchError::TooSlow => write!(f, "the page is too big or too slow to read"),
+            FetchError::TooSlow => write!(f, "the page is too big to read in time"),
+            FetchError::NotReached(what) => write!(f, "the site could not be reached ({what})"),
+            FetchError::ReaderFailed => write!(f, "the page reader failed"),
         }
     }
 }
@@ -133,22 +135,21 @@ impl fmt::Display for FetchError {
 impl std::error::Error for FetchError {}
 
 impl FetchError {
-    /// True when the same read may work later: the site was down, slow, busy or not reached.
-    /// Such a bookmark is link only for now, and the owner can ask for a new read. Every other
-    /// error is a lasting answer about the page (not text, too little text, refused, a login
-    /// wall or a missing page): the page is unreadable.
-    pub fn is_transient(&self) -> bool {
+    /// True when the site was not reached (owner ruling on #25, "All network failures"): any
+    /// network failure, and HTTP 408, 429 and 5xx. The owner can read it again or paste the
+    /// text. False for a lasting answer about the page or the link: "Paste the text" only.
+    pub fn is_not_reached(&self) -> bool {
         match self {
-            FetchError::Timeout | FetchError::Network => true,
-            FetchError::Status(code) => *code >= 500 || *code == 429 || *code == 408,
+            FetchError::NotReached(_) => true,
+            FetchError::Status(code) => matches!(*code, 408 | 429 | 500..=599),
             FetchError::NotWebLink
             | FetchError::Refused
             | FetchError::TooManyRedirects
             | FetchError::NotText
             | FetchError::TooLittleText
             | FetchError::TooComplex
-            | FetchError::Unreachable
-            | FetchError::TooSlow => false,
+            | FetchError::TooSlow
+            | FetchError::ReaderFailed => false,
         }
     }
 }
@@ -230,7 +231,7 @@ impl HttpReader {
         }
         let client = builder.build().map_err(|e| {
             log::error!("the page reader could not start its HTTP client: {e}");
-            FetchError::Network
+            FetchError::NotReached("client")
         })?;
         let response = client
             .get(url.clone())
@@ -293,7 +294,7 @@ impl HttpReader {
                 }
                 let addrs = self.resolve(name, port, deadline)?;
                 if addrs.is_empty() {
-                    return Err(FetchError::Unreachable);
+                    return Err(FetchError::NotReached("dns"));
                 }
                 if !addrs.iter().all(|a| self.allowed(a.ip())) {
                     return Err(FetchError::Refused);
@@ -326,7 +327,7 @@ impl HttpReader {
             return if name == host {
                 Ok(vec![SocketAddr::new(*ip, port)])
             } else {
-                Err(FetchError::Unreachable)
+                Err(FetchError::NotReached("dns"))
             };
         }
         let left = remaining(deadline)?;
@@ -337,10 +338,11 @@ impl HttpReader {
         });
         match rx.recv_timeout(left) {
             Ok(Ok(addrs)) => Ok(addrs),
-            // No such name (or no answer from DNS): a lasting answer about the link.
-            Ok(Err(_)) => Err(FetchError::Unreachable),
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(FetchError::Timeout),
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(FetchError::Unreachable),
+            // No such name, no answer from DNS, or the lookup thread gone: not reached.
+            Ok(Err(_)) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(FetchError::NotReached("dns"))
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(FetchError::NotReached("dns timeout")),
         }
     }
 }
@@ -365,97 +367,86 @@ enum Target {
     },
 }
 
+/// The time left before the body is in. Past the deadline the site was not reached in time.
 fn remaining(deadline: Instant) -> Result<Duration, FetchError> {
     deadline
         .checked_duration_since(Instant::now())
         .filter(|d| !d.is_zero())
-        .ok_or(FetchError::Timeout)
+        .ok_or(FetchError::NotReached("timeout"))
 }
 
-/// The time left to read the body and make its text. Past the deadline the page is too big or
-/// too slow to read (`TooSlow`): a lasting answer, unlike a site that did not answer in time.
-fn body_time(deadline: Instant) -> Result<Duration, FetchError> {
+/// The time left to make the text of a page that is all in. Past the deadline the page is too
+/// big to read (`TooSlow`): a lasting answer about the page.
+fn parse_time(deadline: Instant) -> Result<Duration, FetchError> {
     remaining(deadline).map_err(|_| FetchError::TooSlow)
 }
 
-/// A request that got no answer. A connect or read timeout and a connection that broke on the
-/// way may pass later (`Timeout`, `Network`); everything else (connection refused, a TLS or
-/// certificate error, a broken answer) is a lasting answer (`Unreachable`).
+/// A request that got no answer: refused, TLS, no route, reset, timeout or a broken answer. All
+/// of them mean the site was not reached. The error is logged without the link.
 fn request_failed(e: reqwest::Error) -> FetchError {
-    if e.is_timeout() {
-        return FetchError::Timeout;
-    }
-    let mut source = std::error::Error::source(&e);
-    while let Some(err) = source {
-        if let Some(io) = err.downcast_ref::<io::Error>() {
-            return if broke_on_the_way(io.kind()) {
-                FetchError::Network
-            } else if io.kind() == io::ErrorKind::TimedOut {
-                FetchError::Timeout
-            } else {
-                FetchError::Unreachable
-            };
+    log::info!("the page request failed: {}", e.without_url());
+    FetchError::NotReached("request")
+}
+
+/// The body read failed. reqwest's blocking body gives most errors as `ErrorKind::Other`, so the
+/// kind says nothing: any failure while the bytes come in means the site was not reached.
+fn read_failed(e: &io::Error) -> FetchError {
+    log::info!("the page body could not be read: {:?}", e.kind());
+    FetchError::NotReached("body")
+}
+
+/// Runs `work` on a helper thread and waits at most until `deadline`. A panic in `work` is
+/// caught and logged (`ReaderFailed`); a wait past the deadline gives `late`.
+fn on_helper<T: Send + 'static>(
+    deadline: Instant,
+    late: FetchError,
+    work: impl FnOnce() -> Result<T, FetchError> + Send + 'static,
+) -> Result<T, FetchError> {
+    let left = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|d| !d.is_zero())
+        .ok_or_else(|| late.clone())?;
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).unwrap_or_else(|_| {
+                log::error!("the page reader failed: a helper thread panicked");
+                Err(FetchError::ReaderFailed)
+            });
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(left) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(late),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            log::error!("the page reader failed: a helper thread ended with no answer");
+            Err(FetchError::ReaderFailed)
         }
-        source = err.source();
-    }
-    if e.is_connect() {
-        FetchError::Unreachable
-    } else if e.is_request() {
-        // The connection closed before the answer came: a reset on the way.
-        FetchError::Network
-    } else {
-        FetchError::Unreachable
     }
 }
 
-/// A connection that broke while in use: the site may answer later.
-fn broke_on_the_way(kind: io::ErrorKind) -> bool {
-    matches!(
-        kind,
-        io::ErrorKind::ConnectionReset
-            | io::ErrorKind::ConnectionAborted
-            | io::ErrorKind::BrokenPipe
-            | io::ErrorKind::UnexpectedEof
-    )
-}
-
-/// A body read that failed. The client's read timeout is the time left, so a timeout here is
-/// the deadline: the page is too slow to read.
-fn read_failed(e: io::Error) -> FetchError {
-    if e.kind() == io::ErrorKind::TimedOut {
-        FetchError::TooSlow
-    } else if broke_on_the_way(e.kind()) {
-        FetchError::Network
-    } else {
-        FetchError::Unreachable
-    }
-}
-
-/// Reads the body (at most `max_body_bytes`) and makes its text on a helper thread, given only
-/// the time left. The reqwest blocking client times each read on its own, so a server that
-/// sends one byte at a time could outlast the deadline: the read loop stops at the deadline,
-/// and the caller stops waiting then too. The HTML walk checks the same deadline between small
-/// chunks, so the helper thread itself ends within one chunk of the deadline. Either way the
-/// bookmark keeps the link only.
+/// Reads the body (at most `max_body_bytes`) and makes its text, each on a helper thread and
+/// given only the time left, so the phase is known when the deadline passes. The reqwest
+/// blocking client times each read on its own, so a server that sends one byte at a time could
+/// outlast the deadline: the read loop stops at the deadline, and the caller stops waiting then
+/// too (not reached). The HTML walk checks the same deadline between small chunks (too slow).
+/// Either way the bookmark keeps the link only.
 fn text_within<R: Read + Send + 'static>(
     body: R,
     content_type: String,
     limits: &FetchLimits,
     deadline: Instant,
 ) -> Result<PageText, FetchError> {
-    let left = body_time(deadline)?;
+    let cap = limits.max_body_bytes;
+    let bytes = on_helper(
+        deadline,
+        FetchError::NotReached("body timeout"),
+        move || read_until(body, cap, deadline),
+    )?;
     let limits = limits.clone();
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let result = read_until(body, limits.max_body_bytes, deadline)
-            .and_then(|bytes| page_text_until(&bytes, &content_type, &limits, deadline));
-        let _ = tx.send(result);
-    });
-    match rx.recv_timeout(left) {
-        Ok(result) => result,
-        Err(mpsc::RecvTimeoutError::Timeout) => Err(FetchError::TooSlow),
-        Err(mpsc::RecvTimeoutError::Disconnected) => Err(FetchError::TooSlow),
-    }
+    on_helper(deadline, FetchError::TooSlow, move || {
+        page_text_until(&bytes, &content_type, &limits, deadline)
+    })
 }
 
 /// Reads at most `cap` bytes in chunks and gives up once `deadline` has passed.
@@ -464,12 +455,12 @@ fn read_until<R: Read>(body: R, cap: u64, deadline: Instant) -> Result<Vec<u8>, 
     let mut out = Vec::new();
     let mut chunk = [0u8; 16 * 1024];
     loop {
-        body_time(deadline)?;
+        remaining(deadline).map_err(|_| FetchError::NotReached("body timeout"))?;
         match reader.read(&mut chunk) {
             Ok(0) => return Ok(out),
             Ok(n) => out.extend_from_slice(&chunk[..n]),
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(read_failed(e)),
+            Err(e) => return Err(read_failed(&e)),
         }
     }
 }
@@ -508,8 +499,8 @@ fn charset(content_type: &str) -> Option<&'static encoding_rs::Encoding> {
 }
 
 /// The charset named by a `<meta charset>` or `<meta http-equiv="Content-Type">` tag near the
-/// start of an HTML page, found as the HTML standard's prescan finds it: comments are skipped
-/// (a meta tag inside one does not count) and the first meta tag that names a known charset
+/// start of an HTML page, found as the HTML standard's prescan finds it: comments, scripts and
+/// styles are skipped (a meta tag inside one does not count) and the first meta tag that names a known charset
 /// wins. The search stops after `CHARSET_PRESCAN_BYTES` bytes (larger than the standard's 1024,
 /// so a long comment or script first still leaves the tag in reach). A UTF-16 label means UTF-8
 /// (the bytes were read as ASCII to find it). A byte order mark still wins when decoding.
@@ -522,6 +513,14 @@ fn meta_charset(body: &[u8]) -> Option<&'static encoding_rs::Encoding> {
         if rest.starts_with(b"<!--") {
             match find(&rest[4..], b"-->") {
                 Some(end) => at = lt + 4 + end + 3,
+                None => return None,
+            }
+            continue;
+        }
+        // Script and style content is not markup: a meta tag inside it does not count.
+        if let Some(close) = raw_end_tag(rest) {
+            match find(&rest[1..], close) {
+                Some(end) => at = lt + 1 + end + close.len(),
                 None => return None,
             }
             continue;
@@ -564,6 +563,18 @@ fn charset_value(rest: &[u8]) -> Option<&[u8]> {
         .position(|&c| c == b'"' || c == b'\'' || c == b';' || c == b'/' || c.is_ascii_whitespace())
         .unwrap_or(rest.len());
     (len > 0).then(|| &rest[..len])
+}
+
+/// The end tag to skip to when `rest` (lower case) starts a `<script>` or `<style>` element.
+fn raw_end_tag(rest: &[u8]) -> Option<&'static [u8]> {
+    let ends_name = |at: usize| rest.get(at).is_some_and(|c| !c.is_ascii_alphanumeric());
+    if rest.starts_with(b"<script") && ends_name(7) {
+        Some(b"</script")
+    } else if rest.starts_with(b"<style") && ends_name(6) {
+        Some(b"</style")
+    } else {
+        None
+    }
 }
 
 /// Where `needle` first starts in `hay`.
@@ -864,7 +875,7 @@ fn html_text(source: &str, deadline: Instant) -> Result<(Option<String>, String)
     let input = BufferQueue::default();
     let mut rest = source;
     while !rest.is_empty() {
-        body_time(deadline)?;
+        parse_time(deadline)?;
         let mut cut = rest.len().min(limits::HTML_CHUNK_BYTES);
         while !rest.is_char_boundary(cut) {
             cut += 1;
@@ -874,7 +885,7 @@ fn html_text(source: &str, deadline: Instant) -> Result<(Option<String>, String)
         // The sink never asks to run a script, so a feed only ends when the chunk is used up.
         let _ = tokenizer.feed(&input);
     }
-    body_time(deadline)?;
+    parse_time(deadline)?;
     tokenizer.end();
     let sink = &tokenizer.sink;
     let title = Some(tidy(&sink.title.borrow())).filter(|t| !t.is_empty());
@@ -1241,7 +1252,7 @@ mod tests {
         let started = Instant::now();
         assert_eq!(
             reader.read(&format!("http://127.0.0.1:{port}/")),
-            Err(FetchError::Timeout)
+            Err(FetchError::NotReached("request"))
         );
         assert!(started.elapsed() < Duration::from_secs(2));
     }
@@ -1274,14 +1285,14 @@ mod tests {
         let started = Instant::now();
         assert_eq!(
             reader.read(&format!("http://127.0.0.1:{port}/")),
-            Err(FetchError::TooSlow)
+            Err(FetchError::NotReached("body timeout"))
         );
         assert!(started.elapsed() < Duration::from_secs(2));
         // The read loop itself stops at the deadline.
         let past = Instant::now();
         assert_eq!(
             read_until(io::repeat(b'a'), u64::MAX, past),
-            Err(FetchError::TooSlow)
+            Err(FetchError::NotReached("body timeout"))
         );
     }
 
@@ -1469,40 +1480,79 @@ mod tests {
     }
 
     #[test]
-    fn a_site_that_is_not_there_or_refuses_is_unreachable_not_down() {
+    fn a_site_that_is_not_there_refuses_or_fails_tls_was_not_reached() {
         // Nobody listens on this port: the connection is refused.
         let port = {
             let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             l.local_addr().unwrap().port()
         };
-        assert_eq!(
-            local_reader().read(&format!("http://127.0.0.1:{port}/")),
-            Err(FetchError::Unreachable)
-        );
+        let got = local_reader().read(&format!("http://127.0.0.1:{port}/"));
+        assert!(matches!(got, Err(FetchError::NotReached(_))), "{got:?}");
         // A name with no address.
         let reader = HttpReader::new(FetchLimits {
             fake_dns: Some(("known.test".into(), IpAddr::V4(Ipv4Addr::LOCALHOST))),
             ..local_limits()
         });
-        assert_eq!(
-            reader.read("http://unknown.test/"),
-            Err(FetchError::Unreachable)
-        );
+        let got = reader.read("http://unknown.test/");
+        assert_eq!(got, Err(FetchError::NotReached("dns")));
         // A server that speaks no TLS on an https link.
         let port = serve(1, |_| response("200 OK", "text/plain", &long_text()));
-        assert_eq!(
-            local_reader().read(&format!("https://127.0.0.1:{port}/")),
-            Err(FetchError::Unreachable)
-        );
+        let got = local_reader().read(&format!("https://127.0.0.1:{port}/"));
+        assert!(matches!(got, Err(FetchError::NotReached(_))), "{got:?}");
+        assert!(got.unwrap_err().is_not_reached());
     }
 
     #[test]
-    fn a_connection_reset_during_the_answer_may_read_later() {
-        // The server takes the request and drops the connection without an answer.
+    fn a_server_that_drops_before_it_answers_was_not_reached() {
         let port = serve(1, |_| Vec::new());
         let got = local_reader().read(&format!("http://127.0.0.1:{port}/"));
-        assert_eq!(got, Err(FetchError::Network));
-        assert!(got.unwrap_err().is_transient());
+        assert!(matches!(got, Err(FetchError::NotReached(_))), "{got:?}");
+    }
+
+    #[test]
+    fn a_body_cut_short_by_the_server_was_not_reached() {
+        // The real reqwest path: the body read fails with io::ErrorKind::Other.
+        let port = serve(1, |_| {
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 100000\r\nConnection: close\r\n\r\n0123456789"
+                .to_vec()
+        });
+        let got = local_reader().read(&format!("http://127.0.0.1:{port}/"));
+        assert_eq!(got, Err(FetchError::NotReached("body")));
+    }
+
+    #[test]
+    fn any_failed_body_read_was_not_reached() {
+        struct Fails(io::ErrorKind);
+        impl Read for Fails {
+            fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::new(self.0, "broken"))
+            }
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        for kind in [io::ErrorKind::Other, io::ErrorKind::ConnectionReset] {
+            assert_eq!(
+                read_until(Fails(kind), u64::MAX, deadline),
+                Err(FetchError::NotReached("body")),
+                "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reader_that_panics_fails_within_the_deadline() {
+        struct Panics;
+        impl Read for Panics {
+            fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+                panic!("a broken reader");
+            }
+        }
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let started = Instant::now();
+        assert_eq!(
+            text_within(Panics, "text/plain".into(), &DEFAULT_LIMITS, deadline),
+            Err(FetchError::ReaderFailed)
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[test]
@@ -1550,6 +1600,21 @@ mod tests {
     }
 
     #[test]
+    fn a_meta_tag_inside_a_script_or_style_does_not_count() {
+        let text = "日本語のページです。所有権はRustの中心的な機能です。".repeat(10);
+        let mut html = b"<script>var t = '<meta charset=gbk>';</script>\
+            <style>/* <meta charset=gbk> */</style><meta charset=shift_jis><p>"
+            .to_vec();
+        html.extend_from_slice(&encoding_rs::SHIFT_JIS.encode(&text).0);
+        let got = page_text(&html, "text/html", &DEFAULT_LIMITS).unwrap();
+        assert!(
+            got.text.starts_with("日本語のページです。"),
+            "{:.40}",
+            got.text
+        );
+    }
+
+    #[test]
     fn the_charset_of_a_meta_tag_is_used_when_the_server_names_none() {
         let text = "日本語のページです。所有権はRustの中心的な機能です。".repeat(10);
         for (label, meta) in [
@@ -1583,31 +1648,38 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_read_that_may_pass_later_is_transient() {
+    fn every_error_is_sorted_as_not_reached_or_unreadable() {
+        // The owner's ruling (#25): any failure to reach the site, and 408, 429, 5xx.
         for e in [
-            FetchError::Timeout,
-            FetchError::Network,
+            FetchError::NotReached("dns"),
+            FetchError::NotReached("request"),
+            FetchError::NotReached("body"),
+            FetchError::Status(408),
+            FetchError::Status(429),
             FetchError::Status(500),
             FetchError::Status(503),
-            FetchError::Status(429),
-            FetchError::Status(408),
+            FetchError::Status(599),
         ] {
-            assert!(e.is_transient(), "{e:?}");
+            assert!(e.is_not_reached(), "{e:?}");
         }
+        // A problem with the link or the content: "Paste the text" only.
         for e in [
-            FetchError::TooSlow,
-            FetchError::Unreachable,
             FetchError::NotWebLink,
             FetchError::Refused,
             FetchError::TooManyRedirects,
+            FetchError::Status(400),
             FetchError::Status(401),
             FetchError::Status(403),
             FetchError::Status(404),
+            FetchError::Status(410),
+            FetchError::Status(304),
             FetchError::NotText,
             FetchError::TooLittleText,
             FetchError::TooComplex,
+            FetchError::TooSlow,
+            FetchError::ReaderFailed,
         ] {
-            assert!(!e.is_transient(), "{e:?}");
+            assert!(!e.is_not_reached(), "{e:?}");
         }
     }
 
@@ -1705,7 +1777,7 @@ mod tests {
     }
 
     #[test]
-    fn a_page_that_takes_too_long_ends_as_a_timeout() {
+    fn a_body_that_drips_past_the_deadline_is_not_reached() {
         /// A body that gives one byte every 50 ms, then ends: its reader thread stops by itself.
         struct Slow(usize);
         impl Read for Slow {
@@ -1723,7 +1795,7 @@ mod tests {
         let started = Instant::now();
         assert_eq!(
             text_within(Slow(40), "text/plain".into(), &DEFAULT_LIMITS, deadline),
-            Err(FetchError::TooSlow)
+            Err(FetchError::NotReached("body timeout"))
         );
         assert!(started.elapsed() < Duration::from_secs(1));
     }

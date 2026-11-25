@@ -1,19 +1,22 @@
 // Save a link with a summary and tags (#25, BM-01): the steps of a save and of a later summary.
 //
 // 1. The link is stored at once, before any page read or AI work, so it is never lost. It is
-//    stored and claimed (`reading`) in one storage call, so "Summarize later" cannot start a
-//    second read of it.
+//    stored already claimed (`reading`, with a fresh claim token) in one transaction, so
+//    "Summarize later" cannot start a second read of it.
 // 2. With AI off or at the limit, the bookmark stays link only (`ai_off`, "no summary yet").
 // 3. The core reads the page (`fetch`). A page it cannot read stays link only, with a null
-//    summary: nothing is made up from the link or the title. A lasting answer (not text, too
-//    little text, refused, a login wall, a missing page) is `unreadable` ("Paste the text"). A
-//    site that was down, slow or busy is `pending` ("no summary yet", "Summarize later").
+//    summary: nothing is made up from the link or the title. A site that was not reached (any
+//    network failure, HTTP 408, 429 or 5xx) is `not_reached` ("Summarize later" and "Paste the
+//    text"); a problem with the link or the content (not text, too little text, refused, a login
+//    wall, a missing page) is `unreadable` ("Paste the text").
 // 4. Claude gets only the page text (or the text the owner pasted), with no tools, and must
 //    answer in the JSON schema below. A good answer stores the summary, the tags and the reason
 //    (always a guess) together (`done`). A failed run stores nothing (`pending`, or `ai_off`
 //    when AI went off or reached the limit).
-// Every step sends the bookmark to `emit`, so the screen can show it as it changes. Storage is
-// never locked while the page is read or Claude runs. No exit leaves a bookmark `reading`.
+// Every write of a run names its claim token: when the owner edited or deleted the bookmark
+// meanwhile, the run stops quietly and writes nothing. Every step sends the bookmark to `emit`,
+// so the screen can show it as it changes. Storage is never locked while the page is read or
+// Claude runs. No exit leaves a bookmark `reading`.
 
 use std::sync::Mutex;
 
@@ -25,7 +28,7 @@ use super::limits::{MAX_TEXT_CHARS, SUMMARY_TIMEOUT};
 use super::models::default_choice;
 use super::runner::{AiError, AiOutput, AiRunner, AiTask};
 use crate::storage::bookmarks::{
-    check_summary, BookmarkSummary, Held, SavedBookmark, SummaryStatus, MAX_TAGS,
+    check_summary, BookmarkSummary, ClaimToken, Held, SavedBookmark, SummaryStatus, MAX_TAGS,
 };
 use crate::storage::{Storage, StorageError};
 
@@ -178,25 +181,30 @@ impl From<SaveError> for Stop {
     }
 }
 
+/// A storage call that starts a run: the bookmark and the run's claim.
+type StartCall<'a> =
+    dyn FnMut(&mut Storage) -> Result<(SavedBookmark, ClaimToken), StorageError> + 'a;
+
 impl SaveContext<'_> {
-    /// A storage call that needs no claim (a save, a claim): its bookmark, sent to `emit`.
-    fn start(
-        &self,
-        call: &mut dyn FnMut(&mut Storage) -> Result<SavedBookmark, StorageError>,
-    ) -> Result<SavedBookmark, SaveError> {
-        match self
-            .store
-            .with_storage(&mut |s| call(s).map(Held::Written))?
-        {
-            Held::Written(b) => {
+    /// A storage call that starts a run (a save, a claim): its bookmark, sent to `emit`, and the
+    /// run's claim.
+    fn start(&self, call: &mut StartCall<'_>) -> Result<(SavedBookmark, ClaimToken), SaveError> {
+        let mut claim = None;
+        let held = self.store.with_storage(&mut |s| {
+            let (b, token) = call(s)?;
+            claim = Some(token);
+            Ok(Held::Written(b))
+        })?;
+        match (held, claim) {
+            (Held::Written(b), Some(token)) => {
                 (self.emit)(&b);
-                Ok(b)
+                Ok((b, token))
             }
-            Held::Lost(_) => Err(SaveError::NotFound),
+            _ => Err(SaveError::NotFound),
         }
     }
 
-    /// A write that needs the claim: its bookmark, sent to `emit`, or `Stop::Lost`.
+    /// A write of the run: its bookmark, sent to `emit`, or `Stop::Lost`.
     fn write(
         &self,
         call: &mut dyn FnMut(&mut Storage) -> Result<Held, StorageError>,
@@ -210,9 +218,14 @@ impl SaveContext<'_> {
         }
     }
 
-    /// Ends the claim with `status` (not done).
-    fn release(&self, id: &str, status: SummaryStatus) -> Result<SavedBookmark, Stop> {
-        self.write(&mut |s| s.release_bookmark(id, status))
+    /// Ends the run with `status` (not done) and drops its claim.
+    fn release(
+        &self,
+        id: &str,
+        claim: &ClaimToken,
+        status: SummaryStatus,
+    ) -> Result<SavedBookmark, Stop> {
+        self.write(&mut |s| s.release_bookmark(id, claim, status))
     }
 }
 
@@ -223,11 +236,11 @@ fn result(bookmark: SavedBookmark, ai_error: Option<Problem>) -> Result<SaveResu
 /// Saves a link: stores it at once, then reads the page and asks Claude for the summary.
 /// A link that is not an http or https web address is refused and nothing is stored.
 pub fn save_link(ctx: &SaveContext<'_>, url: &str) -> Result<SaveResult, SaveError> {
-    // Stored already claimed (`reading`) in one statement: no other call can start a summary
-    // of it in between.
-    let b = ctx.start(&mut |s| s.save_link_to_read(url))?;
+    // Stored already claimed (`reading`) in one transaction: no other call can start a summary
+    // of it in between, and with no commit there is no row.
+    let (b, claim) = ctx.start(&mut |s| s.save_link_to_read(url))?;
     log::info!("bookmark {} saved, reading the page", b.base.id);
-    summarize_from(ctx, b, Source::Page)
+    summarize_from(ctx, b, &claim, Source::Page)
 }
 
 /// Makes the summary of a stored bookmark again: from `pasted` text when given ("Paste the
@@ -249,23 +262,24 @@ pub fn summarize(
     };
     // Refused when the bookmark is done or already being read: a done summary is never lost to
     // a failed second run, and two runs never race on one bookmark.
-    let b = ctx.start(&mut |s| s.claim_bookmark_for_summary(id))?;
-    summarize_from(ctx, b, source)
+    let (b, claim) = ctx.start(&mut |s| s.claim_bookmark_for_summary(id))?;
+    summarize_from(ctx, b, &claim, source)
 }
 
-/// Makes the summary of `b`, which this run has claimed (`reading`). Every write after the
-/// claim holds only while the bookmark is still `reading` (`storage::bookmarks::Held`):
-/// - when the owner took the bookmark over (wrote a summary) the run stops quietly and gives
-///   the bookmark as the owner left it; when the owner deleted it, `NotFound`;
-/// - when a storage call fails, the claim is ended as `pending` (only if it is still held, so a
-///   committed summary is never undone) and the error is returned.
+/// Makes the summary of `b` for the run that holds `claim`. Every write names the claim
+/// (`storage::bookmarks::Held`):
+/// - when the run lost it (the owner edited the bookmark, or deleted it) the run stops quietly
+///   and gives the bookmark as it is now (a deleted one with its `deletedAt`), with no error;
+/// - when a storage call fails, the run ends as `pending` (only while it still holds the claim,
+///   so a committed summary is never undone) and the error is returned.
 fn summarize_from(
     ctx: &SaveContext<'_>,
     b: SavedBookmark,
+    claim: &ClaimToken,
     source: Source,
 ) -> Result<SaveResult, SaveError> {
     let id = b.base.id.clone();
-    match summarize_claimed(ctx, b, source) {
+    match summarize_claimed(ctx, b, claim, source) {
         Ok(r) => Ok(r),
         Err(Stop::Lost(Some(b))) => {
             log::info!("bookmark {id}: changed by the owner during the summary, the run stopped");
@@ -277,10 +291,20 @@ fn summarize_from(
         }
         Err(Stop::Lost(None)) => {
             log::info!("bookmark {id}: deleted during the summary, the run stopped");
-            Err(SaveError::NotFound)
+            let mut gone = None;
+            ctx.store.with_storage(&mut |s| {
+                gone = s.get_saved_bookmark_any(&id)?;
+                Ok(Held::Lost(None))
+            })?;
+            let b = gone.ok_or(SaveError::NotFound)?;
+            (ctx.emit)(&b);
+            Ok(SaveResult {
+                bookmark: b,
+                ai_error: None,
+            })
         }
         Err(Stop::Failed(e)) => {
-            match ctx.release(&id, SummaryStatus::Pending) {
+            match ctx.release(&id, claim, SummaryStatus::Pending) {
                 Ok(_) | Err(Stop::Lost(_)) => {}
                 // Storage opens the next time with this row back to pending.
                 Err(Stop::Failed(again)) => {
@@ -295,32 +319,34 @@ fn summarize_from(
 fn summarize_claimed(
     ctx: &SaveContext<'_>,
     mut b: SavedBookmark,
+    claim: &ClaimToken,
     source: Source,
 ) -> Result<SaveResult, Stop> {
     let id = b.base.id.clone();
     if !(ctx.ai_on)() {
-        return result(ctx.release(&id, SummaryStatus::AiOff)?, None);
+        return result(ctx.release(&id, claim, SummaryStatus::AiOff)?, None);
     }
     let text = match source {
         Source::Pasted(text) => cut_chars(&text, MAX_TEXT_CHARS).0,
         Source::Page => match ctx.reader.read(&b.url) {
             Ok(page) => {
                 if page.title.is_some() {
-                    b = ctx.write(&mut |s| s.set_bookmark_title(&id, page.title.as_deref()))?;
+                    b = ctx
+                        .write(&mut |s| s.set_bookmark_title(&id, claim, page.title.as_deref()))?;
                 }
                 page.text
             }
-            Err(e) if e.is_transient() => {
+            Err(e) if e.is_not_reached() => {
                 // The link is user content and is not logged.
-                log::info!("bookmark {id}: the page could not be reached ({e}), no summary yet");
+                log::info!("bookmark {id}: the site could not be reached ({e}), no summary yet");
                 return result(
-                    ctx.write(&mut |s| s.release_not_reached(&id))?,
+                    ctx.release(&id, claim, SummaryStatus::NotReached)?,
                     Some(not_reached()),
                 );
             }
             Err(e) => {
                 log::info!("bookmark {id}: the page could not be read ({e})");
-                return result(ctx.release(&id, SummaryStatus::Unreadable)?, None);
+                return result(ctx.release(&id, claim, SummaryStatus::Unreadable)?, None);
             }
         },
     };
@@ -330,7 +356,7 @@ fn summarize_claimed(
         .and_then(|o| parse(&o));
     match run {
         Ok(summary) => result(
-            ctx.write(&mut |s| s.set_bookmark_summary(&id, &summary))?,
+            ctx.write(&mut |s| s.set_bookmark_summary(&id, claim, &summary))?,
             None,
         ),
         Err(e) => {
@@ -342,17 +368,17 @@ fn summarize_claimed(
             } else {
                 SummaryStatus::Pending
             };
-            result(ctx.release(&id, status)?, Some(problem(&e)))
+            result(ctx.release(&id, claim, status)?, Some(problem(&e)))
         }
     }
 }
 
-/// Why a page that may read later gave no summary, and what the owner can do.
+/// Why a page that was not reached gave no summary, and what the owner can do.
 fn not_reached() -> Problem {
     Problem {
         code: "page_not_reached",
-        message: "Mnemo could not reach the page: the site was down, slow or busy. No summary \
-                  was saved. You can summarize it later."
+        message: "Mnemo could not reach the site. No summary was saved. You can summarize it \
+                  later or paste the text."
             .to_string(),
     }
 }
@@ -471,7 +497,7 @@ mod tests {
         }
     }
 
-    use SummaryStatus::{AiOff, Done, Pending, Reading, Unreadable};
+    use SummaryStatus::{AiOff, Done, NotReached, Pending, Reading, Unreadable};
 
     #[test]
     fn bookmark_save_success_stores_the_summary_tags_and_reason_as_a_guess() {
@@ -531,9 +557,12 @@ mod tests {
             FetchError::NotText,
             FetchError::Refused,
             FetchError::Status(404),
+            FetchError::Status(403),
             FetchError::TooComplex,
             FetchError::TooSlow,
-            FetchError::Unreachable,
+            FetchError::TooManyRedirects,
+            FetchError::NotWebLink,
+            FetchError::ReaderFailed,
         ] {
             let w = World::new(
                 FakeReader::failing(e.clone()),
@@ -557,12 +586,16 @@ mod tests {
     }
 
     #[test]
-    fn a_page_that_may_read_later_stays_no_summary_yet_and_can_be_read_again() {
+    fn a_site_that_was_not_reached_is_stored_as_not_reached_and_offers_both_ways() {
         for e in [
-            FetchError::Timeout,
-            FetchError::Network,
+            FetchError::NotReached("dns"),
+            FetchError::NotReached("request"),
+            FetchError::NotReached("timeout"),
+            FetchError::NotReached("body"),
+            FetchError::NotReached("body timeout"),
             FetchError::Status(503),
             FetchError::Status(429),
+            FetchError::Status(408),
         ] {
             let w = World::new(
                 FakeReader::failing(e.clone()),
@@ -570,23 +603,25 @@ mod tests {
             );
             let got = w.run(|c| save_link(c, "https://example.org/")).unwrap();
             let b = &got.bookmark;
-            // Honest failure: link only, no summary, Claude never asked. The stored row says
-            // the page was not reached, so the card offers both actions after a restart too.
-            assert_eq!(b.summary_status, Pending, "{e:?}");
-            assert!(b.page_not_reached);
+            // Honest failure: link only, no summary, Claude never asked. Stored, so a reload
+            // or a restart keeps it.
+            assert_eq!(b.summary_status, NotReached, "{e:?}");
             assert_eq!(&w.stored(&b.base.id), b);
             assert_eq!((b.summary.clone(), b.reason.clone()), (None, None));
             assert!(w.runner.requests().is_empty());
             let problem = got.ai_error.clone().unwrap();
             assert_eq!(problem.code, "page_not_reached");
             assert!(
-                problem.message.contains("summarize it later"),
+                problem.message.contains("could not reach the site"),
                 "{problem:?}"
             );
-            // A new read is allowed ("Summarize later") and ends not reached again.
+            // "Summarize later" reads again (and is not reached again)...
             let again = w.run(|c| summarize(c, &b.base.id, None)).unwrap();
-            assert_eq!(again.bookmark.summary_status, Pending);
-            assert!(again.bookmark.page_not_reached);
+            assert_eq!(again.bookmark.summary_status, NotReached);
+            assert_eq!(w.reader.calls(), 2);
+            // ... and "Paste the text" makes the summary from the pasted text.
+            let pasted = w.run(|c| summarize(c, &b.base.id, Some(PAGE))).unwrap();
+            assert_eq!(pasted.bookmark.summary_status, Done);
             assert_eq!(w.reader.calls(), 2);
         }
     }
@@ -652,6 +687,22 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_save_leaves_no_bookmark() {
+        let (s, _dir) = open_temp();
+        s.break_bookmark_tags_for_test();
+        let store = Mutex::new(s);
+        let reader = FakeReader::page();
+        let runner = FakeRunner::new(FakeResult::Valid(GOOD.into()));
+        let ctx = context(&store, &reader, &runner);
+        assert!(matches!(
+            save_link(&ctx, "https://example.org/"),
+            Err(SaveError::Storage(_))
+        ));
+        assert_eq!(store.lock().unwrap().bookmark_rows_for_test(), 0);
+        assert_eq!(reader.calls(), 0);
+    }
+
+    #[test]
     fn a_storage_error_after_the_summary_is_stored_keeps_it_done() {
         let (store, _dir) = FailingStore::new(|b| b.summary_status == Done);
         let reader = FakeReader::page();
@@ -686,9 +737,12 @@ mod tests {
     }
 
     /// What the owner does while the page is read.
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Debug)]
     enum OwnerAct {
         WritesSummary,
+        EditsTitle,
+        EditsReason,
+        EditsUrl,
         Deletes,
     }
 
@@ -707,18 +761,38 @@ mod tests {
                 .list_bookmark_cards(&crate::storage::PageRequest::first(10))
                 .unwrap();
             let b = &page.items[0];
-            match self.act {
-                OwnerAct::WritesSummary => {
-                    let mine = BookmarkInput {
-                        url: b.url.clone(),
-                        title: Some("Mine".into()),
-                        summary: Some("My own summary.".into()),
-                        reason: None,
-                        reason_is_guess: false,
-                    };
-                    let _: Bookmark = s.update(&b.base.id, &mine).unwrap();
+            let base = BookmarkInput {
+                url: b.url.clone(),
+                title: None,
+                summary: None,
+                reason: None,
+                reason_is_guess: false,
+            };
+            let edit = match self.act {
+                OwnerAct::WritesSummary => Some(BookmarkInput {
+                    title: Some("Mine".into()),
+                    summary: Some("My own summary.".into()),
+                    ..base
+                }),
+                OwnerAct::EditsTitle => Some(BookmarkInput {
+                    title: Some("Mine".into()),
+                    ..base
+                }),
+                OwnerAct::EditsReason => Some(BookmarkInput {
+                    reason: Some("My reason.".into()),
+                    ..base
+                }),
+                OwnerAct::EditsUrl => Some(BookmarkInput {
+                    url: "https://moved.example/".into(),
+                    ..base
+                }),
+                OwnerAct::Deletes => None,
+            };
+            match edit {
+                Some(input) => {
+                    let _: Bookmark = s.update(&b.base.id, &input).unwrap();
                 }
-                OwnerAct::Deletes => s.delete::<Bookmark>(&b.base.id).unwrap(),
+                None => s.delete::<Bookmark>(&b.base.id).unwrap(),
             }
             Ok(PageText {
                 title: Some("Capabilities | Tauri".into()),
@@ -735,13 +809,14 @@ mod tests {
         Vec<SavedBookmark>,
         Mutex<Storage>,
         TempDir,
+        usize,
     ) {
         let (s, dir) = open_temp();
         let store = Mutex::new(s);
         let seen = RefCell::new(Vec::new());
+        let runner = FakeRunner::new(FakeResult::Valid(GOOD.into()));
         let result = {
             let reader = OwnerActsReader { store: &store, act };
-            let runner = FakeRunner::new(FakeResult::Valid(GOOD.into()));
             let ai_on = || true;
             let emit = |b: &SavedBookmark| seen.borrow_mut().push(b.clone());
             let ctx = SaveContext {
@@ -753,12 +828,14 @@ mod tests {
             };
             save_link(&ctx, "https://example.org/")
         };
-        (result, seen.into_inner(), store, dir)
+        let asked = runner.requests().len();
+        (result, seen.into_inner(), store, dir, asked)
     }
 
     #[test]
     fn a_summary_the_owner_writes_during_the_read_is_never_taken_over() {
-        let (result, seen, store, _dir) = save_while_the_owner_acts(OwnerAct::WritesSummary);
+        let (result, seen, store, _dir, asked) = save_while_the_owner_acts(OwnerAct::WritesSummary);
+        assert_eq!(asked, 0);
         // The run stops quietly: no error, the owner's row as it is.
         let got = result.unwrap();
         assert_eq!(got.ai_error, None);
@@ -778,9 +855,40 @@ mod tests {
     }
 
     #[test]
-    fn a_bookmark_the_owner_deletes_during_the_read_stays_deleted() {
-        let (result, _seen, store, _dir) = save_while_the_owner_acts(OwnerAct::Deletes);
-        assert_eq!(result, Err(SaveError::NotFound));
+    fn an_owner_edit_of_the_title_reason_or_link_during_the_read_stops_the_run_quietly() {
+        for act in [
+            OwnerAct::EditsTitle,
+            OwnerAct::EditsReason,
+            OwnerAct::EditsUrl,
+        ] {
+            let (result, seen, store, _dir, asked) = save_while_the_owner_acts(act);
+            let got = result.unwrap();
+            assert_eq!(got.ai_error, None, "{act:?}");
+            let b = got.bookmark;
+            assert_eq!(b.summary_status, Pending, "{act:?}");
+            assert_eq!(b.summary, None);
+            assert!(!b.reason_is_guess);
+            assert!(b.tags.is_empty());
+            assert_ne!(b.title.as_deref(), Some("Capabilities | Tauri"), "{act:?}");
+            assert_eq!(asked, 0, "{act:?}: Claude was asked");
+            let stored = store
+                .lock()
+                .unwrap()
+                .get_saved_bookmark(&b.base.id)
+                .unwrap();
+            assert_eq!(stored, b);
+            assert_eq!(seen.last(), Some(&b));
+        }
+    }
+
+    #[test]
+    fn a_bookmark_the_owner_deletes_during_the_read_stays_deleted_with_no_error() {
+        let (result, seen, store, _dir, asked) = save_while_the_owner_acts(OwnerAct::Deletes);
+        let got = result.unwrap();
+        assert_eq!(got.ai_error, None);
+        assert!(got.bookmark.base.deleted_at.is_some());
+        assert_eq!(seen.last(), Some(&got.bookmark));
+        assert_eq!(asked, 0);
         let s = store.lock().unwrap();
         let page = s
             .list_bookmark_cards(&crate::storage::PageRequest::first(10))
