@@ -21,7 +21,7 @@ use crate::scheduler::queue::{
     CancelOutcome, Priority, QueuedRunner, RunLog, RunLogError, RunQueue,
 };
 use crate::storage::ai_control::{StoredAiControl, StoredPause, StoredReading};
-use crate::storage::bookmarks::SavedBookmark;
+use crate::storage::bookmarks::{Held, SavedBookmark};
 use crate::storage::export::{ExportError, ExportSummary, FolderState};
 use crate::storage::files::OrphanReport;
 use crate::storage::ideas::{Idea, IdeaInput, IdeaProject};
@@ -2706,8 +2706,8 @@ const MAX_BOOKMARK_ID_LEN: usize = 100;
 impl BookmarkStore for AppStorage {
     fn with_storage(
         &self,
-        call: &mut dyn FnMut(&mut Storage) -> Result<SavedBookmark, StorageError>,
-    ) -> Result<SavedBookmark, SaveError> {
+        call: &mut dyn FnMut(&mut Storage) -> Result<Held, StorageError>,
+    ) -> Result<Held, SaveError> {
         let mut guard = self.get().map_err(|e| SaveError::Unavailable(e.message))?;
         Ok(call(&mut guard)?)
     }

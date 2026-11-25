@@ -104,8 +104,12 @@ pub enum FetchError {
     TooLittleText,
     /// A tag has more than `max_tag_attributes` attributes: the page is not read.
     TooComplex,
-    /// The host could not be found or reached.
+    /// The connection broke or timed out on the way: the site may answer later.
     Network,
+    /// The host could not be found, refused the connection, or failed TLS: a lasting answer.
+    Unreachable,
+    /// The page is too big or too slow to read within the time limit.
+    TooSlow,
 }
 
 impl fmt::Display for FetchError {
@@ -119,7 +123,9 @@ impl fmt::Display for FetchError {
             FetchError::NotText => write!(f, "not an HTML or text page"),
             FetchError::TooLittleText => write!(f, "too little text on the page"),
             FetchError::TooComplex => write!(f, "the page is too complex to read"),
-            FetchError::Network => write!(f, "the site could not be reached"),
+            FetchError::Network => write!(f, "the connection to the site broke"),
+            FetchError::Unreachable => write!(f, "the site could not be found or reached"),
+            FetchError::TooSlow => write!(f, "the page is too big or too slow to read"),
         }
     }
 }
@@ -140,7 +146,9 @@ impl FetchError {
             | FetchError::TooManyRedirects
             | FetchError::NotText
             | FetchError::TooLittleText
-            | FetchError::TooComplex => false,
+            | FetchError::TooComplex
+            | FetchError::Unreachable
+            | FetchError::TooSlow => false,
         }
     }
 }
@@ -285,7 +293,7 @@ impl HttpReader {
                 }
                 let addrs = self.resolve(name, port, deadline)?;
                 if addrs.is_empty() {
-                    return Err(FetchError::Network);
+                    return Err(FetchError::Unreachable);
                 }
                 if !addrs.iter().all(|a| self.allowed(a.ip())) {
                     return Err(FetchError::Refused);
@@ -318,7 +326,7 @@ impl HttpReader {
             return if name == host {
                 Ok(vec![SocketAddr::new(*ip, port)])
             } else {
-                Err(FetchError::Network)
+                Err(FetchError::Unreachable)
             };
         }
         let left = remaining(deadline)?;
@@ -329,9 +337,10 @@ impl HttpReader {
         });
         match rx.recv_timeout(left) {
             Ok(Ok(addrs)) => Ok(addrs),
-            Ok(Err(_)) => Err(FetchError::Network),
+            // No such name (or no answer from DNS): a lasting answer about the link.
+            Ok(Err(_)) => Err(FetchError::Unreachable),
             Err(mpsc::RecvTimeoutError::Timeout) => Err(FetchError::Timeout),
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(FetchError::Network),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(FetchError::Unreachable),
         }
     }
 }
@@ -363,19 +372,62 @@ fn remaining(deadline: Instant) -> Result<Duration, FetchError> {
         .ok_or(FetchError::Timeout)
 }
 
+/// The time left to read the body and make its text. Past the deadline the page is too big or
+/// too slow to read (`TooSlow`): a lasting answer, unlike a site that did not answer in time.
+fn body_time(deadline: Instant) -> Result<Duration, FetchError> {
+    remaining(deadline).map_err(|_| FetchError::TooSlow)
+}
+
+/// A request that got no answer. A connect or read timeout and a connection that broke on the
+/// way may pass later (`Timeout`, `Network`); everything else (connection refused, a TLS or
+/// certificate error, a broken answer) is a lasting answer (`Unreachable`).
 fn request_failed(e: reqwest::Error) -> FetchError {
     if e.is_timeout() {
-        FetchError::Timeout
-    } else {
+        return FetchError::Timeout;
+    }
+    let mut source = std::error::Error::source(&e);
+    while let Some(err) = source {
+        if let Some(io) = err.downcast_ref::<io::Error>() {
+            return if broke_on_the_way(io.kind()) {
+                FetchError::Network
+            } else if io.kind() == io::ErrorKind::TimedOut {
+                FetchError::Timeout
+            } else {
+                FetchError::Unreachable
+            };
+        }
+        source = err.source();
+    }
+    if e.is_connect() {
+        FetchError::Unreachable
+    } else if e.is_request() {
+        // The connection closed before the answer came: a reset on the way.
         FetchError::Network
+    } else {
+        FetchError::Unreachable
     }
 }
 
+/// A connection that broke while in use: the site may answer later.
+fn broke_on_the_way(kind: io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::BrokenPipe
+            | io::ErrorKind::UnexpectedEof
+    )
+}
+
+/// A body read that failed. The client's read timeout is the time left, so a timeout here is
+/// the deadline: the page is too slow to read.
 fn read_failed(e: io::Error) -> FetchError {
     if e.kind() == io::ErrorKind::TimedOut {
-        FetchError::Timeout
-    } else {
+        FetchError::TooSlow
+    } else if broke_on_the_way(e.kind()) {
         FetchError::Network
+    } else {
+        FetchError::Unreachable
     }
 }
 
@@ -391,7 +443,7 @@ fn text_within<R: Read + Send + 'static>(
     limits: &FetchLimits,
     deadline: Instant,
 ) -> Result<PageText, FetchError> {
-    let left = remaining(deadline)?;
+    let left = body_time(deadline)?;
     let limits = limits.clone();
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -401,8 +453,8 @@ fn text_within<R: Read + Send + 'static>(
     });
     match rx.recv_timeout(left) {
         Ok(result) => result,
-        Err(mpsc::RecvTimeoutError::Timeout) => Err(FetchError::Timeout),
-        Err(mpsc::RecvTimeoutError::Disconnected) => Err(FetchError::Network),
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(FetchError::TooSlow),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(FetchError::TooSlow),
     }
 }
 
@@ -412,7 +464,7 @@ fn read_until<R: Read>(body: R, cap: u64, deadline: Instant) -> Result<Vec<u8>, 
     let mut out = Vec::new();
     let mut chunk = [0u8; 16 * 1024];
     loop {
-        remaining(deadline)?;
+        body_time(deadline)?;
         match reader.read(&mut chunk) {
             Ok(0) => return Ok(out),
             Ok(n) => out.extend_from_slice(&chunk[..n]),
@@ -455,35 +507,49 @@ fn charset(content_type: &str) -> Option<&'static encoding_rs::Encoding> {
     })
 }
 
-/// The charset named by a `<meta charset>` or `<meta http-equiv="Content-Type">` tag in the
-/// first bytes of an HTML page, as the HTML standard's prescan finds it. A UTF-16 label means
-/// UTF-8 (the bytes were read as ASCII to find it). A byte order mark still wins when decoding.
+/// The charset named by a `<meta charset>` or `<meta http-equiv="Content-Type">` tag near the
+/// start of an HTML page, found as the HTML standard's prescan finds it: comments are skipped
+/// (a meta tag inside one does not count) and the first meta tag that names a known charset
+/// wins. The search stops after `CHARSET_PRESCAN_BYTES` bytes (larger than the standard's 1024,
+/// so a long comment or script first still leaves the tag in reach). A UTF-16 label means UTF-8
+/// (the bytes were read as ASCII to find it). A byte order mark still wins when decoding.
 fn meta_charset(body: &[u8]) -> Option<&'static encoding_rs::Encoding> {
     let head = &body[..body.len().min(limits::CHARSET_PRESCAN_BYTES)];
     let lower = head.to_ascii_lowercase();
     let mut at = 0;
-    while let Some(start) = find(&lower[at..], b"<meta").map(|i| at + i) {
-        let end = find(&lower[start..], b">").map_or(lower.len(), |i| start + i);
-        let tag = &lower[start..end];
-        if let Some(enc) = find(tag, b"charset")
-            .and_then(|i| charset_value(&head[start + i + 7..end]))
-            .and_then(|v| encoding_rs::Encoding::for_label(v))
-        {
-            return Some(
-                if enc == encoding_rs::UTF_16LE || enc == encoding_rs::UTF_16BE {
-                    encoding_rs::UTF_8
-                } else {
-                    enc
-                },
-            );
+    while let Some(lt) = find(&lower[at..], b"<").map(|i| at + i) {
+        let rest = &lower[lt..];
+        if rest.starts_with(b"<!--") {
+            match find(&rest[4..], b"-->") {
+                Some(end) => at = lt + 4 + end + 3,
+                None => return None,
+            }
+            continue;
         }
-        at = end;
+        // No `>` after this `<`: no tag can end, so no meta tag follows.
+        let end = lt + find(rest, b">")?;
+        if rest.starts_with(b"<meta") && rest.get(5).is_some_and(|c| !c.is_ascii_alphanumeric()) {
+            let tag = &lower[lt..end];
+            if let Some(enc) = find(tag, b"charset")
+                .and_then(|i| charset_value(&head[lt + i + 7..end]))
+                .and_then(encoding_rs::Encoding::for_label)
+            {
+                return Some(
+                    if enc == encoding_rs::UTF_16LE || enc == encoding_rs::UTF_16BE {
+                        encoding_rs::UTF_8
+                    } else {
+                        enc
+                    },
+                );
+            }
+        }
+        at = end + 1;
     }
     None
 }
 
 /// The value after `charset` in a meta tag: `= "x"`, `='x'` or `=x`, up to a quote, space,
-/// `;` or the end.
+/// `;`, `/` or the end.
 fn charset_value(rest: &[u8]) -> Option<&[u8]> {
     let skip_space =
         |b: &[u8]| -> usize { b.iter().take_while(|c| c.is_ascii_whitespace()).count() };
@@ -495,7 +561,7 @@ fn charset_value(rest: &[u8]) -> Option<&[u8]> {
         .unwrap_or(rest);
     let len = rest
         .iter()
-        .position(|&c| c == b'"' || c == b'\'' || c == b';' || c.is_ascii_whitespace() || c == b'/')
+        .position(|&c| c == b'"' || c == b'\'' || c == b';' || c == b'/' || c.is_ascii_whitespace())
         .unwrap_or(rest.len());
     (len > 0).then(|| &rest[..len])
 }
@@ -744,6 +810,10 @@ impl TextSink {
                 }
                 if name == "main" || name == "article" {
                     self.content.set(self.content.get().saturating_sub(1));
+                    if self.content.get() == 0 {
+                        // A <header> left open inside the content ends with it.
+                        self.kept_headers.set(0);
+                    }
                 }
                 if name == "header" && self.kept_headers.get() > 0 {
                     self.kept_headers.set(self.kept_headers.get() - 1);
@@ -794,7 +864,7 @@ fn html_text(source: &str, deadline: Instant) -> Result<(Option<String>, String)
     let input = BufferQueue::default();
     let mut rest = source;
     while !rest.is_empty() {
-        remaining(deadline)?;
+        body_time(deadline)?;
         let mut cut = rest.len().min(limits::HTML_CHUNK_BYTES);
         while !rest.is_char_boundary(cut) {
             cut += 1;
@@ -804,7 +874,7 @@ fn html_text(source: &str, deadline: Instant) -> Result<(Option<String>, String)
         // The sink never asks to run a script, so a feed only ends when the chunk is used up.
         let _ = tokenizer.feed(&input);
     }
-    remaining(deadline)?;
+    body_time(deadline)?;
     tokenizer.end();
     let sink = &tokenizer.sink;
     let title = Some(tidy(&sink.title.borrow())).filter(|t| !t.is_empty());
@@ -1204,14 +1274,14 @@ mod tests {
         let started = Instant::now();
         assert_eq!(
             reader.read(&format!("http://127.0.0.1:{port}/")),
-            Err(FetchError::Timeout)
+            Err(FetchError::TooSlow)
         );
         assert!(started.elapsed() < Duration::from_secs(2));
         // The read loop itself stops at the deadline.
         let past = Instant::now();
         assert_eq!(
             read_until(io::repeat(b'a'), u64::MAX, past),
-            Err(FetchError::Timeout)
+            Err(FetchError::TooSlow)
         );
     }
 
@@ -1338,7 +1408,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_millis(20);
         assert_eq!(
             page_text_until(html.as_bytes(), "text/html", &DEFAULT_LIMITS, deadline),
-            Err(FetchError::Timeout)
+            Err(FetchError::TooSlow)
         );
         assert!(
             started.elapsed() < Duration::from_secs(2),
@@ -1399,6 +1469,87 @@ mod tests {
     }
 
     #[test]
+    fn a_site_that_is_not_there_or_refuses_is_unreachable_not_down() {
+        // Nobody listens on this port: the connection is refused.
+        let port = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
+        assert_eq!(
+            local_reader().read(&format!("http://127.0.0.1:{port}/")),
+            Err(FetchError::Unreachable)
+        );
+        // A name with no address.
+        let reader = HttpReader::new(FetchLimits {
+            fake_dns: Some(("known.test".into(), IpAddr::V4(Ipv4Addr::LOCALHOST))),
+            ..local_limits()
+        });
+        assert_eq!(
+            reader.read("http://unknown.test/"),
+            Err(FetchError::Unreachable)
+        );
+        // A server that speaks no TLS on an https link.
+        let port = serve(1, |_| response("200 OK", "text/plain", &long_text()));
+        assert_eq!(
+            local_reader().read(&format!("https://127.0.0.1:{port}/")),
+            Err(FetchError::Unreachable)
+        );
+    }
+
+    #[test]
+    fn a_connection_reset_during_the_answer_may_read_later() {
+        // The server takes the request and drops the connection without an answer.
+        let port = serve(1, |_| Vec::new());
+        let got = local_reader().read(&format!("http://127.0.0.1:{port}/"));
+        assert_eq!(got, Err(FetchError::Network));
+        assert!(got.unwrap_err().is_transient());
+    }
+
+    #[test]
+    fn an_unclosed_header_inside_an_article_does_not_hide_the_rest_of_the_page() {
+        let body = long_text();
+        let html = format!(
+            "<body><article><header><h1>Ownership</h1><p>{body}</p></article>\
+             <header>Site menu</header><p>After the article.</p></body>"
+        );
+        let got = page_text(html.as_bytes(), "text/html", &DEFAULT_LIMITS).unwrap();
+        assert!(got.text.contains("After the article."), "{}", got.text);
+        assert!(!got.text.contains("Site menu"));
+    }
+
+    #[test]
+    fn the_charset_prescan_is_one_pass_on_hostile_markup() {
+        let started = Instant::now();
+        for html in [
+            "<".repeat(limits::CHARSET_PRESCAN_BYTES),
+            "<a".repeat(limits::CHARSET_PRESCAN_BYTES / 2) + ">",
+            "<!--".repeat(limits::CHARSET_PRESCAN_BYTES / 4),
+        ] {
+            assert_eq!(meta_charset(html.as_bytes()), None);
+        }
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn the_meta_charset_is_found_after_a_long_comment_and_never_inside_one() {
+        let text = "日本語のページです。所有権はRustの中心的な機能です。".repeat(10);
+        let enc = encoding_rs::SHIFT_JIS;
+        let mut html = format!(
+            "<!-- {} <meta charset=\"gbk\"> --><html><head><script>{}</script><meta charset=\"Shift_JIS\"></head><body><p>",
+            "licence text ".repeat(200),
+            "var a = 1; ".repeat(300)
+        )
+        .into_bytes();
+        html.extend_from_slice(&enc.encode(&text).0);
+        let got = page_text(&html, "text/html", &DEFAULT_LIMITS).unwrap();
+        assert!(
+            got.text.starts_with("日本語のページです。"),
+            "{:.40}",
+            got.text
+        );
+    }
+
+    #[test]
     fn the_charset_of_a_meta_tag_is_used_when_the_server_names_none() {
         let text = "日本語のページです。所有権はRustの中心的な機能です。".repeat(10);
         for (label, meta) in [
@@ -1444,6 +1595,8 @@ mod tests {
             assert!(e.is_transient(), "{e:?}");
         }
         for e in [
+            FetchError::TooSlow,
+            FetchError::Unreachable,
             FetchError::NotWebLink,
             FetchError::Refused,
             FetchError::TooManyRedirects,
@@ -1570,7 +1723,7 @@ mod tests {
         let started = Instant::now();
         assert_eq!(
             text_within(Slow(40), "text/plain".into(), &DEFAULT_LIMITS, deadline),
-            Err(FetchError::Timeout)
+            Err(FetchError::TooSlow)
         );
         assert!(started.elapsed() < Duration::from_secs(1));
     }

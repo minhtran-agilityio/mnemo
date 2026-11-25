@@ -1,8 +1,12 @@
 //! Saved links with a summary and tags (#25, BM-01). This file owns the SQL of the
 //! `bookmark.site` and `bookmark.summary_status` columns and of `bookmark_label`.
 //!
-//! A save stores the link at once (status `pending`), before any page read or AI work, so
-//! nothing is lost when that work fails. The summary, the reason (always a guess) and the
+//! A save stores the link at once, before any page read or AI work, so nothing is lost when
+//! that work fails. A summary run first holds the claim (`reading`): the save stores the link
+//! as `reading` in one statement, "Summarize later" claims it in one conditional UPDATE.
+//! **Only a run that holds the claim may write, and every write after the claim is conditional
+//! on `summary_status = 'reading'`.** No row changed means the owner took the bookmark over
+//! (for example wrote a summary) or deleted it: the run stops and changes nothing (`Held::Lost`). The summary, the reason (always a guess) and the
 //! tags are written together in one transaction, and only then is the status `done`. A tag is
 //! a label found by name ignoring case (a top label first, else one the owner moved under a
 //! parent), or a new top label (`label.parent_id` NULL).
@@ -107,11 +111,21 @@ pub struct BookmarkSummary {
     pub tags: Vec<String>,
 }
 
+/// What a write that needs the summary claim did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Held {
+    /// The run held the claim and the write is done: the bookmark after it.
+    Written(SavedBookmark),
+    /// The run no longer holds the claim and nothing was written: the owner changed the
+    /// bookmark (its current row) or deleted it (`None`).
+    Lost(Option<SavedBookmark>),
+}
+
 // ---- SQL. Fixed text, parameters only. ----
 
 const INSERT_SQL: &str = "INSERT INTO bookmark
          (id, created_at, updated_at, url, title, summary, reason, reason_is_guess, site, summary_status)
-     VALUES (?1, ?2, ?2, ?3, NULL, NULL, NULL, 0, ?4, 'pending')";
+     VALUES (?1, ?2, ?2, ?3, NULL, NULL, NULL, 0, ?4, ?5)";
 
 const GET_SQL: &str =
     "SELECT b.id, b.created_at, b.updated_at, b.deleted_at, b.url, b.title, b.site,
@@ -126,20 +140,25 @@ const LIST_SQL: &str =
      WHERE b.deleted_at IS NULL AND (?1 IS NULL OR (b.created_at, b.id) < (?1, ?2))
      ORDER BY b.created_at DESC, b.id DESC LIMIT ?3";
 
-// A status other than done leaves the summary, reason and tags as they are.
+// Tests only: any status, claim or not.
+#[cfg(test)]
 const SET_STATUS_SQL: &str = "UPDATE bookmark SET summary_status = ?3, updated_at = ?2
      WHERE id = ?1 AND deleted_at IS NULL";
+
+// Ends a claim with a status other than done; the summary, reason and tags stay as they are.
+const RELEASE_SQL: &str = "UPDATE bookmark SET summary_status = ?3, updated_at = ?2
+     WHERE id = ?1 AND deleted_at IS NULL AND summary_status = 'reading'";
 
 // Starts a new summary: only a live bookmark that is not done and not being read already.
 const CLAIM_SQL: &str = "UPDATE bookmark SET summary_status = 'reading', updated_at = ?2
      WHERE id = ?1 AND deleted_at IS NULL AND summary_status NOT IN ('reading', 'done')";
 
 const SET_TITLE_SQL: &str = "UPDATE bookmark SET title = ?3, updated_at = ?2
-     WHERE id = ?1 AND deleted_at IS NULL";
+     WHERE id = ?1 AND deleted_at IS NULL AND summary_status = 'reading'";
 
 const SET_SUMMARY_SQL: &str = "UPDATE bookmark
      SET summary = ?3, reason = ?4, reason_is_guess = 1, summary_status = 'done', updated_at = ?2
-     WHERE id = ?1 AND deleted_at IS NULL";
+     WHERE id = ?1 AND deleted_at IS NULL AND summary_status = 'reading'";
 
 // Rows a closed app left in reading go back to pending ("no summary yet").
 const RESET_READING_SQL: &str = "UPDATE bookmark SET summary_status = 'pending', updated_at = ?1
@@ -294,13 +313,34 @@ fn top_label(tx: &Transaction<'_>, now: &str, name: &str) -> Result<Option<Strin
 }
 
 impl Storage {
-    /// Stores a new link at once: no title, no summary, status `pending`, and the site taken
-    /// from the link. The link must be an http or https web address.
-    pub fn save_link(&self, url: &str) -> Result<SavedBookmark, StorageError> {
-        self.save_link_at(&now_iso(), url)
+    /// Tests only: stores a new link with no claim (`pending`), as an old row or a failed
+    /// run leaves it.
+    #[cfg(test)]
+    pub(crate) fn save_link_at(&self, now: &str, url: &str) -> Result<SavedBookmark, StorageError> {
+        self.insert_link(now, url, SummaryStatus::Pending)
     }
 
-    pub(crate) fn save_link_at(&self, now: &str, url: &str) -> Result<SavedBookmark, StorageError> {
+    /// Stores a new link at once, already claimed for its first summary (`reading`), in one
+    /// statement, so no other call can start a summary of it first: no title, no summary, and
+    /// the site taken from the link. The link must be an http or https web address.
+    pub fn save_link_to_read(&self, url: &str) -> Result<SavedBookmark, StorageError> {
+        self.save_link_to_read_at(&now_iso(), url)
+    }
+
+    pub(crate) fn save_link_to_read_at(
+        &self,
+        now: &str,
+        url: &str,
+    ) -> Result<SavedBookmark, StorageError> {
+        self.insert_link(now, url, SummaryStatus::Reading)
+    }
+
+    fn insert_link(
+        &self,
+        now: &str,
+        url: &str,
+        status: SummaryStatus,
+    ) -> Result<SavedBookmark, StorageError> {
         let url = url.trim();
         web_address(url)?;
         let parsed = parsed_link(url)?;
@@ -308,7 +348,13 @@ impl Storage {
         let base = RecordBase::new_at(now);
         self.conn.execute(
             INSERT_SQL,
-            params![base.id, now, parsed.as_str(), site_of(&parsed)],
+            params![
+                base.id,
+                now,
+                parsed.as_str(),
+                site_of(&parsed),
+                status.as_str()
+            ],
         )?;
         self.get_saved_bookmark(&base.id)
     }
@@ -367,15 +413,43 @@ impl Storage {
         Ok(())
     }
 
-    /// Sets where the summary stands. `done` is refused here: only a stored summary sets it.
-    pub fn set_bookmark_status(
-        &self,
-        id: &str,
-        status: SummaryStatus,
-    ) -> Result<SavedBookmark, StorageError> {
-        self.set_bookmark_status_at(&now_iso(), id, status)
+    /// After a write that needs the claim changed `n` rows: the bookmark, or what it is now.
+    fn held(&self, n: usize, id: &str) -> Result<Held, StorageError> {
+        if n == 1 {
+            return Ok(Held::Written(self.get_saved_bookmark(id)?));
+        }
+        match self.get_saved_bookmark(id) {
+            Ok(b) => Ok(Held::Lost(Some(b))),
+            Err(StorageError::NotFound { .. }) => Ok(Held::Lost(None)),
+            Err(e) => Err(e),
+        }
     }
 
+    /// Ends the claim of a summary run with `status` (not `done`, not `reading`): only while
+    /// the bookmark is still `reading`. Otherwise nothing changes (`Held::Lost`).
+    pub fn release_bookmark(&self, id: &str, status: SummaryStatus) -> Result<Held, StorageError> {
+        self.release_bookmark_at(&now_iso(), id, status)
+    }
+
+    pub(crate) fn release_bookmark_at(
+        &self,
+        now: &str,
+        id: &str,
+        status: SummaryStatus,
+    ) -> Result<Held, StorageError> {
+        if matches!(status, SummaryStatus::Done | SummaryStatus::Reading) {
+            return Err(invalid(
+                "A summary run ends done only by storing its summary.".to_string(),
+            ));
+        }
+        let n = self
+            .conn
+            .execute(RELEASE_SQL, params![id, now, status.as_str()])?;
+        self.held(n, id)
+    }
+
+    /// Tests only: sets any status but `done`, claim or not.
+    #[cfg(test)]
     pub(crate) fn set_bookmark_status_at(
         &self,
         now: &str,
@@ -418,12 +492,9 @@ impl Storage {
         }))
     }
 
-    /// Sets the title read from the page: trimmed, 1 to 500 characters, or null.
-    pub fn set_bookmark_title(
-        &self,
-        id: &str,
-        title: Option<&str>,
-    ) -> Result<SavedBookmark, StorageError> {
+    /// Sets the title read from the page: trimmed, 1 to 500 characters, or null. Only while
+    /// the run holds the claim (`reading`).
+    pub fn set_bookmark_title(&self, id: &str, title: Option<&str>) -> Result<Held, StorageError> {
         self.set_bookmark_title_at(&now_iso(), id, title)
     }
 
@@ -432,24 +503,22 @@ impl Storage {
         now: &str,
         id: &str,
         title: Option<&str>,
-    ) -> Result<SavedBookmark, StorageError> {
+    ) -> Result<Held, StorageError> {
         let title = title.map(str::trim).filter(|t| !t.is_empty());
         optional_chars("title", &title.map(str::to_string), MAX_TITLE_CHARS)?;
         let n = self.conn.execute(SET_TITLE_SQL, params![id, now, title])?;
-        if n == 0 {
-            return Err(BOOKMARK_NOT_FOUND);
-        }
-        self.get_saved_bookmark(id)
+        self.held(n, id)
     }
 
     /// Stores the summary, the reason (marked as a guess) and the tags in one transaction, and
-    /// sets the status to `done`. The tags replace the bookmark's old tags. Nothing is written
-    /// when any part is invalid.
+    /// sets the status to `done`, only while the run holds the claim (`reading`). The tags
+    /// replace the bookmark's old tags. Nothing is written when any part is invalid, or when
+    /// the owner took the bookmark over (`Held::Lost`).
     pub fn set_bookmark_summary(
         &mut self,
         id: &str,
         summary: &BookmarkSummary,
-    ) -> Result<SavedBookmark, StorageError> {
+    ) -> Result<Held, StorageError> {
         self.set_bookmark_summary_at(&now_iso(), id, summary)
     }
 
@@ -458,7 +527,7 @@ impl Storage {
         now: &str,
         id: &str,
         summary: &BookmarkSummary,
-    ) -> Result<SavedBookmark, StorageError> {
+    ) -> Result<Held, StorageError> {
         let tags = checked_tags(summary)?;
         let tx = self.immediate()?;
         let n = tx.execute(
@@ -466,7 +535,8 @@ impl Storage {
             params![id, now, summary.summary.trim(), summary.reason.trim()],
         )?;
         if n == 0 {
-            return Err(BOOKMARK_NOT_FOUND);
+            drop(tx);
+            return self.held(0, id);
         }
         let mut keep = HashSet::new();
         for name in &tags {
@@ -485,7 +555,7 @@ impl Storage {
             tx.execute(HIDE_TAG_SQL, params![id, label_id, now])?;
         }
         tx.commit()?;
-        self.get_saved_bookmark(id)
+        self.held(1, id)
     }
 
     /// Turns bookmarks left in `reading` by an app that closed back into `pending`, so no
@@ -504,6 +574,21 @@ mod tests {
 
     const T2: &str = "2026-01-02T00:00:00Z";
     const T3: &str = "2026-01-03T00:00:00Z";
+
+    /// The bookmark after a write the run held the claim for.
+    fn written(h: Result<Held, StorageError>) -> SavedBookmark {
+        match h.unwrap() {
+            Held::Written(b) => b,
+            Held::Lost(b) => panic!("the claim was lost: {b:?}"),
+        }
+    }
+
+    /// Claims `id` and stores `sum` for it, as a summary run does.
+    fn summarized(s: &mut Storage, now: &str, id: &str, sum: &BookmarkSummary) -> SavedBookmark {
+        s.set_bookmark_status_at(now, id, SummaryStatus::Reading)
+            .unwrap();
+        written(s.set_bookmark_summary_at(now, id, sum))
+    }
 
     fn summary(tags: &[&str]) -> BookmarkSummary {
         BookmarkSummary {
@@ -626,9 +711,7 @@ mod tests {
             s.claim_bookmark_for_summary_at(T2, &b.base.id),
             Err(StorageError::Invalid(_))
         ));
-        let done = s
-            .set_bookmark_summary_at(T2, &b.base.id, &summary(&["a"]))
-            .unwrap();
+        let done = summarized(&mut s, T2, &b.base.id, &summary(&["a"]));
         assert!(matches!(
             s.claim_bookmark_for_summary_at(T3, &b.base.id),
             Err(StorageError::Invalid(_))
@@ -643,14 +726,10 @@ mod tests {
     #[test]
     fn set_bookmark_title_trims_and_checks_the_title() {
         let (s, _d) = open_temp();
-        let b = s.save_link_at(T1, "https://a.example").unwrap();
-        let got = s
-            .set_bookmark_title_at(T2, &b.base.id, Some("  Page  "))
-            .unwrap();
+        let b = s.save_link_to_read_at(T1, "https://a.example").unwrap();
+        let got = written(s.set_bookmark_title_at(T2, &b.base.id, Some("  Page  ")));
         assert_eq!(got.title.as_deref(), Some("Page"));
-        let got = s
-            .set_bookmark_title_at(T2, &b.base.id, Some("   "))
-            .unwrap();
+        let got = written(s.set_bookmark_title_at(T2, &b.base.id, Some("   ")));
         assert_eq!(got.title, None);
         let long = "a".repeat(MAX_TITLE_CHARS + 1);
         assert!(s
@@ -658,7 +737,7 @@ mod tests {
             .is_err());
         assert_eq!(
             s.set_bookmark_title_at(T2, "missing", None),
-            Err(BOOKMARK_NOT_FOUND)
+            Ok(Held::Lost(None))
         );
     }
 
@@ -666,9 +745,12 @@ mod tests {
     fn set_bookmark_summary_stores_summary_reason_as_guess_and_top_label_tags() {
         let (mut s, _d) = open_temp();
         let b = s.save_link_at(T1, "https://a.example").unwrap();
-        let got = s
-            .set_bookmark_summary_at(T2, &b.base.id, &summary(&["tauri", " Security ", "TAURI"]))
-            .unwrap();
+        let got = summarized(
+            &mut s,
+            T2,
+            &b.base.id,
+            &summary(&["tauri", " Security ", "TAURI"]),
+        );
         assert_eq!(got.summary_status, SummaryStatus::Done);
         assert_eq!(
             got.summary.as_deref(),
@@ -691,19 +773,14 @@ mod tests {
         let (mut s, _d) = open_temp();
         let rust = s.create_label_at(T1, None, "Rust").unwrap();
         let b = s.save_link_at(T1, "https://a.example").unwrap();
-        s.set_bookmark_summary_at(T2, &b.base.id, &summary(&["rust", "old"]))
-            .unwrap();
-        let got = s
-            .set_bookmark_summary_at(T3, &b.base.id, &summary(&["new", "RUST"]))
-            .unwrap();
+        summarized(&mut s, T2, &b.base.id, &summary(&["rust", "old"]));
+        let got = summarized(&mut s, T3, &b.base.id, &summary(&["new", "RUST"]));
         assert_eq!(got.tags, vec!["new".to_string(), "Rust".to_string()]);
         assert!(got.labels.iter().any(|t| t.id == rust.base.id));
         // The dropped tag's label stays; only the link is hidden.
         assert!(s.list_labels().unwrap().iter().any(|l| l.name == "old"));
         // Bringing a dropped tag back revives its link.
-        let got = s
-            .set_bookmark_summary_at(T3, &b.base.id, &summary(&["old"]))
-            .unwrap();
+        let got = summarized(&mut s, T3, &b.base.id, &summary(&["old"]));
         assert_eq!(got.tags, vec!["old".to_string()]);
     }
 
@@ -741,7 +818,7 @@ mod tests {
         assert!(s.list_labels().unwrap().is_empty());
         assert_eq!(
             s.set_bookmark_summary_at(T2, "missing", &summary(&["a"])),
-            Err(BOOKMARK_NOT_FOUND)
+            Ok(Held::Lost(None))
         );
     }
 
@@ -752,9 +829,7 @@ mod tests {
             s.create_label_at(T1, None, &format!("l{i}")).unwrap();
         }
         let b = s.save_link_at(T1, "https://a.example").unwrap();
-        let got = s
-            .set_bookmark_summary_at(T2, &b.base.id, &summary(&["l1", "brand-new"]))
-            .unwrap();
+        let got = summarized(&mut s, T2, &b.base.id, &summary(&["l1", "brand-new"]));
         assert_eq!(got.tags, vec!["l1".to_string()]);
         assert_eq!(got.summary_status, SummaryStatus::Done);
     }
@@ -763,9 +838,7 @@ mod tests {
     fn a_deleted_tag_label_or_a_deleted_bookmark_is_left_out() {
         let (mut s, _d) = open_temp();
         let b = s.save_link_at(T1, "https://a.example").unwrap();
-        let got = s
-            .set_bookmark_summary_at(T2, &b.base.id, &summary(&["keep", "drop"]))
-            .unwrap();
+        let got = summarized(&mut s, T2, &b.base.id, &summary(&["keep", "drop"]));
         let drop_id = got
             .labels
             .iter()
@@ -844,27 +917,73 @@ mod tests {
     }
 
     #[test]
+    fn only_a_run_that_holds_the_claim_writes() {
+        let (mut s, _d) = open_temp();
+        let b = s.save_link_to_read_at(T1, "https://a.example").unwrap();
+        assert_eq!(b.summary_status, SummaryStatus::Reading);
+        // The owner writes a summary through the item path during the read.
+        let mine = BookmarkInput {
+            summary: Some("My own summary.".into()),
+            ..bookmark("https://a.example/")
+        };
+        let _: Bookmark = s.update_at(T2, &b.base.id, &mine).unwrap();
+        let owner = s.get_saved_bookmark(&b.base.id).unwrap();
+        assert_eq!(owner.summary_status, SummaryStatus::Done);
+        // Every write of the run now changes nothing and gives the owner's row.
+        let lost = Ok(Held::Lost(Some(owner.clone())));
+        assert_eq!(s.set_bookmark_title_at(T3, &b.base.id, Some("AI")), lost);
+        assert_eq!(
+            s.set_bookmark_summary_at(T3, &b.base.id, &summary(&["ai"])),
+            lost
+        );
+        for status in [
+            SummaryStatus::Pending,
+            SummaryStatus::Unreadable,
+            SummaryStatus::AiOff,
+        ] {
+            assert_eq!(s.release_bookmark_at(T3, &b.base.id, status), lost);
+        }
+        assert_eq!(s.get_saved_bookmark(&b.base.id).unwrap(), owner);
+        assert!(s.list_labels().unwrap().is_empty());
+        // A run cannot end done or reading by a release.
+        let c = s.save_link_to_read_at(T1, "https://c.example").unwrap();
+        for status in [SummaryStatus::Done, SummaryStatus::Reading] {
+            assert!(matches!(
+                s.release_bookmark_at(T2, &c.base.id, status),
+                Err(StorageError::Invalid(_))
+            ));
+        }
+        assert_eq!(
+            written(s.release_bookmark_at(T2, &c.base.id, SummaryStatus::Unreadable))
+                .summary_status,
+            SummaryStatus::Unreadable
+        );
+        // Deleted during the read: nothing to write, no row.
+        let d = s.save_link_to_read_at(T1, "https://d.example").unwrap();
+        s.delete_at::<Bookmark>(T2, &d.base.id).unwrap();
+        assert_eq!(
+            s.release_bookmark_at(T3, &d.base.id, SummaryStatus::Pending),
+            Ok(Held::Lost(None))
+        );
+    }
+
+    #[test]
     fn a_tag_the_owner_moved_under_a_parent_is_reused_not_made_again() {
         let (mut s, _d) = open_temp();
         let b = s.save_link_at(T1, "https://a.example").unwrap();
-        s.set_bookmark_summary_at(T1, &b.base.id, &summary(&["rust"]))
-            .unwrap();
+        summarized(&mut s, T1, &b.base.id, &summary(&["rust"]));
         let rust = s.list_labels().unwrap()[0].clone();
         let parent = s.create_label_at(T1, None, "Languages").unwrap();
         s.move_label_at(T2, &rust.base.id, Some(&parent.base.id))
             .unwrap();
         let c = s.save_link_at(T2, "https://c.example").unwrap();
-        let done = s
-            .set_bookmark_summary_at(T3, &c.base.id, &summary(&["Rust"]))
-            .unwrap();
+        let done = summarized(&mut s, T3, &c.base.id, &summary(&["Rust"]));
         assert_eq!(done.labels[0].id, rust.base.id);
         assert_eq!(s.list_labels().unwrap().len(), 2);
         // A top label of that name still wins over a child one.
         let top = s.create_label_at(T3, None, "rust").unwrap();
         let d = s.save_link_at(T3, "https://d.example").unwrap();
-        let done = s
-            .set_bookmark_summary_at(T3, &d.base.id, &summary(&["rust"]))
-            .unwrap();
+        let done = summarized(&mut s, T3, &d.base.id, &summary(&["rust"]));
         assert_eq!(done.labels[0].id, top.base.id);
     }
 

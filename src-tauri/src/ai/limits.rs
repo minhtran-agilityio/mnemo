@@ -26,7 +26,8 @@ pub const HTML_CHUNK_BYTES: usize = 4 * 1024;
 /// Longest title kept while reading a page (the stored title is cut to 500 characters later).
 pub const TITLE_BUFFER_BYTES: usize = 8 * 1024;
 /// How many first bytes of an HTML page are searched for a `<meta charset>` when the server
-/// names no charset (the HTML standard's prescan uses 1024).
-pub const CHARSET_PRESCAN_BYTES: usize = 1024;
+/// names no charset. The HTML standard's prescan uses 1024; a legacy page with a long comment
+/// or script first needs more. Comments are skipped, so the cost stays one pass.
+pub const CHARSET_PRESCAN_BYTES: usize = 64 * 1024;
 /// How often a run waiting in the queue looks at its cancel token.
 pub const QUEUED_CANCEL_POLL: Duration = Duration::from_millis(50);
