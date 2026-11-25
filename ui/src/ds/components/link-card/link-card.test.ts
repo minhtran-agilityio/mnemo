@@ -564,13 +564,65 @@ test("in the List view the body gives way first, and only the site in the meta l
   });
 });
 
-test("in the Compact view a long title gives way first, so a short site keeps its width", () => {
-  const rule = cssRule(
-    import.meta.dirname,
-    "link-card.css",
-    ".compact-row .row-title",
+test("in the Compact view a long title gives way only down to its readable minimum, and the site is cut first", () => {
+  const css = (sel: string) =>
+    cssRule(import.meta.dirname, "link-card.css", sel);
+  // The title takes the room that is left, down to 8ch of its own font (or the whole line).
+  expect(css(".compact-row .row-title")).toMatchObject({
+    flex: "1 1 0",
+    "min-width": "min(var(--size-link-site-min), 100%)",
+    "max-width": "max-content",
+  });
+  // The room left when both are whole goes to an auto end margin on the title, or on the spinner
+  // of a reading row: parts that never wrap. The site and the date, which can wrap, carry no auto
+  // margin, so a wrapped one starts at the row's edge.
+  expect(css(".compact-row > .row-title")["margin-inline-end"]).toBe("auto");
+  expect(css(".compact-row > .compact-reading")["margin-inline-end"]).toBe(
+    "auto",
   );
-  expect(rule).toMatchObject({ flex: "1 1 0", "min-width": "0" });
+  expect(
+    css('.compact-row[data-status="reading"] > .row-title')[
+      "margin-inline-end"
+    ],
+  ).toBe("0");
+  // The site starts at 8ch, capped by its own width (a short host's box is its text), and grows as
+  // fast as the title. No 50% cap that left the title a few pixels (issue 175).
+  const dom = css(".compact-row .dom");
+  expect(dom).toMatchObject({
+    flex: "1 1 var(--size-link-site-min)",
+    "min-width": "0",
+    "max-width": "max-content",
+  });
+  // When the smallest title, site and the whole date do not fit one line, the date wraps under the
+  // title rather than squeezing the title.
+  expect(css(".compact-row")).toMatchObject({
+    "flex-wrap": "wrap",
+    gap: "var(--space-1) var(--space-2)",
+  });
+  // The date never shrinks (the list row part's rule).
+  expect(
+    cssRule(
+      resolve(import.meta.dirname, "..", "list-row"),
+      "list-row.css",
+      ".row-meta",
+    ),
+  ).toMatchObject({ flex: "none", "white-space": "nowrap" });
+});
+
+test("a compact row with a long Vietnamese title and host keeps both whole in its text and tooltips (text only; the layout is checked in ds-09)", () => {
+  const title = `${"Hướng dẫn đầy đủ về quyền và khả năng — Ở ĐÂU, KHI NÀO? ".repeat(4)}`;
+  const site = `${"rất-nhiều-tên-miền-con.".repeat(4)}tài-liệu.v2.tauri.app`;
+  const row = createCompactRow(document, { ...pasted, title, site });
+  expect(row.querySelector(".row-title")?.textContent).toBe(title);
+  expect(row.querySelector<HTMLElement>(".row-title")?.title).toBe(title);
+  expect(row.querySelector(".dom")?.textContent).toBe(site);
+  expect(row.querySelector<HTMLElement>(".dom")?.title).toBe(pasted.url);
+  // The parts keep their order: title, site, date.
+  expect([...row.children].map((c) => c.className)).toEqual([
+    "row-title",
+    "dom",
+    "row-meta",
+  ]);
 });
 
 test("a link with no app, site, saved date or age has no empty meta line", () => {
@@ -822,6 +874,9 @@ test("reading: the Compact row shows a spinner after the title, a status named b
   expect(status?.nextElementSibling?.className).toBe("dom");
   // Only the spinner takes room, so the site and the date keep theirs.
   expect(rowCss(".compact-row .compact-reading").flex).toBe("none");
+  // The spinner box holds its hidden words, so they never land past the row's scroll box and widen
+  // the page (issue 175: 397px in a 385px window at 200% zoom).
+  expect(rowCss(".compact-row .compact-reading").position).toBe("relative");
   expect(rowCss(".compact-row .compact-reading-words")).toMatchObject({
     position: "absolute",
     width: "var(--border-1)",

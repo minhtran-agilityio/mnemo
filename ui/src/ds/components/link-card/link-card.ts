@@ -385,7 +385,13 @@ export function createLinkRow(
 
 /**
  * The Compact view: the title, the site and the saved date on one line, and a spinner (named
- * "Reading the page") while Mnemo reads it. It shows nothing the app wrote (no summary, tags or
+ * "Reading the page") while Mnemo reads it. The title and the site share the room, each up to its
+ * own width. The title keeps a readable minimum (8ch), so a short title keeps an 8ch box and any
+ * room beyond that goes to the site; the site is cut before the title goes under 8ch. The date goes
+ * to a second line under the title in a list of 220px or narrower with a host of 8ch or more (214px
+ * docs.rs, 201px x.com, 194px t.me, 160px no site; on a reading row 244, 238, 225, 218 and 184px);
+ * on a reading row the site goes there too at 166px or narrower (159px docs.rs, 146px x.com, 140px
+ * t.me). Measured in Chrome (issue 175). It shows nothing the app wrote (no summary, tags or
  * reason), so it needs no trust label; the List and Cards views show them, labelled (issue 171).
  */
 export function createCompactRow(

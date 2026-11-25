@@ -654,6 +654,241 @@ test('AC3: control, the List row audit reports a site 1px under --size-link-site
     assert.ok(floored.bad.some((b) => b.includes('is wider than its text')), 'a short host in an 8ch box was not reported');
   }));
 
+// Issue 175. The Compact row of a link: the title, the reading spinner, the site (.dom) and the date. In the Records
+// tab, at the page's own width and with each list set to widths from 150 to 800px (the narrowest catalog column is
+// 158px at 200% zoom and 161px at 800 x 560, as issues 172 and 175 measured it; 150, 155 and 166 are where a reading
+// row's medium host, github.io or example.org, wraps alone or first wraps):
+// - no row is wider than its list, and every part stays inside the row's content box, with no part over another;
+// - a cut title keeps at least --size-link-site-min (8ch of the title's own font, or the whole line when that is
+//   narrower), so the site is cut before the title drops below it;
+// - a cut site keeps at least --size-link-site-min of its own font (or the whole line), so its ellipsis shows;
+// - on a line the title shares with a cut site: the title's box is no wider than its text or its minimum, whichever
+//   is wider (+1px), so a short title never keeps empty room next to a cut host; and a cut title gets at least the
+//   room the site got above its 8ch start (title >= site - 8ch of the site's font - 1px), so a long title is never
+//   starved by a long host (a title alone on its line, with the site wrapped under it, takes the line);
+// - on a one-line row the date ends at the row's content edge;
+// - a site's box is never wider than its text (+1px): a short host ("t.me") has no gap after it (a focused row,
+//   whose host wraps, is left out of this one);
+// - the date is one piece, never cut; the spinner sits on the title's line, right after it;
+// - when the parts do not fit one line, a wrapped part starts at the row's content edge, under the title, and no
+//   row wraps at a list of 280px or wider.
+// The counts make sure each check ran.
+const COMPACT_WIDTHS = [150, 155, 158, 160, 161, 166, 170, 180, 190, 200, 210, 220, 240, 260, 280, 320, 360, 400, 480, 560, 640, 720, 800];
+const COMPACT_SEEN = ['rows', 'cutTitles', 'cutHosts', 'hosts', 'shortHosts', 'dates', 'spinners', 'wrapped', 'oneLine', 'parts', 'titlesBesideCutHost', 'shortTitles', 'longTitlesBesideCutHost', 'datesAtEnd', 'noSite', 'wrappedSites'];
+const COMPACT_AUDIT = `(() => {
+  const bad = [];
+  const x = (n) => Math.round(n * 100) / 100;
+  const seen = Object.fromEntries(${JSON.stringify(COMPACT_SEEN)}.map((k) => [k, 0]));
+  const sample = [];
+  const range = document.createRange();
+  const widest = (node) => { range.selectNodeContents(node); return Math.max(0, ...[...range.getClientRects()].map((r) => r.width)); };
+  // --size-link-site-min in the element's own font (8ch): the probe goes inside it and inherits its font. Call it
+  // after the element's text is measured.
+  const floorIn = (el) => {
+    const probe = document.createElement('span');
+    probe.style.cssText = 'position:absolute;width:var(--size-link-site-min)';
+    el.append(probe);
+    const w = probe.getBoundingClientRect().width;
+    probe.remove();
+    return w;
+  };
+  const rowsNow = () => [...document.querySelectorAll('.compact-row')].filter((r) => r.getBoundingClientRect().width >= 1);
+  const lists = [...new Set(rowsNow().map((r) => r.parentElement))];
+  const check = (width) => {
+    for (const row of rowsNow()) {
+      seen.rows++;
+      const focused = row.matches('.is-focus, :focus-visible');
+      const titleEl = row.querySelector(':scope > .row-title');
+      const at = '"' + titleEl.textContent.slice(0, 24) + '"' + (row.dataset.status === 'reading' ? ' (reading)' : '') + (focused ? ' (focus)' : '') + ' @ list ' + width;
+      const rr = row.getBoundingClientRect();
+      const lr = row.parentElement.getBoundingClientRect();
+      if (rr.right > lr.right + 0.5 || rr.left < lr.left - 0.5) bad.push(at + ': row x' + x(rr.left) + '-' + x(rr.right) + ' leaves its list x' + x(lr.left) + '-' + x(lr.right));
+      const cs = getComputedStyle(row);
+      const left = rr.left + parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth);
+      const right = rr.right - parseFloat(cs.paddingRight) - parseFloat(cs.borderRightWidth);
+      const content = right - left;
+      // Nothing spills out of the row's content box, and no part sits over the one before it on its line.
+      const parts = [...row.children].filter((c) => c.getBoundingClientRect().width >= 1);
+      let prev = null;
+      for (const part of parts) {
+        seen.parts++;
+        const pr = part.getBoundingClientRect();
+        if (pr.left < left - 0.5 || pr.right > right + 0.5) bad.push(at + ': ' + part.className + ' "' + part.textContent.slice(0, 20) + '" x' + x(pr.left) + '-' + x(pr.right) + ' spills out of the row x' + x(left) + '-' + x(right));
+        if (prev) {
+          const qr = prev.getBoundingClientRect();
+          const sameLine = pr.top < qr.bottom - 0.5 && pr.bottom > qr.top + 0.5;
+          if (sameLine && pr.left < qr.right - 0.5) bad.push(at + ': ' + part.className + ' x' + x(pr.left) + ' sits over ' + prev.className + ' x' + x(qr.right));
+          // A part on a new line starts at the row's content edge, under the title.
+          if (!sameLine && pr.top >= qr.bottom - 0.5 && part.classList.contains('dom')) seen.wrappedSites++;
+          if (!sameLine && pr.top >= qr.bottom - 0.5 && Math.abs(pr.left - left) > 0.5) bad.push(at + ': ' + part.className + ' wrapped to x' + x(pr.left) + ', not the row edge x' + x(left));
+        }
+        prev = part;
+      }
+      // The title: a cut title keeps at least 8ch of its font, or the whole line.
+      const tBox = titleEl.getBoundingClientRect();
+      const tText = widest(titleEl);
+      const tFloor = floorIn(titleEl);
+      const site = row.querySelector(':scope > .dom');
+      const sBox = site ? site.getBoundingClientRect().width : 0;
+      const sText = site ? widest(site) : 0;
+      const sFloor = site ? floorIn(site) : 0;
+      const siteCut = !!site && !focused && sText > sBox + 0.05;
+      if (tText > tBox.width + 0.05) {
+        seen.cutTitles++;
+        const least = Math.min(tFloor, content);
+        if (tBox.width < least - 0.5) bad.push(at + ': title cut to ' + x(tBox.width) + 'px, under its minimum ' + x(least) + 'px' + (site ? ', while the site is ' + (siteCut ? 'cut to ' + x(sBox) : 'whole at ' + x(sBox)) + 'px' : ''));
+      }
+      if (site) {
+        seen.hosts++;
+        if (sText < sFloor - 0.5) seen.shortHosts++;
+        if (!focused && sBox > sText + 1) bad.push(at + ': site "' + site.textContent.slice(0, 20) + '" box ' + x(sBox) + 'px is wider than its text ' + x(sText) + 'px');
+        if (siteCut) {
+          seen.cutHosts++;
+          const least = Math.min(sFloor, content);
+          if (sBox < least - 0.5) bad.push(at + ': site cut to ' + x(sBox) + 'px, under its smallest width ' + x(least) + 'px');
+          if (getComputedStyle(site).textOverflow !== 'ellipsis') bad.push(at + ': a cut site has no ellipsis');
+          const sr = site.getBoundingClientRect();
+          const shareLine = sr.top < tBox.bottom - 0.5 && sr.bottom > tBox.top + 0.5;
+          if (shareLine) seen.titlesBesideCutHost++;
+          if (shareLine && tText > tBox.width + 0.05) {
+            seen.longTitlesBesideCutHost++;
+            if (tBox.width < sBox - sFloor - 1) bad.push(at + ': title cut to ' + x(tBox.width) + 'px, less than the site got above its 8ch start (' + x(sBox) + ' - ' + x(sFloor) + 'px)');
+          }
+          if (shareLine && tBox.width > Math.max(tText, tFloor) + 1) bad.push(at + ': title box ' + x(tBox.width) + 'px is wider than its text ' + x(tText) + 'px and its minimum ' + x(tFloor) + 'px while the site is cut to ' + x(sBox) + 'px');
+        }
+      }
+      // The date: one piece, never cut.
+      const date = row.querySelector(':scope > .row-meta');
+      let wrapped = false;
+      if (date) {
+        seen.dates++;
+        range.selectNodeContents(date);
+        const rects = [...range.getClientRects()].filter((r) => r.width >= 1);
+        if (rects.length !== 1) bad.push(at + ': the date "' + date.textContent + '" has ' + rects.length + ' line boxes');
+        const dr = date.getBoundingClientRect();
+        if (widest(date) > dr.width + 0.05) bad.push(at + ': the date is cut');
+        wrapped = dr.top >= tBox.bottom - 0.5;
+      }
+      if (date && !wrapped) {
+        seen.datesAtEnd++;
+        const dr = date.getBoundingClientRect();
+        if (Math.abs(dr.right - right) > 0.5) bad.push(at + ': the date ends at x' + x(dr.right) + ', not the row end x' + x(right));
+      }
+      if (wrapped) {
+        seen.wrapped++;
+        if (typeof width === 'number' && width >= 280) bad.push(at + ': the row wraps at a list of ' + width + 'px');
+      } else seen.oneLine++;
+      // The spinner: on the title's line, right after it (the part order check above keeps it off the title).
+      if (!site) seen.noSite++;
+      const spin = row.querySelector(':scope > .compact-reading');
+      if (spin) {
+        seen.spinners++;
+        const sr = spin.getBoundingClientRect();
+        if (!(sr.top < tBox.bottom && sr.bottom > tBox.top)) bad.push(at + ': the spinner is not on the title line');
+      }
+      if (tText < tFloor - 0.5 && siteCut && site.getBoundingClientRect().top < tBox.bottom - 0.5) seen.shortTitles++;
+      const kind = titleEl.textContent === 'Go' ? 'short' : titleEl.textContent.startsWith('Hướng') ? 'overflow' : row.dataset.status === 'reading' ? 'reading' : site?.textContent === 't.me' ? 't.me' : null;
+      if (kind && !row.matches('.is-hover, .is-active') && !sample.some((s) => s.width === width && s.kind === kind + (focused ? '-focus' : '')))
+        sample.push({ width, kind: kind + (focused ? '-focus' : ''), title: x(tBox.width) + '/' + x(tText), site: site ? x(sBox) + '/' + x(sText) : '-', titleMin: x(tFloor), wrapped });
+    }
+  };
+  check('page');
+  for (const w of ${JSON.stringify(COMPACT_WIDTHS)}) {
+    for (const l of lists) l.style.width = w + 'px';
+    check(w);
+  }
+  for (const l of lists) l.style.width = '';
+  return { bad, seen, sample };
+})()`;
+
+for (const scheme of ['light', 'dark']) {
+  test(`AC3: a link's Compact row keeps a cut title at its readable minimum, cuts the site first, spills nothing and wraps only in narrow lists (${scheme})`, UI, async () => {
+    const bad = [];
+    const seen = Object.fromEntries(COMPACT_SEEN.map((k) => [k, 0]));
+    for (const s of SIZES) {
+      await withApp({ ...s, scheme }, async (app) => {
+        await app.goto('/#/ui-catalog', CATALOG_READY);
+        assert.ok(await app.click('Records'), 'no Records tab');
+        await sleep(500);
+        const r = await app.eval(COMPACT_AUDIT);
+        assert.ok(r.seen.rows > 0, `no link Compact row in the Records tab @ ${s.label}`);
+        for (const k of COMPACT_SEEN) seen[k] += r.seen[k];
+        for (const b of r.bad) bad.push(`${b} @ ${s.label}`);
+        if (process.env.MNEMO_COMPACT_SAMPLE) for (const line of r.sample) console.log(scheme, s.label, JSON.stringify(line));
+      });
+    }
+    assert.deepEqual(bad, []);
+    assert.ok(seen.cutTitles > 0, 'no cut title seen, so the title minimum check never ran');
+    assert.ok(seen.cutHosts > 0, 'no cut site seen, so the site checks never ran');
+    assert.ok(seen.shortHosts > 0, 'no host shorter than --size-link-site-min seen, so a short host was never checked');
+    assert.ok(seen.spinners > 0, 'no reading spinner seen');
+    assert.ok(seen.dates > 0, 'no date seen, so the date checks never ran');
+    assert.ok(seen.wrapped > 0, 'no wrapped row seen, so the wrapped-edge check never ran');
+    assert.ok(seen.oneLine > 0, 'no one-line row seen');
+    assert.ok(seen.parts > 0, 'no part measured, so the spill check never ran');
+    assert.ok(seen.titlesBesideCutHost > 0, 'no title measured next to a cut site, so the first-claim check never ran');
+    assert.ok(seen.shortTitles > 0, 'no title shorter than its minimum seen next to a cut site');
+    assert.ok(seen.longTitlesBesideCutHost > 0, 'no cut title seen next to a cut site, so the long-title check never ran');
+    assert.ok(seen.datesAtEnd > 0, 'no one-line row with a date seen, so the date-at-end check never ran');
+    assert.ok(seen.noSite > 0, 'no row without a site seen');
+    assert.ok(seen.wrappedSites > 0, 'no site wrapped to a second line seen, so its row-edge check never ran');
+  });
+}
+
+// Control for the Compact checks above, with a style injected into the page:
+// - titles held at exactly --size-link-site-min (8ch of the title font): no title is reported under its minimum;
+//   held 1px under it, a cut title is;
+// - the layout before issue 175 (the title from zero, the site up to half the row, one line): the 161px column's
+//   title of a few pixels is reported;
+// - the title with no max-content cap (the equal split of the first version of issue 175): the short title's empty
+//   box next to a cut long host is reported;
+// - the site with first claim on the room (flex-grow 1000, the second version): the long title starved next to a
+//   long host is reported;
+// - no auto end margin on the title or spinner: a one-line row whose date stops short of the row end is reported;
+// - the auto margin on the site instead (fb6db27): a reading row's site wrapped to a second line, pushed off the row
+//   edge, is reported;
+// - a site that never shrinks: it is reported spilling out of the row.
+test('AC3: control, the Compact row audit reports a title 1px under its minimum, none at it, the old layout, an uncapped title, a host-first split, a date short of the row end, a wrapped site off the row edge and a spilling site', UI, () =>
+  withApp({}, async (app) => {
+    await app.goto('/#/ui-catalog', CATALOG_READY);
+    assert.ok(await app.click('Records'), 'no Records tab');
+    await sleep(500);
+    const under = (r) => r.bad.filter((b) => b.includes('under its minimum'));
+    const style = (css) => app.eval(`(() => {
+      let s = document.getElementById('ds09-compact-hold');
+      if (!s) { s = document.createElement('style'); s.id = 'ds09-compact-hold'; document.head.append(s); }
+      s.textContent = ${JSON.stringify(css)};
+      return true;
+    })()`);
+    const hold = (width) => style(`.compact-row .row-title { flex: none !important; min-width: 0 !important; width: ${width} !important; }`);
+    await hold('var(--size-link-site-min)');
+    const at = await app.eval(COMPACT_AUDIT);
+    assert.ok(at.seen.cutTitles > 0, 'no cut title seen with the titles held at their minimum');
+    assert.deepEqual(under(at), []);
+    await hold('calc(var(--size-link-site-min) - 1px)');
+    const below = await app.eval(COMPACT_AUDIT);
+    assert.ok(below.seen.cutTitles > 0, 'no cut title seen with the titles held under their minimum');
+    assert.ok(under(below).length > 0, 'a title held 1px under its minimum was not reported');
+    await style('.compact-row { flex-wrap: nowrap !important; } .compact-row .row-title { min-width: 0 !important; max-width: none !important; } .compact-row .dom { flex: 0 1 auto !important; max-width: 50% !important; }');
+    const old = await app.eval(COMPACT_AUDIT);
+    assert.ok(under(old).some((b) => b.includes('@ list 161')), 'the old layout, with its title of a few pixels at 161px, was not reported');
+    await style('.compact-row .row-title { max-width: none !important; }');
+    const equal = await app.eval(COMPACT_AUDIT);
+    assert.ok(equal.bad.some((b) => b.startsWith('"Go"') && b.includes('while the site is cut')), 'a short title holding empty room next to a cut host was not reported');
+    await style('.compact-row .dom { flex-grow: 1000 !important; }');
+    const hostFirst = await app.eval(COMPACT_AUDIT);
+    assert.ok(hostFirst.bad.some((b) => b.startsWith('"Hướng') && b.includes('less than the site got')), 'a long title starved by a long host was not reported');
+    await style('.compact-row > .row-title, .compact-row > .compact-reading { margin-inline-end: 0 !important; }');
+    const noEnd = await app.eval(COMPACT_AUDIT);
+    assert.ok(noEnd.bad.some((b) => b.includes('not the row end')), 'a date short of the row end was not reported');
+    await style('.compact-row > .row-title, .compact-row > .compact-reading { margin-inline-end: 0 !important; } .compact-row .dom { margin-inline-start: auto !important; }');
+    const hostMargin = await app.eval(COMPACT_AUDIT);
+    assert.ok(hostMargin.bad.some((b) => b.includes(' (reading)') && b.includes(': dom wrapped to x')), 'a wrapped site pushed off the row edge by its auto margin (fb6db27) was not reported');
+    await style('.compact-row { flex-wrap: nowrap !important; } .compact-row .dom { min-width: max-content !important; }');
+    const spill = await app.eval(COMPACT_AUDIT);
+    assert.ok(spill.bad.some((b) => b.includes('spills out of the row')), 'a site that never shrinks was not reported spilling');
+  }));
+
 // ---------------------------------------------------------------- AC4
 test('AC4: the 1000-row catalog list builds in under 1.5 s and scrolls with no frame stall over 250 ms', UI, () =>
   withApp({ w: 900, h: 640 }, async (app) => {

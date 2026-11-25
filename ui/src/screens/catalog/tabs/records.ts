@@ -307,6 +307,10 @@ function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
     [shortX, "short host x.com"],
     [noSite, "partial: no site, the host from a URL with https://"],
     [noScheme, "partial: no site, the host from a URL with no scheme"],
+    [
+      { ...pasted, site: undefined, url: "file:///home/me/notes/tauri.pdf" },
+      "partial: no host (a file link), the date at the row's end",
+    ],
     [{ ...pasted, ...unread, status: "pending" }, "pending"],
     [
       { ...pasted, ...unread, status: "reading" },
@@ -314,7 +318,42 @@ function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
     ],
     [{ ...pasted, ...unread, status: "unreadable" }, "could not read"],
     [{ ...pasted, ...unread, status: "ai-off" }, "AI off"],
-    [overflow, "overflow: long Vietnamese title and host"],
+    [
+      overflow,
+      "overflow: long Vietnamese title and host; the title keeps 8ch and the host is cut first, the date wraps under the title in a narrow column",
+    ],
+    [
+      { ...overflow, site: "t.me", url: "https://t.me/tauri_apps/1234" },
+      "overflow: long title, short host t.me kept whole",
+    ],
+    [
+      { ...overflow, title: "Go" },
+      "short title, long host: the title box stops at 8ch, the host takes the rest",
+    ],
+    [
+      { ...overflow, ...unread, status: "reading" },
+      "reading, long title and host: the spinner stays on the title's line",
+    ],
+    [
+      {
+        ...pasted,
+        ...unread,
+        status: "reading",
+        site: "github.io",
+        url: "https://github.io/tauri-apps/plugins",
+      },
+      "reading, medium host github.io: in a narrow column the site and date wrap under the title, from its edge",
+    ],
+    [
+      {
+        ...pasted,
+        ...unread,
+        status: "reading",
+        site: "example.org",
+        url: "https://example.org/tauri/capabilities",
+      },
+      "reading, medium host example.org: in a narrow column the site and date wrap under the title, from its edge",
+    ],
     [pasted, "hover", { forceState: "hover" }],
     [pasted, "focus-visible", { forceState: "focus" }],
     [
