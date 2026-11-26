@@ -7,6 +7,11 @@
 // (Delete key). Rename and create open a field in the row: Enter saves, Escape cancels, an empty or
 // duplicate name is refused at the field. The tree only reports the chosen node and the action; the
 // screen does the work. A refused action stays in the menu, disabled, with its reason.
+//
+// The flat folder mode (`noun: "folder"`, `flat: true`) is for a one-level list such as the
+// Bookmarks folders: the menu has Rename and Delete only, nothing is drawn under a node, and the
+// words say "folder" ("New folder", "New folder name", "No folders yet"). Nested labels stay the
+// default.
 import {
   ChevronRight,
   CircleAlert,
@@ -83,9 +88,43 @@ export interface TreeActionsOptions {
     action: "create" | "rename",
   ) => string | undefined;
   readonly forced?: TreeForcedState;
+  /**
+   * The word for a node in the button, the field, the menu and the empty state. Default "label":
+   * "New label", "New label name", "No labels yet". "folder" says "New folder" and so on.
+   */
+  readonly noun?: TreeNoun;
+  /**
+   * A one-level list: the menu has Rename and Delete only (no "New … inside", no "Move to…"),
+   * a create is always at the top level, and children are not drawn. Default false.
+   */
+  readonly flat?: boolean;
   /** When it aborts, an open menu closes and its document listener goes. */
   readonly signal?: AbortSignal;
 }
+
+export type TreeNoun = "label" | "folder";
+
+/** The words of each noun. */
+const WORDS: Record<
+  TreeNoun,
+  {
+    readonly empty: string;
+    readonly emptyBody: string;
+    readonly flatBody: string;
+  }
+> = {
+  label: {
+    empty: "No labels yet",
+    emptyBody: "Create a label to group your notes. You can nest labels later.",
+    flatBody: "Create a label to group your notes.",
+  },
+  folder: {
+    empty: "No folders yet",
+    emptyBody:
+      "Create a folder to group your items. You can nest folders later.",
+    flatBody: "Create a folder to group your items.",
+  },
+};
 
 const ICONS: Record<TreeNode["kind"], IconNode> = {
   folder: Folder,
@@ -94,6 +133,7 @@ const ICONS: Record<TreeNode["kind"], IconNode> = {
 
 const KEYS = "F2 Delete Shift+F10";
 const ACTIONS: readonly TreeAction[] = ["create", "rename", "move", "delete"];
+const FLAT_ACTIONS: readonly TreeAction[] = ["rename", "delete"];
 const nameKey = (name: string) => name.trim().normalize("NFC").toLowerCase();
 let counter = 0;
 
@@ -140,13 +180,22 @@ function menuFor(
     },
     ...extra,
   });
-  const entries: MenuEntry[] = [
-    item("create", "New label inside"),
-    item("rename", "Rename", { shortcut: "F2" }),
-    item("move", "Move to…"),
-    "separator",
-    item("delete", "Delete", { danger: true, shortcut: "Del" }),
-  ];
+  const noun = build.actions?.noun ?? "label";
+  const flat = build.actions?.flat === true;
+  const order = flat ? FLAT_ACTIONS : ACTIONS;
+  const entries: MenuEntry[] = flat
+    ? [
+        item("rename", "Rename", { shortcut: "F2" }),
+        "separator",
+        item("delete", "Delete", { danger: true, shortcut: "Del" }),
+      ]
+    : [
+        item("create", `New ${noun} inside`),
+        item("rename", "Rename", { shortcut: "F2" }),
+        item("move", "Move to…"),
+        "separator",
+        item("delete", "Delete", { danger: true, shortcut: "Del" }),
+      ];
   const trigger = createButton(doc, {
     label: `Actions for ${node.label}`,
     iconOnly: true,
@@ -163,7 +212,7 @@ function menuFor(
   panel.classList.add("tmenu");
   // A refused action keeps its place and says why, under its name.
   const rows = [...panel.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-  ACTIONS.forEach((action, i) => {
+  order.forEach((action, i) => {
     const reason = refused[action];
     const row = rows[i];
     if (reason === undefined || !row) return;
@@ -207,7 +256,8 @@ function buildNodes(
     const btn = doc.createElement("button");
     btn.type = "button";
     btn.className = "tnode";
-    const hasKids = (node.children?.length ?? 0) > 0;
+    const hasKids =
+      build.actions?.flat !== true && (node.children?.length ?? 0) > 0;
     if (hasKids) {
       btn.setAttribute("aria-expanded", String(node.expanded === true));
       btn.append(createIcon(ChevronRight, "sm", "chev"));
@@ -445,10 +495,14 @@ export function createTree(
   if (!actions) return tree;
 
   // Actions: the box holds the tree, the empty state and the New label button.
+  const noun = actions.noun ?? "label";
+  const flat = actions.flat === true;
+  const words = WORDS[noun];
   const box = doc.createElement("div");
   box.className = "tree-box";
+  if (flat) box.classList.add("is-flat");
   const newLabel = createButton(doc, {
-    label: "New label",
+    label: `New ${noun}`,
     icon: Plus,
     size: "sm",
     variant: "ghost",
@@ -456,9 +510,9 @@ export function createTree(
   });
   newLabel.classList.add("tree-new");
   const empty = buildEmptyState({
-    title: "No labels yet",
-    body: "Create a label to group your notes. You can nest labels later.",
-    action: { label: "New label", onClick: () => startEdit("create", null) },
+    title: words.empty,
+    body: flat ? words.flatBody : words.emptyBody,
+    action: { label: `New ${noun}`, onClick: () => startEdit("create", null) },
   });
   box.append(tree, empty, newLabel);
   const sync = () => {
@@ -524,13 +578,17 @@ export function createTree(
     const input = createTextInput(doc, { value: options.value ?? current });
     input.setAttribute(
       "aria-label",
-      mode === "rename" ? `Rename ${current}` : "New label name",
+      mode === "rename" ? `Rename ${current}` : `New ${noun} name`,
     );
     const spacer = doc.createElement("span");
     spacer.className = "spacer";
     const line = doc.createElement("div");
     line.className = "tedit-line";
-    line.append(spacer, createIcon(Tag, "sm", "ic-muted"), input);
+    line.append(
+      spacer,
+      createIcon(noun === "folder" ? Folder : Tag, "sm", "ic-muted"),
+      input,
+    );
     const edit = doc.createElement("div");
     edit.className = "tedit";
     edit.append(line);
@@ -558,7 +616,9 @@ export function createTree(
       if (!name) return "Type a name before you save.";
       const taken = siblings.filter((s) => s !== meta?.node);
       if (taken.some((s) => nameKey(s.label) === nameKey(name)))
-        return `A label named "${name}" already exists here.`;
+        return flat
+          ? `A ${noun} named "${name}" already exists.`
+          : `A ${noun} named "${name}" already exists here.`;
       return actions.validateName?.(name, mode);
     };
     let closed = false;
