@@ -2,10 +2,11 @@
 // Run: MNEMO_NESTED=1 node --test --test-isolation=none tests/acceptance/font-189-vietnamese.test.mjs
 // Black box. Vite serves the app on a private port, headless Google Chrome loads the Bookmarks screen with the Tauri
 // bridge replaced by an in-page fake, and the DevTools call CSS.getPlatformFontsForNode says which font drew each
-// node's glyphs. The test skips when no Chrome is found (set MNEMO_CHROME). It does not run WebKitGTK: the same
+// node's glyphs. The test finds Chrome from MNEMO_CHROME, the PATH or the macOS app folders; it skips with a warning when none
+// is found, and fails when CI is set. It does not run WebKitGTK: the same
 // @fontsource files are served to both engines, and the real Linux build was checked by hand (see the PR).
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -15,7 +16,22 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const CHROME = [process.env.MNEMO_CHROME, '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((c) => c && existsSync(c));
+// The browser: MNEMO_CHROME, then a name on the PATH (Linux), then the Chrome app folders (macOS).
+// With none found the test skips and says so; on CI (CI is set) a missing browser fails the run instead.
+const findChrome = () => {
+  const fromEnv = process.env.MNEMO_CHROME;
+  if (fromEnv) return existsSync(fromEnv) ? fromEnv : undefined;
+  for (const n of ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']) {
+    try { return execFileSync('which', [n], { encoding: 'utf8' }).trim(); } catch { /* not on the PATH; try the next name */ }
+  }
+  return ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium'].find((f) => existsSync(f));
+};
+const CHROME = findChrome();
+if (!CHROME) {
+  const why = 'font-189-vietnamese.test.mjs: no Chrome or Chromium found (set MNEMO_CHROME to its path)';
+  if (process.env.CI) throw new Error(why);
+  console.warn(`${why}; the rendered font test is skipped.`);
+}
 // Chrome names the bundled variable file by its default instance ("Source Sans 3 ExtraLight"), so match the family prefix.
 const isOwn = (name) => name.startsWith('Source Sans 3') || name.startsWith('JetBrains Mono');
 
