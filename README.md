@@ -226,5 +226,9 @@ Status: **Unverified**. These need the owner's own machines and are not done:
 | Variable | Effect |
 | --- | --- |
 | `MNEMO_FAKE_AI` | `1` starts Mnemo with the fake AI runner (fixed test answers, no Claude usage). Settings > AI then shows a Fake AI banner. Any other value leaves the real runner on. |
+| `MNEMO_SAVE_EVAL` | Eval only (#30). `1` lets the ignored test `ai::save_eval` start about 34 real `claude -p` runs. Without it the test starts nothing. Set by `bash scripts/save-eval.sh`, never by the app, `npm test` or CI. |
+| `MNEMO_SAVE_EVAL_RESULT` | Eval only. The file the eval writes its result to. Set by `scripts/save-eval.sh` (`evals/save/results/<date>.json`). |
+| `MNEMO_SAVE_EVAL_DATE` | Eval only. The date written in the result. Set by `scripts/save-eval.sh`. |
+| `MNEMO_SAVE_RESCORE_FROM`, `MNEMO_SAVE_RESCORE_NOTE` | Eval only. Used by `bash scripts/save-eval.sh rescore` to score a stored result again, with no run. |
 
 New variables are listed here when they are added.

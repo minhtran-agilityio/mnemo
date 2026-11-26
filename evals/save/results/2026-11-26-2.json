@@ -1,0 +1,419 @@
+{
+  "date": "2026-11-26",
+  "save_model": "haiku",
+  "save_effort": "low",
+  "judge_model": "sonnet",
+  "judge_effort": "low",
+  "pages": {
+    "mdn-css-flexbox": {
+      "score": 0.8125,
+      "readable": true,
+      "notes": [
+        "missing: display: flex turns an element into a flex container",
+        "missing: flex-direction chooses the main axis, row or column",
+        "missing: flex-wrap lets items wrap onto several lines"
+      ],
+      "summary": "The page is the MDN Learn article on Flexbox. It says flexbox is a one-dimensional layout method for arranging items in rows or columns, where items flex to fill extra space or shrink to fit. It covers flex containers and items, main and cross axes, wrapping, flex sizing, alignment, and ordering, with hands-on examples.",
+      "tags": [
+        "flexbox",
+        "css",
+        "web layout",
+        "mdn",
+        "one-dimensional layout"
+      ],
+      "facts_present": [
+        true,
+        false,
+        false,
+        false
+      ]
+    },
+    "mdn-http-overview": {
+      "score": 0.9375,
+      "readable": true,
+      "notes": [
+        "missing: HTTP is stateless, but cookies can create sessions"
+      ],
+      "summary": "The MDN page explains that HTTP is a client-server application-layer protocol for fetching resources such as HTML documents, usually sent over TCP, with requests initiated by the user-agent (typically a browser). It describes proxies, the request and response message format, and features controllable with HTTP, such as caching, origin relaxation, authentication, and cookie-based sessions. It also covers HTTP/2 multiplexing and the Fetch and server-sent events APIs.",
+      "tags": [
+        "http",
+        "web protocol",
+        "client-server",
+        "proxies",
+        "http messages",
+        "web apis"
+      ],
+      "facts_present": [
+        true,
+        true,
+        false,
+        true
+      ]
+    },
+    "mdn-js-array-map": {
+      "score": 0.9375,
+      "readable": true,
+      "notes": [
+        "missing: The callback gets the element, its index and the array"
+      ],
+      "summary": "The page is MDN's reference entry for Array.prototype.map(). It says map() creates a new array holding the results of calling a provided function on each element of the calling array, and that the callback is not called for empty slots in sparse arrays. It covers the callback arguments, the thisArg parameter, and common pitfalls such as the parseInt-with-map problem, undefined results, and side effects. It also gives examples of mapping, object reformatting, and use with array-like objects.",
+      "tags": [
+        "javascript",
+        "array.prototype.map",
+        "arrays",
+        "mdn reference",
+        "web development"
+      ],
+      "facts_present": [
+        true,
+        true,
+        false,
+        true
+      ]
+    },
+    "python-howto-sorting": {
+      "score": 0.8125,
+      "readable": true,
+      "notes": [
+        "missing: The key parameter takes a function that is called on each element before comparing",
+        "missing: Python sorts are guaranteed to be stable",
+        "missing: operator.itemgetter and attrgetter make key functions"
+      ],
+      "summary": "This is the Python 3.15.2 documentation HOWTO \"Sorting Techniques.\" It contrasts the in-place list.sort() with the sorted() built-in, which accepts any iterable. It covers key functions, operator and functools helpers, reverse ordering, sort stability, the decorate-sort-undecorate idiom, comparison functions, strategies for unorderable types, locale-aware sorting, and partial sorts using min, max, and heapq.",
+      "tags": [
+        "python",
+        "sorting",
+        "key functions",
+        "python documentation",
+        "sort stability",
+        "heapq"
+      ],
+      "facts_present": [
+        true,
+        false,
+        false,
+        false
+      ]
+    },
+    "python-tutorial-controlflow": {
+      "score": 0.9375,
+      "readable": true,
+      "notes": [
+        "missing: The range() function makes arithmetic sequences"
+      ],
+      "summary": "This is section 4 of the Python 3.15 tutorial, on control flow. It covers if/elif/else, for loops over sequences (including iterating over a copy when changing a collection), range(), break and continue, and else clauses on loops. It also covers pass, match statements for pattern matching, and defining functions with default and keyword arguments, including a warning about mutable default values.",
+      "tags": [
+        "python",
+        "control flow",
+        "loops",
+        "match statement",
+        "functions",
+        "tutorial"
+      ],
+      "facts_present": [
+        true,
+        true,
+        false,
+        true
+      ]
+    },
+    "python-tutorial-datastructures": {
+      "score": 0.8125,
+      "readable": true,
+      "notes": [
+        "missing: List comprehensions give a short way to make lists",
+        "missing: Tuples are immutable sequences, and sets hold unique items",
+        "missing: A dictionary maps keys to values"
+      ],
+      "summary": "The page is the Python 3.15.2 tutorial chapter \"5. Data Structures\". It documents list methods (append, extend, insert, remove, pop, index, count, sort, reverse, copy) with examples, and shows lists used as stacks and as queues via collections.deque. It also covers list comprehensions, nested comprehensions, unpacking in lists, the del statement, tuples and sequences, sets, dictionaries, and looping techniques.",
+      "tags": [
+        "python",
+        "data structures",
+        "lists",
+        "tuples",
+        "sets",
+        "dictionaries"
+      ],
+      "facts_present": [
+        true,
+        false,
+        false,
+        false
+      ]
+    },
+    "rfc-3986-uri": {
+      "score": 0.8125,
+      "readable": true,
+      "notes": [
+        "missing: A URI has scheme, authority, path, query and fragment parts",
+        "missing: Reserved characters and percent-encoding are defined",
+        "missing: It obsoletes RFC 2732, 2396 and 1808"
+      ],
+      "summary": "This page is an excerpt of RFC 3986, \"Uniform Resource Identifier (URI): Generic Syntax,\" a January 2005 Internet standards-track document by Berners-Lee, Fielding, and Masinter. It defines a generic URI syntax that is a superset of all valid URIs, plus a process for resolving relative references, guidelines, and security considerations. The excerpt also states that a URI only identifies a resource, and that access to the resource is neither guaranteed nor implied by the URI. The excerpt ends mid-sentence in section 1.2.2.",
+      "tags": [
+        "uri syntax",
+        "rfc 3986",
+        "internet standards",
+        "relative reference resolution",
+        "url"
+      ],
+      "facts_present": [
+        true,
+        false,
+        false,
+        false
+      ]
+    },
+    "rust-book-cargo": {
+      "score": 0.9166666666666666,
+      "readable": true,
+      "notes": [
+        "missing: The opt-level setting controls the number of optimisations, from 0 to 3"
+      ],
+      "summary": "The page is a chapter from The Rust Programming Language book about customizing builds with release profiles. It says Cargo has two main profiles: dev, used by cargo build, and release, used by cargo build --release. Each profile has defaults, which can be overridden by adding [profile.*] sections to Cargo.toml. The page uses opt-level as an example: dev defaults to 0 and release to 3, and setting [profile.dev] opt-level = 1 applies some optimization in development builds.",
+      "tags": [
+        "rust",
+        "cargo",
+        "release profiles",
+        "build configuration",
+        "opt-level"
+      ],
+      "facts_present": [
+        true,
+        false,
+        true
+      ]
+    },
+    "rust-book-error-handling": {
+      "score": 0.9166666666666666,
+      "readable": true,
+      "notes": [
+        "missing: unwrap and expect return the value in Ok, and panic when the value is Err"
+      ],
+      "summary": "This page is a chapter from The Rust Programming Language on recoverable errors with the Result enum, which has Ok and Err variants. It walks through opening a file with File::open and handling the result with match, including a nested match that creates the file when the error kind is NotFound. It also covers unwrap and expect as shortcuts that panic on Err, and propagating errors to the caller with the ? operator, which requires a compatible return type. It ends with fs::read_to_string as a shorter way to read a file.",
+      "tags": [
+        "rust",
+        "error handling",
+        "result type",
+        "recoverable errors",
+        "? operator",
+        "propagating errors"
+      ],
+      "facts_present": [
+        true,
+        true,
+        false
+      ]
+    },
+    "rust-book-ownership": {
+      "score": 0.8333333333333334,
+      "readable": true,
+      "notes": [
+        "missing: Rust checks the ownership rules at compile time, so they cost nothing at run time",
+        "missing: Each value has one owner, and the value is dropped when the owner goes out of scope"
+      ],
+      "summary": "This page introduces ownership, the set of rules Rust uses to manage memory, which the compiler checks so that violations stop the program from compiling. It explains the stack and the heap, noting that heap data is reached through a pointer. Using String as the example, it shows that assigning a String to another variable moves ownership and invalidates the first variable, while clone makes a deep copy. It also covers scope and drop, and why stack-only types such as integers implement Copy and stay valid after assignment.",
+      "tags": [
+        "rust",
+        "ownership",
+        "memory management",
+        "stack and heap",
+        "move semantics",
+        "copy trait"
+      ],
+      "facts_present": [
+        true,
+        false,
+        false
+      ]
+    },
+    "rust-book-variables": {
+      "score": 1.0,
+      "readable": true,
+      "notes": [],
+      "summary": "In Rust, variables are immutable by default, and assigning a second value to one is a compile-time error; adding mut allows the value to change. Constants are always immutable, are declared with const, require a type annotation, and must be set to a constant expression. Shadowing with a repeated let creates a new variable that can have a different type, which mut cannot do.",
+      "tags": [
+        "rust",
+        "variables",
+        "mutability",
+        "constants",
+        "shadowing"
+      ],
+      "facts_present": [
+        true,
+        true,
+        true,
+        true
+      ]
+    },
+    "unreadable-empty": {
+      "score": 1.0,
+      "readable": false,
+      "notes": [
+        "link only (too little text on the page)"
+      ],
+      "summary": null,
+      "tags": [],
+      "facts_present": []
+    },
+    "unreadable-login-wall": {
+      "score": 1.0,
+      "readable": false,
+      "notes": [
+        "link only (too little text on the page)"
+      ],
+      "summary": null,
+      "tags": [],
+      "facts_present": []
+    },
+    "unreadable-members-only": {
+      "score": 1.0,
+      "readable": false,
+      "notes": [
+        "link only (too little text on the page)"
+      ],
+      "summary": null,
+      "tags": [],
+      "facts_present": []
+    },
+    "wikipedia-de-brandenburger-tor": {
+      "score": 0.8125,
+      "readable": true,
+      "notes": [
+        "missing: Es wurde 1788 bis 1791 nach Plänen von Carl Gotthard Langhans gebaut",
+        "missing: Oben steht die Quadriga mit der Siegesgöttin Victoria",
+        "missing: Das Tor steht am Pariser Platz und wurde in der Teilung Deutschlands zum Symbol"
+      ],
+      "summary": "The page describes the Brandenburger Tor, an early classicist triumphal gate on Pariser Platz in Berlin, built 1789–1793 on the orders of King Friedrich Wilhelm II to designs by Carl Gotthard Langhans. Its quadriga sculpture was designed by Johann Gottfried Schadow. It is the only surviving of Berlin's 18 city gates, was restored after WWII damage by 1958, and has been seen as a symbol of overcoming Germany's division since 1990.",
+      "tags": [
+        "brandenburger tor",
+        "berlin",
+        "classicism",
+        "architecture",
+        "landmark",
+        "german history"
+      ],
+      "facts_present": [
+        true,
+        false,
+        false,
+        false
+      ]
+    },
+    "wikipedia-en-bookmark": {
+      "score": 1.0,
+      "readable": true,
+      "notes": [],
+      "summary": "The page is the English Wikipedia article on bookmarks. It describes a bookmark as a thin marking tool, usually made of card, leather, or fabric, that tracks a reader's place in a book. It traces their history from codices in the 1st century AD and the earliest surviving example from the 6th century, through Victorian woven silk \"Stevengraphs\" and later printed card markers. It ends with advice that safe bookmarks should be acid-free, thin, and free of bleeding dyes.",
+      "tags": [
+        "bookmarks",
+        "book history",
+        "reading",
+        "bookbinding",
+        "stevengraph",
+        "book conservation"
+      ],
+      "facts_present": [
+        true,
+        true,
+        true
+      ]
+    },
+    "wikipedia-en-sqlite": {
+      "score": 0.875,
+      "readable": true,
+      "notes": [
+        "missing: SQLite's source code is in the public domain",
+        "missing: It was created by D. Richard Hipp in 2000"
+      ],
+      "summary": "SQLite is a free, open-source, serverless relational database engine written in C that is embedded as a library in applications rather than running as a standalone program. It is described as the most widely deployed database engine and is used by several top web browsers, operating systems, and mobile phones. The page covers its design, features such as STRICT tables, JSON and FTS5 support, its limits (no stored procedures, limited ALTER TABLE and triggers), and its testing and notable uses.",
+      "tags": [
+        "sqlite",
+        "embedded database",
+        "relational database",
+        "sql",
+        "open source",
+        "c library"
+      ],
+      "facts_present": [
+        true,
+        true,
+        false,
+        false
+      ]
+    },
+    "wikipedia-en-tardigrade": {
+      "score": 0.8125,
+      "readable": true,
+      "notes": [
+        "missing: They are eight-legged, segmented animals",
+        "missing: They survive extreme conditions by entering a dried state called cryptobiosis",
+        "missing: They live in many places on Earth, from mountains to the deep sea"
+      ],
+      "summary": "Tardigrades, also called water bears or moss piglets, are a phylum of eight-legged micro-animals with about 1,500 known species; Goeze described them in 1773 and Spallanzani named the group in 1776. They are very resilient, surviving extreme temperatures, pressures, radiation, dehydration and exposure to space, largely by entering a dehydrated 'tun' state. The page also covers their body structure, feeding, reproduction, habitats and fossil history, with the earliest known fossil from the Cambrian, about 500 million years ago.",
+      "tags": [
+        "tardigrades",
+        "water bears",
+        "microscopic animals",
+        "cryptobiosis",
+        "extremophile tolerance",
+        "evolution"
+      ],
+      "facts_present": [
+        true,
+        false,
+        false,
+        false
+      ]
+    },
+    "wikipedia-simple-moon": {
+      "score": 0.8333333333333334,
+      "readable": true,
+      "notes": [
+        "missing: It orbits the Earth about once every 27 days",
+        "missing: The Moon is not man-made and is usually visible in the night sky"
+      ],
+      "summary": "The page is the Simple English Wikipedia article on the Moon, Earth's only natural satellite. It covers the giant impact origin theory, the Moon's lower gravity and lack of atmosphere, craters, the water found by Chandrayaan-1, the phases of the Moon, tidal locking, and the Apollo landings. It also notes that no country controls the Moon and that the Outer Space Treaty bans military use there.",
+      "tags": [
+        "moon",
+        "astronomy",
+        "lunar exploration",
+        "moon phases",
+        "space law"
+      ],
+      "facts_present": [
+        true,
+        false,
+        false
+      ]
+    },
+    "wikipedia-vi-pho": {
+      "score": 0.9375,
+      "readable": true,
+      "notes": [
+        "missing: Có hai kiểu chính: phở Bắc và phở Nam"
+      ],
+      "summary": "The page describes phở, a traditional Vietnamese rice noodle soup usually made with beef or chicken and a long-simmered broth flavored with spices such as star anise, cinnamon, and cardamom. It says phở likely took shape in the early 20th century, with Hanoi or Nam Định cited as possible origins, and that chicken phở appeared in 1939. It also covers regional styles (northern, Huế, and Saigon), serving customs, nutritional value, and instant and bát đá variants.",
+      "tags": [
+        "phở",
+        "vietnamese cuisine",
+        "noodle soup",
+        "beef broth",
+        "food history",
+        "regional variants"
+      ],
+      "facts_present": [
+        true,
+        true,
+        true,
+        false
+      ]
+    }
+  },
+  "total": 18.0,
+  "max_total": 20,
+  "total_percent": 90.0,
+  "runs_used": 34,
+  "usage_before_percent": null,
+  "usage_after_percent": null
+}

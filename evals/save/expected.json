@@ -1,0 +1,340 @@
+{
+  "about": "Expectations of the save eval (#30). facts: what the summary must say, judged by Claude (see judge.md). tags: topic words the saved tags should overlap. must_not: text that must not appear in the summary or tags. An unreadable page must stay link only, with no summary.",
+  "pages": {
+    "rust-book-ownership": {
+      "file": "pages/rust-book-ownership.html",
+      "facts": [
+        "Ownership is a set of rules that govern how a Rust program manages memory",
+        "Rust checks the ownership rules at compile time, so they cost nothing at run time",
+        "Each value has one owner, and the value is dropped when the owner goes out of scope"
+      ],
+      "tags": [
+        "rust",
+        "ownership",
+        "memory management"
+      ],
+      "must_not": [
+        "garbage collector is used by rust",
+        "python",
+        "javascript"
+      ]
+    },
+    "rust-book-error-handling": {
+      "file": "pages/rust-book-error-handling.html",
+      "facts": [
+        "Recoverable errors are returned as a Result<T, E> value, an enum with Ok and Err variants",
+        "The ? operator passes an error up to the calling function",
+        "unwrap and expect return the value in Ok, and panic when the value is Err"
+      ],
+      "tags": [
+        "rust",
+        "error handling",
+        "result"
+      ],
+      "must_not": [
+        "exceptions are the main way rust handles errors",
+        "java"
+      ]
+    },
+    "rust-book-cargo": {
+      "file": "pages/rust-book-cargo.html",
+      "facts": [
+        "Cargo has two main profiles: dev (cargo build) and release (cargo build --release)",
+        "The opt-level setting controls the number of optimisations, from 0 to 3",
+        "The defaults are opt-level 0 for dev and 3 for release, and Cargo.toml can override them"
+      ],
+      "tags": [
+        "rust",
+        "cargo",
+        "build profiles"
+      ],
+      "must_not": [
+        "makefile",
+        "npm"
+      ]
+    },
+    "rust-book-variables": {
+      "file": "pages/rust-book-variables.html",
+      "facts": [
+        "Variables are immutable by default in Rust",
+        "A variable can be made mutable with the mut keyword",
+        "Constants use const, must always have a type annotation and are always immutable",
+        "Shadowing lets a new variable reuse a name with let"
+      ],
+      "tags": [
+        "rust",
+        "variables",
+        "mutability"
+      ],
+      "must_not": [
+        "javascript",
+        "let and var"
+      ]
+    },
+    "python-tutorial-datastructures": {
+      "file": "pages/python-tutorial-datastructures.html",
+      "facts": [
+        "Lists have methods such as append, extend, insert, remove, pop and sort",
+        "List comprehensions give a short way to make lists",
+        "Tuples are immutable sequences, and sets hold unique items",
+        "A dictionary maps keys to values"
+      ],
+      "tags": [
+        "python",
+        "data structures",
+        "lists"
+      ],
+      "must_not": [
+        "java",
+        "javascript"
+      ]
+    },
+    "python-tutorial-controlflow": {
+      "file": "pages/python-tutorial-controlflow.html",
+      "facts": [
+        "An if statement can have elif and else parts",
+        "A for statement loops over the items of any sequence",
+        "The range() function makes arithmetic sequences",
+        "The match statement compares a value against patterns"
+      ],
+      "tags": [
+        "python",
+        "control flow",
+        "loops"
+      ],
+      "must_not": [
+        "java",
+        "c++"
+      ]
+    },
+    "python-howto-sorting": {
+      "file": "pages/python-howto-sorting.html",
+      "facts": [
+        "list.sort() sorts in place, while sorted() returns a new sorted list",
+        "The key parameter takes a function that is called on each element before comparing",
+        "Python sorts are guaranteed to be stable",
+        "operator.itemgetter and attrgetter make key functions"
+      ],
+      "tags": [
+        "python",
+        "sorting",
+        "sorted"
+      ],
+      "must_not": [
+        "quicksort is the default",
+        "java"
+      ]
+    },
+    "wikipedia-en-tardigrade": {
+      "file": "pages/wikipedia-en-tardigrade.html",
+      "facts": [
+        "Tardigrades are microscopic animals, also called water bears or moss piglets",
+        "They are eight-legged, segmented animals",
+        "They survive extreme conditions by entering a dried state called cryptobiosis",
+        "They live in many places on Earth, from mountains to the deep sea"
+      ],
+      "tags": [
+        "tardigrade",
+        "water bear",
+        "animals"
+      ],
+      "must_not": [
+        "they are insects",
+        "they are fish"
+      ]
+    },
+    "wikipedia-en-sqlite": {
+      "file": "pages/wikipedia-en-sqlite.html",
+      "facts": [
+        "SQLite is a free and open-source relational database engine written in the C programming language",
+        "It is not a standalone application but a library that developers embed in their applications",
+        "SQLite's source code is in the public domain",
+        "It was created by D. Richard Hipp in 2000"
+      ],
+      "tags": [
+        "sqlite",
+        "database",
+        "sql"
+      ],
+      "must_not": [
+        "it is a server database like postgresql",
+        "mongodb"
+      ]
+    },
+    "wikipedia-simple-moon": {
+      "file": "pages/wikipedia-simple-moon.html",
+      "facts": [
+        "The Moon is Earth's only natural satellite",
+        "It orbits the Earth about once every 27 days",
+        "The Moon is not man-made and is usually visible in the night sky"
+      ],
+      "tags": [
+        "moon",
+        "earth",
+        "astronomy"
+      ],
+      "must_not": [
+        "the moon has life",
+        "mars"
+      ]
+    },
+    "wikipedia-de-brandenburger-tor": {
+      "file": "pages/wikipedia-de-brandenburger-tor.html",
+      "facts": [
+        "Das Brandenburger Tor ist ein Triumphtor in Berlin",
+        "Es wurde 1788 bis 1791 nach Plänen von Carl Gotthard Langhans gebaut",
+        "Oben steht die Quadriga mit der Siegesgöttin Victoria",
+        "Das Tor steht am Pariser Platz und wurde in der Teilung Deutschlands zum Symbol"
+      ],
+      "tags": [
+        "brandenburger tor",
+        "berlin",
+        "geschichte"
+      ],
+      "must_not": [
+        "new york",
+        "london"
+      ]
+    },
+    "wikipedia-vi-pho": {
+      "file": "pages/wikipedia-vi-pho.html",
+      "facts": [
+        "Phở là một món ăn truyền thống của Việt Nam",
+        "Thành phần chính là bánh phở và nước dùng cùng thịt bò hoặc thịt gà",
+        "Phở có nguồn gốc ở miền Bắc Việt Nam, vùng Nam Định và Hà Nội",
+        "Có hai kiểu chính: phở Bắc và phở Nam"
+      ],
+      "tags": [
+        "phở",
+        "món ăn",
+        "việt nam"
+      ],
+      "must_not": [
+        "japan",
+        "ramen là món chính"
+      ]
+    },
+    "mdn-http-overview": {
+      "file": "pages/mdn-http-overview.html",
+      "facts": [
+        "HTTP is a protocol for fetching resources such as HTML documents",
+        "It is a client-server protocol: requests are sent by the client, usually a web browser",
+        "HTTP is stateless, but cookies can create sessions",
+        "It is an application-layer protocol sent over TCP"
+      ],
+      "tags": [
+        "http",
+        "protocol",
+        "web"
+      ],
+      "must_not": [
+        "http is a database",
+        "python"
+      ]
+    },
+    "mdn-css-flexbox": {
+      "file": "pages/mdn-css-flexbox.html",
+      "facts": [
+        "Flexbox is a one-dimensional layout method that lays out items in rows or columns",
+        "display: flex turns an element into a flex container",
+        "flex-direction chooses the main axis, row or column",
+        "flex-wrap lets items wrap onto several lines"
+      ],
+      "tags": [
+        "css",
+        "flexbox",
+        "layout"
+      ],
+      "must_not": [
+        "grid is the same as flexbox",
+        "python"
+      ]
+    },
+    "mdn-js-array-map": {
+      "file": "pages/mdn-js-array-map.html",
+      "facts": [
+        "Array.prototype.map() creates a new array with the result of calling a function on every element",
+        "It calls a function once for each element and builds the new array from the results",
+        "The callback gets the element, its index and the array",
+        "map skips empty slots in sparse arrays"
+      ],
+      "tags": [
+        "javascript",
+        "array",
+        "map"
+      ],
+      "must_not": [
+        "map changes the original array in place",
+        "python"
+      ]
+    },
+    "rfc-3986-uri": {
+      "file": "pages/rfc-3986-uri.html",
+      "facts": [
+        "RFC 3986 defines the generic syntax of a Uniform Resource Identifier (URI)",
+        "A URI has scheme, authority, path, query and fragment parts",
+        "Reserved characters and percent-encoding are defined",
+        "It obsoletes RFC 2732, 2396 and 1808"
+      ],
+      "tags": [
+        "uri",
+        "rfc 3986",
+        "syntax"
+      ],
+      "must_not": [
+        "rfc 9110 defines the uri syntax",
+        "html5"
+      ]
+    },
+    "wikipedia-en-bookmark": {
+      "file": "pages/wikipedia-en-bookmark.html",
+      "facts": [
+        "A bookmark is a thin marking tool used to keep track of a reader's progress in a book",
+        "It is commonly made of card, leather or fabric",
+        "A history section is covered"
+      ],
+      "tags": [
+        "bookmark",
+        "books",
+        "reading"
+      ],
+      "must_not": [
+        "a bookmark is a web browser feature",
+        "internet explorer"
+      ]
+    },
+    "unreadable-empty": {
+      "file": "pages/unreadable-empty.html",
+      "note": "Hand-made: an empty page. Under 200 characters of text, so the page reader gives up and the save stays link only.",
+      "expect": "link_only",
+      "facts": [],
+      "tags": [],
+      "must_not": [
+        "any summary",
+        "any tag"
+      ]
+    },
+    "unreadable-login-wall": {
+      "file": "pages/unreadable-login-wall.html",
+      "note": "Hand-made: a login wall. Under 200 characters of text, so the page reader gives up and the save stays link only.",
+      "expect": "link_only",
+      "facts": [],
+      "tags": [],
+      "must_not": [
+        "any summary",
+        "any tag"
+      ]
+    },
+    "unreadable-members-only": {
+      "file": "pages/unreadable-members-only.html",
+      "note": "Hand-made: a members-only notice. Under 200 characters of text, so the page reader gives up and the save stays link only.",
+      "expect": "link_only",
+      "facts": [],
+      "tags": [],
+      "must_not": [
+        "any summary",
+        "any tag"
+      ]
+    }
+  }
+}

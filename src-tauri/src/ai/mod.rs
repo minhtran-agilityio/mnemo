@@ -15,6 +15,8 @@ pub mod run_dir;
 pub mod runner;
 #[cfg(test)]
 mod sample;
+#[cfg(test)]
+mod save_eval;
 pub mod stream;
 pub mod test_prompt;
 pub mod usage;
