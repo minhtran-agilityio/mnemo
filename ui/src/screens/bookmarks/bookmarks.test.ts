@@ -26,6 +26,11 @@ function bm(over: Partial<SavedBookmark> = {}): SavedBookmark {
   };
 }
 
+/** A save or summary result: the bookmark, not already saved. */
+function res(over: Partial<SaveResult> = {}): SaveResult {
+  return { ...bm(), alreadySaved: false, ...over };
+}
+
 const page = <T>(items: T[]): Page<T> => ({ items, next: null });
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
@@ -33,8 +38,8 @@ function deps(over: Partial<BookmarksDeps> = {}) {
   let emit: (b: SavedBookmark) => void = () => {};
   const stop = vi.fn();
   const d: BookmarksDeps = {
-    saveLink: vi.fn(async (url: string) => bm({ id: "new", url })),
-    summarizeBookmark: vi.fn(async (id: string) => bm({ id })),
+    saveLink: vi.fn(async (url: string) => res({ id: "new", url })),
+    summarizeBookmark: vi.fn(async (id: string) => res({ id })),
     listBookmarkCards: vi.fn(async () => page<SavedBookmark>([])),
     onBookmarkChanged: vi.fn(async (h: (b: SavedBookmark) => void) => {
       emit = h;
@@ -160,7 +165,7 @@ test("Save sends the link, clears the box at once, and the card follows the even
   expect(input.value).toBe("");
   emit(bm({ summaryStatus: "reading", summary: null, title: null }));
   expect(box.textContent).toContain("Reading the page");
-  finish(bm());
+  finish(res());
   await flush();
   expect(box.textContent).toContain(
     "Each window gets a list of allowed commands.",
@@ -220,7 +225,7 @@ test("Paste the text opens a dialog and Make summary sends the text for that boo
   const { d } = deps({
     listBookmarkCards: vi.fn(async () => page([unreadable])),
     summarizeBookmark: vi.fn(async (id: string) =>
-      bm({ id, summary: "Summary made from the pasted text." }),
+      res({ id, summary: "Summary made from the pasted text." }),
     ),
   });
   const { box } = mount(d);
@@ -254,7 +259,7 @@ test("Summarize later asks again without pasted text and an AI error shows as a 
   const { d } = deps({
     listBookmarkCards: vi.fn(async () => page([off])),
     summarizeBookmark: vi.fn(async (id: string) => ({
-      ...bm({ id, summaryStatus: "pending", summary: null, tags: [] }),
+      ...res({ id, summaryStatus: "pending", summary: null, tags: [] }),
       aiError: { code: "timeout", message: "Claude did not answer in time." },
     })),
   });
@@ -272,7 +277,7 @@ test("Summarize later asks again without pasted text and an AI error shows as a 
 test("a link whose page could not be reached offers both actions, and pasted text makes its summary", async () => {
   const { d } = deps({
     saveLink: vi.fn(async (url: string) => ({
-      ...bm({
+      ...res({
         id: "n1",
         url,
         summaryStatus: "not_reached",
@@ -286,7 +291,7 @@ test("a link whose page could not be reached offers both actions, and pasted tex
       },
     })),
     summarizeBookmark: vi.fn(async (id: string) =>
-      bm({ id, summary: "Summary made from the pasted text." }),
+      res({ id, summary: "Summary made from the pasted text." }),
     ),
   });
   const { box } = mount(d);
@@ -367,7 +372,7 @@ function expectBothActions(card: HTMLElement): void {
 test("a bookmark deleted while it was read leaves the list quietly", async () => {
   const { d, emit } = deps({
     saveLink: vi.fn(async (url: string) =>
-      bm({
+      res({
         id: "g1",
         url,
         summaryStatus: "reading",

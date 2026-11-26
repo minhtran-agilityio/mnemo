@@ -761,9 +761,14 @@ export interface SavedBookmark extends Bookmark {
   labels: BookmarkTag[];
 }
 
-/** A save or summary result: the bookmark, and why there is no summary when an AI run failed. */
+/**
+ * A save or summary result: the bookmark, and why there is no summary when an AI run failed.
+ * `alreadySaved` is true when `saveLink` found the link already saved (#28): the bookmark is the
+ * old one, unchanged, and no page read or AI run started.
+ */
 export interface SaveResult extends SavedBookmark {
   aiError?: AppError;
+  alreadySaved: boolean;
 }
 
 /** Saves a link: the core stores it at once, then reads the page and asks for a summary. */

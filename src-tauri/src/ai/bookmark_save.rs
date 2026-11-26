@@ -33,7 +33,8 @@ use super::limits::{MAX_TEXT_CHARS, SUMMARY_TIMEOUT};
 use super::models::default_choice;
 use super::runner::{AiError, AiOutput, AiRunner, AiTask};
 use crate::storage::bookmarks::{
-    check_summary, BookmarkSummary, ClaimToken, Held, SavedBookmark, SummaryStatus, MAX_TAGS,
+    check_summary, BookmarkSummary, ClaimToken, Held, LinkSave, SavedBookmark, SummaryStatus,
+    MAX_TAGS,
 };
 use crate::storage::{Storage, StorageError};
 
@@ -134,6 +135,9 @@ pub struct SaveResult {
     pub bookmark: SavedBookmark,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ai_error: Option<Problem>,
+    /// True when the link was already saved (#28): `bookmark` is the old one, unchanged, and no
+    /// page read or AI run was started. False for a new save and for every summary.
+    pub already_saved: bool,
 }
 
 /// Runs one storage call. The app's storage and a plain `Mutex<Storage>` (tests) both serve.
@@ -191,6 +195,25 @@ type StartCall<'a> =
     dyn FnMut(&mut Storage) -> Result<(SavedBookmark, ClaimToken), StorageError> + 'a;
 
 impl SaveContext<'_> {
+    /// The save of a new link, or the old bookmark of a link already saved. A new bookmark is
+    /// sent to `emit`; an old one is not.
+    fn start_save(&self, url: &str) -> Result<LinkSave, SaveError> {
+        let mut outcome = None;
+        self.store.with_storage(&mut |s| {
+            let saved = s.save_link_to_read(url)?;
+            let carried = match &saved {
+                LinkSave::New(b, _) | LinkSave::Duplicate(b) => b.clone(),
+            };
+            outcome = Some(saved);
+            Ok(Held::Written(carried))
+        })?;
+        let saved = outcome.ok_or(SaveError::NotFound)?;
+        if let LinkSave::New(b, _) = &saved {
+            (self.emit)(b);
+        }
+        Ok(saved)
+    }
+
     /// A storage call that starts a run (a save, a claim): its bookmark, sent to `emit`, and the
     /// run's claim.
     fn start(&self, call: &mut StartCall<'_>) -> Result<(SavedBookmark, ClaimToken), SaveError> {
@@ -235,17 +258,36 @@ impl SaveContext<'_> {
 }
 
 fn result(bookmark: SavedBookmark, ai_error: Option<Problem>) -> Result<SaveResult, Stop> {
-    Ok(SaveResult { bookmark, ai_error })
+    Ok(SaveResult {
+        bookmark,
+        ai_error,
+        already_saved: false,
+    })
 }
 
 /// Saves a link: stores it at once, then reads the page and asks Claude for the summary.
 /// A link that is not an http or https web address is refused and nothing is stored.
+///
+/// A link that is already saved (same compare key as a live bookmark, #28) is checked first, in
+/// the same transaction as the insert: the old bookmark comes back with `already_saved` set, and
+/// nothing is stored, read, summarized or sent as an event. No AI run starts.
 pub fn save_link(ctx: &SaveContext<'_>, url: &str) -> Result<SaveResult, SaveError> {
     // Stored already claimed (`reading`) in one transaction: no other call can start a summary
     // of it in between, and with no commit there is no row.
-    let (b, claim) = ctx.start(&mut |s| s.save_link_to_read(url))?;
-    log::info!("bookmark {} saved, reading the page", b.base.id);
-    summarize_from(ctx, b, &claim, Source::Page)
+    match ctx.start_save(url)? {
+        LinkSave::New(b, claim) => {
+            log::info!("bookmark {} saved, reading the page", b.base.id);
+            summarize_from(ctx, b, &claim, Source::Page)
+        }
+        LinkSave::Duplicate(b) => {
+            log::info!("bookmark {} is already saved, nothing was added", b.base.id);
+            Ok(SaveResult {
+                bookmark: b,
+                ai_error: None,
+                already_saved: true,
+            })
+        }
+    }
 }
 
 /// Makes the summary of a stored bookmark again: from `pasted` text when given ("Paste the
@@ -300,6 +342,7 @@ fn summarize_from(
             Ok(SaveResult {
                 bookmark: *b,
                 ai_error: None,
+                already_saved: false,
             })
         }
         Err(Stop::Lost(None)) => {
@@ -314,6 +357,7 @@ fn summarize_from(
             Ok(SaveResult {
                 bookmark: b,
                 ai_error: None,
+                already_saved: false,
             })
         }
         Err(Stop::Failed(e)) => {
@@ -1358,5 +1402,66 @@ mod tests {
             .unwrap();
         assert!(marker.starts_with("page-") && marker.len() > 20);
         assert_eq!(t.prompt.matches(&format!("</{marker}>")).count(), 2);
+    }
+
+    #[test]
+    fn duplicate_save_starts_no_ai_run_reads_no_page_and_sends_no_event() {
+        let w = World::new(FakeReader::page(), FakeResult::Valid(GOOD.into()));
+        let first = w.run(|c| save_link(c, "https://example.org/a")).unwrap();
+        assert!(!first.already_saved);
+        let (runs, reads, events) = (w.runner.requests().len(), w.reader.calls(), w.seen().len());
+        assert_eq!((runs, reads), (1, 1));
+        let again = w
+            .run(|c| save_link(c, "https://www.example.org/a/?utm_source=x#top"))
+            .unwrap();
+        assert!(again.already_saved);
+        assert_eq!(again.ai_error, None);
+        // The old bookmark, as it is now, with its summary.
+        assert_eq!(again.bookmark, first.bookmark);
+        assert_eq!(again.bookmark.summary_status, Done);
+        // Nothing ran: no AI run, no page read, no event, no new row.
+        assert_eq!(
+            (w.runner.requests().len(), w.reader.calls(), w.seen().len()),
+            (runs, reads, events)
+        );
+        assert_eq!(w.store.lock().unwrap().bookmark_rows_for_test(), 1);
+    }
+
+    #[test]
+    fn duplicate_save_with_ai_off_still_gives_the_old_bookmark() {
+        let mut w = World::new(FakeReader::page(), FakeResult::Valid(GOOD.into()));
+        w.ai_on = false;
+        let first = w.run(|c| save_link(c, "https://example.org/a")).unwrap();
+        assert_eq!(first.bookmark.summary_status, AiOff);
+        let again = w.run(|c| save_link(c, "https://example.org/a")).unwrap();
+        assert!(again.already_saved);
+        assert_eq!(again.bookmark.base.id, first.bookmark.base.id);
+        assert_eq!(w.runner.requests().len(), 0);
+    }
+
+    #[test]
+    fn duplicate_save_result_serialises_already_saved_true_and_a_new_save_false() {
+        let w = World::new(FakeReader::page(), FakeResult::Valid(GOOD.into()));
+        let first = w.run(|c| save_link(c, "https://example.org/a")).unwrap();
+        let again = w.run(|c| save_link(c, "https://example.org/a")).unwrap();
+        assert_eq!(serde_json::to_value(&first).unwrap()["alreadySaved"], false);
+        let json = serde_json::to_value(&again).unwrap();
+        assert_eq!(json["alreadySaved"], true);
+        assert_eq!(json["id"], first.bookmark.base.id);
+    }
+
+    #[test]
+    fn duplicate_save_after_the_bookmark_was_soft_deleted_starts_a_new_run() {
+        let w = World::new(FakeReader::page(), FakeResult::Valid(GOOD.into()));
+        let first = w.run(|c| save_link(c, "https://example.org/a")).unwrap();
+        w.store
+            .lock()
+            .unwrap()
+            .delete::<crate::storage::items::Bookmark>(&first.bookmark.base.id)
+            .unwrap();
+        let again = w.run(|c| save_link(c, "https://example.org/a")).unwrap();
+        assert!(!again.already_saved);
+        assert_ne!(again.bookmark.base.id, first.bookmark.base.id);
+        assert_eq!(w.runner.requests().len(), 2);
     }
 }

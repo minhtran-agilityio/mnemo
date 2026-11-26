@@ -49,6 +49,10 @@ pub const MIGRATIONS: &[Migration] = &[
         number: 9,
         sql: include_str!("../../migrations/0009_bookmark_save.sql"),
     },
+    Migration {
+        number: 10,
+        sql: include_str!("../../migrations/0010_bookmark_compare_key.sql"),
+    },
 ];
 
 /// Reads the schema version stored in the database (0 for a new file).
@@ -107,7 +111,7 @@ mod tests {
     fn real_migrations_set_the_version() {
         let mut c = mem();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 9);
+        assert_eq!(current_version(&c).unwrap(), 10);
     }
 
     /// `run` skips every number at or below the stored version, so a gap that is filled
@@ -187,7 +191,7 @@ mod tests {
             err,
             StorageError::SchemaTooNew {
                 found: 99,
-                supported: 9
+                supported: 10
             }
         );
     }
@@ -381,7 +385,7 @@ mod tests {
         )
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 9);
+        assert_eq!(current_version(&c).unwrap(), 10);
         for t in KINDS.iter().chain(["item_link", "settings"].iter()) {
             assert!(table_exists(&c, t), "table {t} missing");
         }
@@ -403,7 +407,7 @@ mod tests {
         ))
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 9);
+        assert_eq!(current_version(&c).unwrap(), 10);
         let cols = columns(&c, "idea");
         for col in [
             "body",
@@ -600,7 +604,7 @@ mod tests {
              INSERT INTO bookmark (id, created_at, updated_at, url) VALUES ('b-link', '{T}', '{T}', 'https://b.example');"
         ))
         .unwrap();
-        run(&mut c, MIGRATIONS).unwrap();
+        run(&mut c, &MIGRATIONS[..9]).unwrap();
         assert_eq!(current_version(&c).unwrap(), 9);
         let row = |id: &str| -> (Option<String>, String, Option<String>) {
             c.query_row(
@@ -671,5 +675,42 @@ mod tests {
             .is_err());
         assert!(index_exists(&c, "idx_bookmark_label_label"));
         assert!(index_exists(&c, "idx_bookmark_label_bookmark"));
+    }
+    #[test]
+    fn migration_10_adds_the_compare_key_and_a_partial_index_to_a_database_built_by_migration_9() {
+        let mut c = mem();
+        run(&mut c, &MIGRATIONS[..9]).unwrap();
+        c.execute(
+            "INSERT INTO bookmark (id, created_at, updated_at, url) VALUES ('b-old', ?1, ?1, 'https://a.example/')",
+            [T],
+        )
+        .unwrap();
+        run(&mut c, MIGRATIONS).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 10);
+        // The old row is kept, with no key until the step at open fills it.
+        let key: Option<String> = c
+            .query_row(
+                "SELECT compare_key FROM bookmark WHERE id = 'b-old'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(key, None);
+        // The index is not unique (old duplicates stay) and only covers live rows.
+        let (unique, partial): (i64, i64) = c
+            .query_row(
+                "SELECT \"unique\", partial FROM pragma_index_list('bookmark') WHERE name = 'idx_bookmark_compare_key'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((unique, partial), (0, 1));
+        for id in ["b-1", "b-2"] {
+            c.execute(
+                "INSERT INTO bookmark (id, created_at, updated_at, url, compare_key) VALUES (?1, ?2, ?2, 'https://x.example/', 'https://x.example')",
+                [id, T],
+            )
+            .unwrap();
+        }
     }
 }
