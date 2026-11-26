@@ -95,6 +95,39 @@ test("Records shows link cards with two actions: pending, narrow, busy, disabled
     expect(entry?.states).toContain(cap);
 });
 
+test("Records shows the link card's note and folder line in each state (issue 186)", () => {
+  const panel = mount(renderRecords);
+  const entry = RECORDS.find((e) => e.name === "link card");
+  const caps = [...panel.querySelectorAll(".st > .cap")].map(
+    (c) => c.textContent ?? "",
+  );
+  const mine = (entry?.states ?? []).filter((st) =>
+    /^(folder|already saved)/.test(st),
+  );
+  expect(mine).toHaveLength(10);
+  for (const st of mine) expect(caps).toContain(st);
+  const cardOf = (cap: string) =>
+    [...panel.querySelectorAll(".st")]
+      .find((s) => s.querySelector(":scope > .cap")?.textContent === cap)
+      ?.querySelector(".lcard");
+  expect(
+    cardOf("already saved")?.querySelector(".lcard-notice")?.textContent,
+  ).toBe("Already saved");
+  expect(
+    cardOf("folder: Guess, on a done card")?.querySelector(
+      ".lcard-folder .trust-guess",
+    ),
+  ).not.toBeNull();
+  expect(
+    cardOf("folder: AI off, Unsorted, no label")?.querySelector(
+      ".lcard-folder .trust",
+    ),
+  ).toBeNull();
+  expect(
+    cardOf("folder: none, no note")?.querySelector(".lcard-folder"),
+  ).toBeNull();
+});
+
 test("Lists sorts the table, opens the tree and moves a kanban card", () => {
   const panel = mount(renderLists);
   const th = panel.querySelectorAll("th");

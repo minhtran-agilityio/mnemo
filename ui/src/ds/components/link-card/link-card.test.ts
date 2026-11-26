@@ -1258,3 +1258,179 @@ test("the smallest widths of the List row are tokens: a whole trust label, and a
   expect(tokens).toMatch(/--size-link-sub-min: 6\.75rem;/);
   expect(tokens).toMatch(/--size-link-site-min: 8ch;/);
 });
+
+// Issue 186: the "Already saved" note and the folder line.
+const wiki: LinkItem = {
+  title: "Embedded database - Wikipedia",
+  url: "https://en.wikipedia.org/wiki/Embedded_database",
+  site: "en.wikipedia.org",
+  saved: "26 Nov 2026",
+  status: "done",
+  summary: "A database engine built into the app that uses it.",
+};
+
+test("empty: with no folder and no note, the card shows neither line", () => {
+  const card = createLinkCard(document, wiki);
+  expect(card.querySelector(".lcard-notice")).toBeNull();
+  expect(card.querySelector(".lcard-folder")).toBeNull();
+  expect(card.textContent).not.toContain("Already saved");
+  // An empty or blank folder is no folder.
+  for (const folder of ["", "   "]) {
+    const blank = createLinkCard(document, {
+      ...wiki,
+      folder,
+      folderIsGuess: true,
+    });
+    expect(blank.querySelector(".lcard-folder")).toBeNull();
+  }
+  expect(
+    createLinkCard(document, { ...wiki, alreadySaved: false }).querySelector(
+      ".lcard-notice",
+    ),
+  ).toBeNull();
+});
+
+test("Already saved is an info note on top of the card, read as text", () => {
+  const card = createLinkCard(
+    document,
+    { ...wiki, alreadySaved: true },
+    { thumb: true },
+  );
+  const note = card.querySelector(".lcard-notice");
+  expect(note?.textContent).toBe("Already saved");
+  // Information, not an error: the info pill, never a bad or warn tint, and no alert role.
+  expect(note?.classList.contains("pill-info")).toBe(true);
+  expect(note?.classList.contains("pill-bad")).toBe(false);
+  expect(note?.getAttribute("role")).toBeNull();
+  // Its icon is decorative; the words carry the meaning.
+  expect(note?.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+  // It sits above the meta line and the title, after the picture box.
+  const kids = [...card.children];
+  expect(kids.indexOf(note as Element)).toBe(1);
+  expect(kids.indexOf(note as Element)).toBeLessThan(
+    kids.indexOf(card.querySelector(".meta") as Element),
+  );
+  // The rows do not show it.
+  expect(
+    createLinkRow(document, { ...wiki, alreadySaved: true }).textContent,
+  ).not.toContain("Already saved");
+  expect(
+    createCompactRow(document, { ...wiki, alreadySaved: true }).textContent,
+  ).not.toContain("Already saved");
+});
+
+test("the folder line says where the link is filed, labelled Guess when the app chose it", () => {
+  const guessed = createLinkCard(document, {
+    ...wiki,
+    folder: "Dev tools",
+    folderIsGuess: true,
+  });
+  const line = guessed.querySelector(".lcard-folder");
+  expect(line?.textContent).toBe("Filed in Dev toolsGuess");
+  expect(line?.querySelector(".lcard-folder-name")?.textContent).toBe(
+    "Dev tools",
+  );
+  expect(line?.querySelector(".trust-guess")?.textContent).toBe("Guess");
+  expect(line?.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+  // The owner's folder (or the app's default with AI off) has no label.
+  const unsorted = createLinkCard(document, {
+    ...wiki,
+    status: "ai-off",
+    summary: undefined,
+    folder: "Unsorted",
+  });
+  expect(unsorted.querySelector(".lcard-folder")?.textContent).toBe(
+    "Filed in Unsorted",
+  );
+  expect(unsorted.querySelector(".lcard-folder .trust")).toBeNull();
+  // The line comes after the reason and before the actions.
+  const full = createLinkCard(
+    document,
+    { ...wiki, reason: "For the storage module.", folder: "Dev tools" },
+    { action: createButton(document, { label: "Open" }) },
+  );
+  const kids = [...full.children];
+  const at = (sel: string) => kids.indexOf(full.querySelector(sel) as Element);
+  expect(at(".reason")).toBeLessThan(at(".lcard-folder"));
+  expect(at(".lcard-folder")).toBeLessThan(at(".lcard-action"));
+  // The rows do not show it.
+  expect(
+    createLinkRow(document, { ...wiki, folder: "Dev tools" }).textContent,
+  ).not.toContain("Dev tools");
+});
+
+test("partial: a card that is not done still shows its folder", () => {
+  for (const status of [
+    "pending",
+    "reading",
+    "unreadable",
+    "ai-off",
+  ] as const) {
+    const card = createLinkCard(document, {
+      ...wiki,
+      summary: undefined,
+      status,
+      folder: "Unsorted",
+    });
+    expect(card.querySelector(".lcard-folder-name")?.textContent).toBe(
+      "Unsorted",
+    );
+  }
+});
+
+test("the note and the folder line together, with the folder name as text", () => {
+  const card = createLinkCard(document, {
+    ...wiki,
+    alreadySaved: true,
+    folder: "<b>Dev</b> tools",
+    folderIsGuess: true,
+  });
+  expect(card.querySelector(".lcard-notice")).not.toBeNull();
+  expect(card.querySelector(".lcard-folder-name")?.textContent).toBe(
+    "<b>Dev</b> tools",
+  );
+  expect(card.querySelector(".lcard-folder b")).toBeNull();
+});
+
+test("overflow: a long folder name is cut, with its full text in the tooltip and room for marks", () => {
+  const long =
+    "Tài liệu kỹ thuật về cơ sở dữ liệu nhúng và các công cụ phát triển ứng dụng máy tính để bàn";
+  const card = createLinkCard(document, {
+    ...wiki,
+    folder: long,
+    folderIsGuess: true,
+  });
+  const name = card.querySelector<HTMLElement>(".lcard-folder-name");
+  expect(name?.textContent).toBe(long);
+  expect(name?.title).toBe(long);
+  const rule = cssRule(
+    import.meta.dirname,
+    "link-card.css",
+    ".lcard .lcard-folder-name",
+  );
+  expect(rule).toMatchObject({
+    "min-width": "0",
+    overflow: "hidden",
+    "text-overflow": "ellipsis",
+    "white-space": "nowrap",
+    ...MARKS_ROOM,
+  });
+  // The words and the name shrink as one piece; the Guess label stays whole and wraps under them.
+  expect(
+    cssRule(import.meta.dirname, "link-card.css", ".lcard .lcard-folder"),
+  ).toMatchObject({ display: "flex", "flex-wrap": "wrap", "min-width": "0" });
+  expect(
+    cssRule(import.meta.dirname, "link-card.css", ".lcard .lcard-folder-where"),
+  ).toMatchObject({ "min-width": "0", "white-space": "pre" });
+  expect(
+    cssRule(
+      import.meta.dirname,
+      "link-card.css",
+      ".lcard .lcard-folder > .trust",
+    ),
+  ).toMatchObject({ flex: "none" });
+  // A note on a card narrower than its words wraps inside the pill.
+  expect(
+    cssRule(import.meta.dirname, "link-card.css", ".lcard .lcard-notice"),
+  ).toMatchObject({ "max-width": "100%", "white-space": "normal" });
+});
