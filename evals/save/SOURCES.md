@@ -5,7 +5,9 @@ these saved HTML copies exactly. The pages are stored only to test Mnemo and are
 owner may add a page that has a clear licence: save its raw HTML in `pages/`, add a row here and an entry in
 `expected.json`.
 
-Saved on 2026-11-26 with `curl`. Images, scripts and styles are not stored, only the page HTML.
+Saved on 2026-11-26 with `curl`. Only the page HTML is stored: images and stylesheet files are not. The pages
+still hold their `<script>` tags and links to other sites. The eval never opens them in a browser: the page
+reader drops scripts and keeps only the visible text.
 
 | Page | Source | Licence |
 |---|---|---|

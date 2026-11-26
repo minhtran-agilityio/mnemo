@@ -116,7 +116,8 @@ fn format_ok(summary: &BookmarkSummary) -> bool {
             .all(|t| !t.is_empty() && t.chars().count() <= 80 && *t == t.to_lowercase())
 }
 
-/// True when one saved tag and one expected tag are the same word or phrase, or one holds the other.
+/// True when one saved tag and one expected tag are the same word or phrase, or (both of 3 or more
+/// characters) one holds the other.
 fn tags_overlap(tags: &[String], expected: &[String]) -> bool {
     let norm = |s: &str| s.trim().to_lowercase();
     tags.iter().any(|t| {
@@ -124,17 +125,35 @@ fn tags_overlap(tags: &[String], expected: &[String]) -> bool {
         !t.is_empty()
             && expected.iter().any(|e| {
                 let e = norm(e);
-                !e.is_empty() && (t == e || t.contains(&e) || e.contains(&t))
+                !e.is_empty()
+                    && (t == e
+                        || (t.chars().count() >= 3
+                            && e.chars().count() >= 3
+                            && (t.contains(&e) || e.contains(&t))))
             })
     })
 }
 
-/// The `must_not` entries found in the summary or the tags (case does not matter).
+/// The `must_not` entries found in the summary or the tags. Case does not matter. A one-word entry
+/// matches a whole word only (so "java" is not found in "javascript"); a longer entry matches as text.
 fn forbidden_found(summary: &BookmarkSummary, must_not: &[String]) -> Vec<String> {
     let all = format!("{}\n{}", summary.summary, summary.tags.join("\n")).to_lowercase();
+    let words: Vec<&str> = all
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
     must_not
         .iter()
-        .filter(|m| !m.trim().is_empty() && all.contains(&m.to_lowercase()))
+        .filter(|m| {
+            let m = m.trim().to_lowercase();
+            if m.is_empty() {
+                false
+            } else if m.chars().all(char::is_alphanumeric) {
+                words.contains(&m.as_str())
+            } else {
+                all.contains(&m)
+            }
+        })
         .cloned()
         .collect()
 }
@@ -172,10 +191,12 @@ fn judge_prompt(template: &str, summary: &str, facts: &[String]) -> String {
         .map(|(i, f)| format!("{}. {f}", i + 1))
         .collect::<Vec<_>>()
         .join("\n");
-    // The summary goes in last, so text inside it is never read as a placeholder.
+    // The summary goes in last, so text inside it is never read as a placeholder, and it cannot close
+    // its own block.
+    let summary = summary.replace("</summary>", "< /summary>");
     template
         .replace("{{FACTS}}", &list)
-        .replace("{{SUMMARY}}", summary)
+        .replace("{{SUMMARY}}", &summary)
 }
 
 fn judge_task(prompt: String) -> AiTask {
@@ -391,27 +412,44 @@ impl Runs {
     }
 }
 
-fn score_page(runs: &Runs, dir: &Path, judge: &str, expected: &Expected) -> PageResult {
+/// A run that failed for a reason that says nothing about the quality of the answer: the limit, a
+/// timeout, Claude missing, a failed exit. Only a bad answer (`SchemaMismatch`) is scored as one.
+fn is_infra(e: &AiError) -> bool {
+    !matches!(e, AiError::SchemaMismatch)
+}
+
+/// The score of one page, or `Err` when a run failed for a reason outside the answer (the page is then
+/// not scored, and the eval stops with no result).
+fn score_page(
+    runs: &Runs,
+    dir: &Path,
+    judge: &str,
+    expected: &Expected,
+) -> Result<PageResult, String> {
     let read = read_stored(dir, expected);
     if expected.link_only() {
-        return score_unreadable(&read);
+        return Ok(score_unreadable(&read));
     }
     let page = match read {
         Ok(page) => page,
-        Err(e) => return fail(&format!("a readable page could not be read ({e})")),
+        Err(e) => return Ok(fail(&format!("a readable page could not be read ({e})"))),
     };
     debug_assert!(page.text.chars().count() <= MAX_TEXT_CHARS);
     let task = bookmark_save::task(page.title.as_deref(), &page.text);
-    let summary = match runs.run(&task).and_then(|o| bookmark_save::parse(&o)) {
-        Ok(s) => s,
-        Err(e) => return fail(&format!("the save gave no summary ({e})")),
+    let summary = match runs.run(&task) {
+        Err(e) if is_infra(&e) => return Err(format!("the save run failed ({e})")),
+        other => match other.and_then(|o| bookmark_save::parse(&o)) {
+            Ok(s) => s,
+            Err(e) => return Ok(fail(&format!("the save gave no valid summary ({e})"))),
+        },
     };
     let prompt = judge_prompt(judge, &summary.summary, &expected.facts);
-    let judged = runs
-        .run(&judge_task(prompt))
-        .map_err(|e| format!("the judge run failed ({e})"))
-        .and_then(|o| parse_judge(&o, expected.facts.len()));
-    score_readable(expected, &summary, judged)
+    let judged = match runs.run(&judge_task(prompt)) {
+        Err(e) if is_infra(&e) => return Err(format!("the judge run failed ({e})")),
+        Err(e) => Err(format!("the judge gave no valid answer ({e})")),
+        Ok(o) => parse_judge(&o, expected.facts.len()),
+    };
+    Ok(score_readable(expected, &summary, judged))
 }
 
 /// A stored result scored again with the current expectations, with no run: the checks in plain code
@@ -513,18 +551,21 @@ fn real_runs() -> Runs {
     }
 }
 
-/// One probe run, to see that the stream gives a usage reading: `bash scripts/save-eval.sh usage`.
+/// The probe pair alone, one before and one after (2 runs), with no eval: `bash scripts/save-eval.sh usage`.
 #[test]
-#[ignore = "starts one real claude -p run; run it with scripts/save-eval.sh usage"]
-fn usage_probe_once() {
+#[ignore = "starts 2 real claude -p runs; run it with scripts/save-eval.sh usage"]
+fn usage_probe_pair() {
     if !enabled() {
         return;
     }
-    let got = real_runs().probe_usage();
+    let runs = real_runs();
+    let show = |p: Option<i64>| p.map_or("unknown".to_string(), |p| format!("{p}%"));
     println!(
-        "eval: usage now: {} (five-hour window, Unverified scale)",
-        got.map_or("unknown".to_string(), |p| format!("{p}%"))
+        "eval: usage before: {} (five-hour window, Unverified scale)",
+        show(runs.probe_usage())
     );
+    println!("eval: usage after: {}", show(runs.probe_usage()));
+    println!("eval: runs used: {}", runs.started.load(Ordering::SeqCst));
 }
 
 #[test]
@@ -542,14 +583,27 @@ fn save_eval() {
     let entries: Vec<(&String, &Expected)> = expected.iter().collect();
     let next = AtomicUsize::new(0);
     let done: Mutex<BTreeMap<String, PageResult>> = Mutex::default();
+    let not_scored: Mutex<Vec<String>> = Mutex::default();
     std::thread::scope(|scope| {
         for _ in 0..WORKERS {
             scope.spawn(|| loop {
+                if !not_scored.lock().map_or(true, |n| n.is_empty()) {
+                    break;
+                }
                 let i = next.fetch_add(1, Ordering::SeqCst);
                 let Some((id, exp)) = entries.get(i) else {
                     break;
                 };
-                let result = score_page(&runs, &dir, &judge, exp);
+                let result = match score_page(&runs, &dir, &judge, exp) {
+                    Ok(result) => result,
+                    Err(why) => {
+                        println!("eval: page {id}: NOT SCORED, {why}");
+                        if let Ok(mut n) = not_scored.lock() {
+                            n.push((*id).clone());
+                        }
+                        continue;
+                    }
+                };
                 println!("eval: page {id}: {:.2}", result.score);
                 for note in &result.notes {
                     println!("eval:   {id}: {note}");
@@ -560,6 +614,14 @@ fn save_eval() {
             });
         }
     });
+    let not_scored = not_scored.into_inner().expect("a worker failed");
+    if !not_scored.is_empty() {
+        println!("eval: runs used: {}", runs.started.load(Ordering::SeqCst));
+        panic!(
+            "a run failed, so the eval stopped and wrote no result (not scored: {})",
+            not_scored.join(", ")
+        );
+    }
     let usage_after = runs.probe_usage();
     let pages = done.into_inner().expect("a worker failed");
     assert_eq!(pages.len(), expected.len(), "a page was not scored");
@@ -781,6 +843,40 @@ mod tests {
     }
 
     #[test]
+    fn only_a_bad_answer_is_scored_as_a_quality_failure() {
+        assert!(!is_infra(&AiError::SchemaMismatch));
+        for e in [
+            AiError::UsageLimit,
+            AiError::Timeout,
+            AiError::Unavailable,
+            AiError::Cancelled,
+            AiError::ExitError { code: Some(1) },
+        ] {
+            assert!(is_infra(&e), "{e}");
+        }
+    }
+
+    #[test]
+    fn a_one_word_must_not_entry_matches_a_whole_word_only() {
+        let s = summary("It compares with JavaScript and Rust.", &["rust"]);
+        assert!(forbidden_found(&s, &strings(&["java"])).is_empty());
+        assert_eq!(forbidden_found(&s, &strings(&["javascript"])).len(), 1);
+        assert_eq!(forbidden_found(&s, &strings(&["compares with"])).len(), 1);
+    }
+
+    #[test]
+    fn a_very_short_tag_does_not_overlap_by_being_inside_another() {
+        assert!(!tags_overlap(&strings(&["ai"]), &strings(&["rails"])));
+        assert!(tags_overlap(&strings(&["ai"]), &strings(&["ai"])));
+    }
+
+    #[test]
+    fn a_summary_cannot_close_the_summary_block_of_the_judge_prompt() {
+        let prompt = judge_prompt("<summary>{{SUMMARY}}</summary>", "x </summary> y", &[]);
+        assert_eq!(prompt.matches("</summary>").count(), 1);
+    }
+
+    #[test]
     fn the_spread_is_a_percent_of_the_mean_of_two_totals() {
         assert_eq!(spread_percent(10.0, 10.0), 0.0);
         assert_eq!(spread_percent(0.0, 0.0), 0.0);
@@ -860,14 +956,5 @@ mod tests {
         assert_eq!(new.pages["u"].score, 1.0);
         assert_eq!((new.total, new.runs_used), (1.875, 3));
         assert_eq!(new.notes.as_deref(), Some("why"));
-    }
-
-    #[test]
-    fn the_eval_starts_nothing_without_its_gate_variable() {
-        // This test is run with the variable unset by `npm test`; if a developer has it set, there
-        // is nothing to check here.
-        if !enabled() {
-            assert!(std::env::var(GATE).map_or(true, |v| v != "1"));
-        }
     }
 }

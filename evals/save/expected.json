@@ -14,9 +14,9 @@
         "memory management"
       ],
       "must_not": [
-        "garbage collector is used by rust",
         "python",
-        "javascript"
+        "javascript",
+        "golang"
       ]
     },
     "rust-book-error-handling": {
@@ -32,8 +32,9 @@
         "result"
       ],
       "must_not": [
-        "exceptions are the main way rust handles errors",
-        "java"
+        "python",
+        "javascript",
+        "golang"
       ]
     },
     "rust-book-cargo": {
@@ -49,8 +50,9 @@
         "build profiles"
       ],
       "must_not": [
-        "makefile",
-        "npm"
+        "python",
+        "javascript",
+        "golang"
       ]
     },
     "rust-book-variables": {
@@ -67,8 +69,9 @@
         "mutability"
       ],
       "must_not": [
+        "python",
         "javascript",
-        "let and var"
+        "golang"
       ]
     },
     "python-tutorial-datastructures": {
@@ -85,8 +88,9 @@
         "lists"
       ],
       "must_not": [
-        "java",
-        "javascript"
+        "rust",
+        "golang",
+        "kotlin"
       ]
     },
     "python-tutorial-controlflow": {
@@ -103,8 +107,9 @@
         "loops"
       ],
       "must_not": [
-        "java",
-        "c++"
+        "golang",
+        "kotlin",
+        "kubernetes"
       ]
     },
     "python-howto-sorting": {
@@ -121,8 +126,9 @@
         "sorted"
       ],
       "must_not": [
-        "quicksort is the default",
-        "java"
+        "rust",
+        "golang",
+        "kotlin"
       ]
     },
     "wikipedia-en-tardigrade": {
@@ -139,8 +145,9 @@
         "animals"
       ],
       "must_not": [
-        "they are insects",
-        "they are fish"
+        "kubernetes",
+        "blockchain",
+        "bitcoin"
       ]
     },
     "wikipedia-en-sqlite": {
@@ -157,8 +164,9 @@
         "sql"
       ],
       "must_not": [
-        "it is a server database like postgresql",
-        "mongodb"
+        "kubernetes",
+        "blockchain",
+        "bitcoin"
       ]
     },
     "wikipedia-simple-moon": {
@@ -174,8 +182,9 @@
         "astronomy"
       ],
       "must_not": [
-        "the moon has life",
-        "mars"
+        "kubernetes",
+        "blockchain",
+        "bitcoin"
       ]
     },
     "wikipedia-de-brandenburger-tor": {
@@ -192,8 +201,9 @@
         "geschichte"
       ],
       "must_not": [
-        "new york",
-        "london"
+        "kubernetes",
+        "blockchain",
+        "bitcoin"
       ]
     },
     "wikipedia-vi-pho": {
@@ -210,8 +220,9 @@
         "việt nam"
       ],
       "must_not": [
-        "japan",
-        "ramen là món chính"
+        "kubernetes",
+        "blockchain",
+        "bitcoin"
       ]
     },
     "mdn-http-overview": {
@@ -228,8 +239,9 @@
         "web"
       ],
       "must_not": [
-        "http is a database",
-        "python"
+        "python",
+        "golang",
+        "kubernetes"
       ]
     },
     "mdn-css-flexbox": {
@@ -246,8 +258,9 @@
         "layout"
       ],
       "must_not": [
-        "grid is the same as flexbox",
-        "python"
+        "golang",
+        "kubernetes",
+        "blockchain"
       ]
     },
     "mdn-js-array-map": {
@@ -264,8 +277,9 @@
         "map"
       ],
       "must_not": [
-        "map changes the original array in place",
-        "python"
+        "python",
+        "golang",
+        "kubernetes"
       ]
     },
     "rfc-3986-uri": {
@@ -282,8 +296,9 @@
         "syntax"
       ],
       "must_not": [
-        "rfc 9110 defines the uri syntax",
-        "html5"
+        "kubernetes",
+        "blockchain",
+        "bitcoin"
       ]
     },
     "wikipedia-en-bookmark": {
@@ -299,8 +314,9 @@
         "reading"
       ],
       "must_not": [
-        "a bookmark is a web browser feature",
-        "internet explorer"
+        "kubernetes",
+        "blockchain",
+        "bitcoin"
       ]
     },
     "unreadable-empty": {

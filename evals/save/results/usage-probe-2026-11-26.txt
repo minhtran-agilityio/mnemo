@@ -1,0 +1,4 @@
+# bash scripts/save-eval.sh usage, 2026-11-26, claude 2.1.332 (Claude Code), Linux x86_64
+usage before: 45% (five-hour window, Unverified scale)
+usage after: 45%
+runs used: 2
