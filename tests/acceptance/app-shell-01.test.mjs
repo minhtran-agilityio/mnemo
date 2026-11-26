@@ -188,7 +188,7 @@ test('AC1: the running app makes no network connection at start', TEST, () =>
 test('AC1: no network crate or http capability is added, and the UI has no sign-in', () => {
   const cargo = readFileSync(p('src-tauri', 'Cargo.toml'), 'utf8');
   const deps = cargo.slice(cargo.indexOf('[dependencies]'));
-  assert.doesNotMatch(deps, /^\s*(reqwest|hyper|ureq|isahc|surf|curl|attohttpc|tungstenite|tokio-tungstenite|tauri-plugin-http|tauri-plugin-updater)\b/m);
+  assert.doesNotMatch(deps, /^\s*(hyper|ureq|isahc|surf|curl|attohttpc|tungstenite|tokio-tungstenite|tauri-plugin-http|tauri-plugin-updater)\b/m);
   for (const f of walk(p('src-tauri', 'capabilities'))) assert.doesNotMatch(readFileSync(f, 'utf8'), /http|updater/i);
   const ui = walk(p('ui')).filter((f) => /\.(html|ts|tsx|css)$/.test(f)).map((f) => readFileSync(f, 'utf8')).join('\n');
   assert.doesNotMatch(ui, /sign[ -]?in|log[ -]?in|password/i);

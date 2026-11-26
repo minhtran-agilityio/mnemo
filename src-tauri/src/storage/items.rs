@@ -224,6 +224,14 @@ pub trait Item: sealed::Sealed + Sized {
     const EXISTS_SQL: &'static str;
     /// Refuses input that must not be saved. Runs before any write.
     fn validate(input: &Self::Input) -> Result<(), StorageError>;
+    /// Refuses an update that must not be saved given the stored row (after `validate`).
+    fn validate_update(
+        _conn: &rusqlite::Connection,
+        _id: &str,
+        _input: &Self::Input,
+    ) -> Result<(), StorageError> {
+        Ok(())
+    }
     #[doc(hidden)]
     fn values(input: &Self::Input) -> Vec<Value>;
     #[doc(hidden)]
@@ -343,7 +351,7 @@ pub(super) fn required_chars(field: &str, v: &str, max: usize) -> Result<(), Sto
 }
 
 /// Long text that must be given: not blank, at most 1 MB.
-fn required_text(field: &str, v: &str) -> Result<(), StorageError> {
+pub(super) fn required_text(field: &str, v: &str) -> Result<(), StorageError> {
     if v.trim().is_empty() {
         return Err(invalid(format!("The {field} cannot be empty.")));
     }
@@ -378,6 +386,18 @@ pub(super) fn optional_text(field: &str, v: &Option<String>) -> Result<(), Stora
         }),
         None => Ok(()),
     }
+}
+
+/// The form the URL parser writes of a link that passed `web_address`: the same check, with a
+/// message for a link that is too long only once encoded.
+pub(super) fn encoded_web_address(parsed: &url::Url) -> Result<(), StorageError> {
+    if parsed.as_str().chars().count() > MAX_URL_CHARS {
+        return Err(invalid(
+            "The link is too long once encoded (letters such as é take more room in a link)."
+                .to_string(),
+        ));
+    }
+    web_address(parsed.as_str())
 }
 
 /// A web address: http or https, a host, no spaces, at most 2048 characters.
@@ -494,11 +514,26 @@ impl sealed::Sealed for Bookmark {}
 impl Item for Bookmark {
     type Input = BookmarkInput;
     const KIND: ItemKind = ItemKind::Bookmark;
+    // ?9 is the new link as the URL parser writes it (a save stores that form). The same link
+    // sent in another form (case, a missing "/") is not a changed link: the stored form stays.
+    // A different link is stored in the parsed form too, so a later edit in either form matches
+    // it. The site (?8) follows the link. Any owner edit drops a summary run's claim, so the run
+    // stops and never writes over it. A bookmark with a summary is done (no AI run takes an
+    // owner's summary over); a removed summary, an edit during a read, or a changed link (an
+    // old "unreadable" or "not reached" verdict no longer holds) gives pending; any other
+    // status stays.
     item_sql!(
         table: "bookmark",
-        columns: "url, title, summary, reason, reason_is_guess",
-        insert: "?3, ?4, ?5, ?6, ?7",
-        set: "url = ?3, title = ?4, summary = ?5, reason = ?6, reason_is_guess = ?7"
+        columns: "url, title, summary, reason, reason_is_guess, site, summary_status",
+        // The insert and the update share the values: NULLIF(?9, ?9) is NULL and only names ?9.
+        insert: "?3, ?4, ?5, ?6, ?7, COALESCE(?8, NULLIF(?9, ?9)),
+            CASE WHEN ?5 IS NULL THEN 'pending' ELSE 'done' END",
+        set: "url = CASE WHEN url IS ?3 OR url IS ?9 THEN url ELSE ?9 END, title = ?4, summary = ?5, reason = ?6, reason_is_guess = ?7, site = ?8,
+            claim = NULL,
+            summary_status = CASE WHEN ?5 IS NOT NULL THEN 'done'
+                WHEN summary_status IN ('done', 'reading')
+                    OR (url IS NOT ?3 AND url IS NOT ?9) THEN 'pending'
+                ELSE summary_status END"
     );
 
     fn validate(i: &BookmarkInput) -> Result<(), StorageError> {
@@ -514,6 +549,30 @@ impl Item for Bookmark {
         Ok(())
     }
 
+    /// A changed link is stored as the URL parser writes it (?9), which percent-encoding or
+    /// punycode can make longer: only then is that form checked too, as a save does. The same
+    /// link (as stored, or in its parsed form) keeps the stored form and is not checked again.
+    fn validate_update(
+        conn: &rusqlite::Connection,
+        id: &str,
+        i: &BookmarkInput,
+    ) -> Result<(), StorageError> {
+        let Ok(parsed) = url::Url::parse(i.url.trim()) else {
+            return Ok(());
+        };
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT url FROM bookmark WHERE id = ?1 AND deleted_at IS NULL",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match stored {
+            Some(url) if url != i.url && url != parsed.as_str() => encoded_web_address(&parsed),
+            _ => Ok(()),
+        }
+    }
+
     fn values(i: &BookmarkInput) -> Vec<Value> {
         vec![
             text(&i.url),
@@ -521,6 +580,16 @@ impl Item for Bookmark {
             opt_text(&i.summary),
             opt_text(&i.reason),
             Value::Integer(i64::from(i.reason_is_guess)),
+            opt_text(
+                &url::Url::parse(i.url.trim())
+                    .ok()
+                    .and_then(|u| super::bookmarks::site_of(&u)),
+            ),
+            text(
+                &url::Url::parse(i.url.trim())
+                    .map(|u| u.to_string())
+                    .unwrap_or_else(|_| i.url.clone()),
+            ),
         ]
     }
 
@@ -991,6 +1060,7 @@ impl Storage {
         input: &T::Input,
     ) -> Result<T, StorageError> {
         T::validate(input)?;
+        T::validate_update(&self.conn, id, input)?;
         let mut values = vec![text(id), text(now)];
         values.extend(T::values(input));
         self.conn

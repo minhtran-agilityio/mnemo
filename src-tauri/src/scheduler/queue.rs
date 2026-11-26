@@ -211,6 +211,43 @@ impl RunQueue {
     }
 }
 
+/// An `AiRunner` that sends each task through the queue as an owner task and waits for its
+/// result, so a feature written against `AiRunner` (such as save a link) gets the run row, the
+/// two-run limit and the AI control of the queue. A set cancel token cancels the queued run.
+pub struct QueuedRunner(pub RunQueue);
+
+impl AiRunner for QueuedRunner {
+    fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
+        let ticket = self.0.submit(Priority::Owner, task.clone()).map_err(|e| {
+            log::error!("the {} run could not be queued: {e}", task.name);
+            AiError::Unavailable
+        })?;
+        let mut cancelled = false;
+        loop {
+            match ticket
+                .done
+                .recv_timeout(crate::ai::limits::QUEUED_CANCEL_POLL)
+            {
+                Ok(result) => return result,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if cancel.is_cancelled() && !cancelled {
+                        cancelled = true;
+                        self.0.cancel(&ticket.id);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    log::error!(
+                        "the {} run {} stopped without a result",
+                        task.name,
+                        ticket.id
+                    );
+                    return Err(AiError::Unavailable);
+                }
+            }
+        }
+    }
+}
+
 impl Inner {
     /// A poisoned lock is taken over: the state is a plain queue and stays usable.
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -925,5 +962,59 @@ mod tests {
         );
         assert!(q.submit(Priority::Owner, task("x")).is_err());
         assert!(runner.called().is_empty());
+    }
+
+    fn save_task() -> AiTask {
+        AiTask {
+            name: "save".into(),
+            prompt: "page text".into(),
+            schema: "{}".into(),
+            tools: vec![],
+            model: "haiku".into(),
+            effort: None,
+            timeout: Duration::from_secs(5),
+        }
+    }
+
+    #[test]
+    fn a_queued_runner_runs_the_task_through_the_queue_and_writes_its_run_row() {
+        let fake = Arc::new(FakeRunner::new(FakeResult::Valid(r#"{"ok":1}"#.into())));
+        let log = TestLog::new();
+        let (q, _events) = queue(fake.clone(), log.clone());
+        let got = QueuedRunner(q).run_task(&save_task(), &CancelToken::default());
+        assert_eq!(got.unwrap().structured_output, r#"{"ok":1}"#);
+        let rows = log.rows();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].task_type, "save");
+        assert_eq!(rows[0].state, RunState::Done);
+        assert_eq!(fake.requests().len(), 1);
+    }
+
+    #[test]
+    fn a_queued_runner_gives_the_error_of_the_run() {
+        let fake = Arc::new(FakeRunner::new(FakeResult::Timeout));
+        let (q, _events) = queue(fake, TestLog::new());
+        assert_eq!(
+            QueuedRunner(q).run_task(&save_task(), &CancelToken::default()),
+            Err(AiError::Timeout)
+        );
+    }
+
+    #[test]
+    fn a_queued_runner_cancels_its_run_when_the_token_is_set() {
+        let fake = Arc::new(FakeRunner::new(FakeResult::BlockUntilCancelled));
+        let log = TestLog::new();
+        let (q, _events) = queue(fake, log.clone());
+        let token = CancelToken::default();
+        let setter = token.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            setter.cancel();
+        });
+        assert_eq!(
+            QueuedRunner(q).run_task(&save_task(), &token),
+            Err(AiError::Cancelled)
+        );
+        assert_eq!(log.rows()[0].state, RunState::Cancelled);
     }
 }

@@ -12,7 +12,7 @@ use serde::Serialize;
 
 use super::error::StorageError;
 use super::files::{FileRecord, FILES_DIR};
-use super::items::{Bookmark, Event, Memory, Note, Project, Run, Task};
+use super::items::{Event, Memory, Note, Project, Run, Task};
 use super::record::{Cursor, Page, PageRequest, MAX_PAGE};
 use super::Storage;
 
@@ -294,8 +294,9 @@ impl Storage {
             notes: self.export_notes(&dir.join("notes"))?,
             ..ExportCounts::default()
         };
+        // With the site, summary status and tags of #25.
         c.bookmarks = write_array(&json("bookmarks"), |a| {
-            self.list::<Bookmark>(&page_of(a), false)
+            self.list_bookmark_cards(&page_of(a))
         })?;
         c.ideas = write_array(&json("ideas"), |a| self.list_ideas(&page_of(a), false))?;
         c.projects = write_array(&json("projects"), |a| {
@@ -470,8 +471,8 @@ pub(crate) mod tests {
     use super::super::ideas::IdeaInput;
     use super::super::items::ItemKind;
     use super::super::items::{
-        BookmarkInput, EventInput, MemoryInput, NoteInput, ProjectInput, RunInput, RunOutcome,
-        RunState, TaskInput,
+        Bookmark, BookmarkInput, EventInput, MemoryInput, NoteInput, ProjectInput, RunInput,
+        RunOutcome, RunState, TaskInput,
     };
     use super::super::links::ItemRef;
     use super::super::testing::{open_temp, TempDir};
