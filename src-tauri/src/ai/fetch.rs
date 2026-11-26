@@ -451,10 +451,10 @@ fn text_within<R: Read + Send + 'static>(
         FetchError::NotReached("body timeout"),
         move || read_until(body, cap, deadline),
     )?;
-    // The body came in too late to make its text: the site was slow, not the page too big
-    // (decision 34).
+    // The body came in too late to walk its HTML: the site was slow, not the page too big
+    // (decision 34). Plain text has no walk that can run out of time, so it needs no budget.
     let left = deadline.saturating_duration_since(Instant::now());
-    if left < limits.parse_budget {
+    if text_kind(&content_type) == Some(TextKind::Html) && left < limits.parse_budget {
         return Err(FetchError::NotReached("body timeout"));
     }
     let limits = limits.clone();
@@ -1668,16 +1668,23 @@ mod tests {
             parse_budget: Duration::from_secs(2),
             ..DEFAULT_LIMITS
         };
+        let html = format!("<p>{}</p>", long_text());
         let deadline = Instant::now() + Duration::from_millis(500);
-        let body = io::Cursor::new(long_text().into_bytes());
+        let body = io::Cursor::new(html.clone().into_bytes());
         assert_eq!(
-            text_within(body, "text/plain".into(), &limits, deadline),
+            text_within(body, "text/html".into(), &limits, deadline),
             Err(FetchError::NotReached("body timeout"))
         );
         // With the budget left, the same body is read.
         let deadline = Instant::now() + Duration::from_secs(5);
+        let body = io::Cursor::new(html.into_bytes());
+        assert!(text_within(body, "text/html".into(), &limits, deadline).is_ok());
+        // Plain text has no walk to time, so it needs no budget: read with little time left.
+        let deadline = Instant::now() + Duration::from_millis(500);
         let body = io::Cursor::new(long_text().into_bytes());
         assert!(text_within(body, "text/plain".into(), &limits, deadline).is_ok());
+        // The budget is a part of the whole read, never all of it.
+        assert!(DEFAULT_LIMITS.parse_budget < DEFAULT_LIMITS.timeout);
         // A parse that started with its budget and ran out is too slow (the page is too big).
         let html = two_mb("<div/>");
         assert_eq!(

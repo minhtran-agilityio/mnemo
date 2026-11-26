@@ -279,11 +279,12 @@ fn summarize_from(
     source: Source,
 ) -> Result<SaveResult, SaveError> {
     let id = b.base.id.clone();
-    // A failed run from pasted text ends with the status the card had, so "Paste the text"
-    // stays offered; a failed read ends as "no summary yet".
-    let back = match source {
-        Source::Pasted(_) => claim.claimed_from(),
-        Source::Page => SummaryStatus::Pending,
+    // A failed run from pasted text on a card that offers "Paste the text" (unreadable or not
+    // reached) gives the card that status back, so the action stays; any other failed run ends
+    // by the usual rule (see `end_status`).
+    let back = match (&source, claim.claimed_from()) {
+        (Source::Pasted(_), from @ (SummaryStatus::Unreadable | SummaryStatus::NotReached)) => from,
+        _ => SummaryStatus::Pending,
     };
     match summarize_claimed(ctx, b, claim, source, back) {
         Ok(r) => Ok(r),
@@ -331,7 +332,11 @@ fn summarize_claimed(
 ) -> Result<SaveResult, Stop> {
     let id = b.base.id.clone();
     if !(ctx.ai_on)() {
-        return result(ctx.release(&id, claim, SummaryStatus::AiOff)?, None);
+        let status = end_status(back, true);
+        // A card that keeps its status would change in no way, so say why; a plain AI-off
+        // card shows "AI off" itself.
+        let why = (status != SummaryStatus::AiOff).then(|| ai_off(status));
+        return result(ctx.release(&id, claim, status)?, why);
     }
     let text = match source {
         Source::Pasted(text) => cut_chars(&text, MAX_TEXT_CHARS).0,
@@ -370,15 +375,32 @@ fn summarize_claimed(
             log::info!("bookmark {id}: no summary ({e})");
             let off = matches!(e, AiError::UsageLimit | AiError::Unavailable)
                 || (e == AiError::Cancelled && !(ctx.ai_on)());
-            let status = if back != SummaryStatus::Pending {
-                back
-            } else if off {
-                SummaryStatus::AiOff
-            } else {
-                SummaryStatus::Pending
-            };
-            result(ctx.release(&id, claim, status)?, Some(problem(&e)))
+            let status = end_status(back, off);
+            result(ctx.release(&id, claim, status)?, Some(problem(&e, status)))
         }
+    }
+}
+
+/// The one rule for the status a run ends with when it made no summary: `back` (a pasted run on
+/// an unreadable or not-reached card) wins; else AI off when AI is off or at its limit; else no
+/// summary yet.
+fn end_status(back: SummaryStatus, off: bool) -> SummaryStatus {
+    if back != SummaryStatus::Pending {
+        back
+    } else if off {
+        SummaryStatus::AiOff
+    } else {
+        SummaryStatus::Pending
+    }
+}
+
+/// What the owner can do next, for the actions a card with `status` offers (bookmarks-logic.ts
+/// `actionsFor`).
+fn next_step(status: SummaryStatus) -> &'static str {
+    match status {
+        SummaryStatus::Unreadable => "You can paste the text again.",
+        SummaryStatus::NotReached => "You can summarize it later or paste the text again.",
+        _ => "You can summarize it later.",
     }
 }
 
@@ -392,8 +414,17 @@ fn not_reached() -> Problem {
     }
 }
 
-/// The plain reason a run gave no summary, and what the owner can do.
-fn problem(e: &AiError) -> Problem {
+/// Why a pasted run with AI off gave no summary, for a card that keeps `status`.
+fn ai_off(status: SummaryStatus) -> Problem {
+    Problem {
+        code: "ai_off",
+        message: format!("AI is off. No summary was saved. {}", next_step(status)),
+    }
+}
+
+/// The plain reason a run gave no summary, and what the owner can do with a card that ends
+/// with `status`.
+fn problem(e: &AiError, status: SummaryStatus) -> Problem {
     let (code, message) = match e {
         AiError::Timeout => ("timeout", "Claude did not answer in time."),
         AiError::SchemaMismatch => (
@@ -407,7 +438,7 @@ fn problem(e: &AiError) -> Problem {
     };
     Problem {
         code,
-        message: format!("{message} No summary was saved. You can summarize it later."),
+        message: format!("{message} No summary was saved. {}", next_step(status)),
     }
 }
 
@@ -739,6 +770,163 @@ mod tests {
         ));
         // The summary was committed, so the row is done; nothing turns it back.
         assert_eq!(store.only_bookmark().summary_status, Done);
+    }
+
+    /// A saved card with the given status (via a failed read), and the world to run more on.
+    fn card(read: FetchError, result: FakeResult) -> (World, String) {
+        let w = World::new(FakeReader::failing(read), result);
+        let saved = w.run(|c| save_link(c, "https://example.org/")).unwrap();
+        let id = saved.bookmark.base.id.clone();
+        (w, id)
+    }
+
+    #[test]
+    fn the_message_of_a_failed_pasted_run_names_only_the_actions_the_card_still_has() {
+        // Unreadable: the card offers only "Paste the text".
+        let (w, id) = card(FetchError::TooLittleText, FakeResult::Timeout);
+        let got = w.run(|c| summarize(c, &id, Some(PAGE))).unwrap();
+        assert_eq!(got.bookmark.summary_status, Unreadable);
+        let message = got.ai_error.unwrap().message;
+        assert!(!message.contains("summarize it later"), "{message}");
+        assert!(message.contains("paste the text again"), "{message}");
+        // Not reached: both actions.
+        let (w, id) = card(FetchError::NotReached("dns"), FakeResult::Timeout);
+        let got = w.run(|c| summarize(c, &id, Some(PAGE))).unwrap();
+        assert_eq!(got.bookmark.summary_status, NotReached);
+        let message = got.ai_error.unwrap().message;
+        assert!(
+            message.contains("summarize it later or paste the text again"),
+            "{message}"
+        );
+        // No summary yet: "Summarize later" only.
+        let w = World::new(FakeReader::page(), FakeResult::Timeout);
+        let got = w.run(|c| save_link(c, "https://example.org/")).unwrap();
+        assert_eq!(got.bookmark.summary_status, Pending);
+        let message = got.ai_error.unwrap().message;
+        assert!(
+            message.ends_with("You can summarize it later."),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_pasted_run_with_ai_off_keeps_paste_the_text_and_says_why() {
+        for (read, before, next) in [
+            (
+                FetchError::TooLittleText,
+                Unreadable,
+                "paste the text again",
+            ),
+            (
+                FetchError::NotReached("dns"),
+                NotReached,
+                "summarize it later or paste the text again",
+            ),
+        ] {
+            let (mut w, id) = card(read, FakeResult::Valid(GOOD.into()));
+            w.ai_on = false;
+            let got = w.run(|c| summarize(c, &id, Some(PAGE))).unwrap();
+            assert_eq!(got.bookmark.summary_status, before);
+            assert_eq!(w.stored(&id).summary_status, before);
+            assert!(w.runner.requests().is_empty());
+            let problem = got.ai_error.unwrap();
+            assert_eq!(problem.code, "ai_off");
+            assert!(problem.message.contains(next), "{problem:?}");
+        }
+        // A plain save with AI off is still AI off, with no message (unchanged).
+        let mut w = World::new(FakeReader::page(), FakeResult::Valid(GOOD.into()));
+        w.ai_on = false;
+        let got = w.run(|c| save_link(c, "https://example.org/")).unwrap();
+        assert_eq!(got.bookmark.summary_status, AiOff);
+        assert!(got.ai_error.is_none());
+    }
+
+    #[test]
+    fn a_failed_pasted_run_on_an_ai_off_card_with_ai_on_is_no_summary_yet() {
+        let mut w = World::new(FakeReader::page(), FakeResult::Timeout);
+        w.ai_on = false;
+        let saved = w.run(|c| save_link(c, "https://example.org/")).unwrap();
+        assert_eq!(saved.bookmark.summary_status, AiOff);
+        w.ai_on = true;
+        let got = w
+            .run(|c| summarize(c, &saved.bookmark.base.id, Some(PAGE)))
+            .unwrap();
+        // AI is on, so the card does not say "AI off"; Claude timed out: no summary yet.
+        assert_eq!(got.bookmark.summary_status, Pending);
+    }
+
+    #[test]
+    fn summarize_later_on_a_not_reached_card_that_reads_the_page_follows_the_usual_rule() {
+        let w = World::new(FakeReader::page(), FakeResult::Timeout);
+        let saved = w.run(|c| save_link(c, "https://example.org/")).unwrap();
+        let id = saved.bookmark.base.id.clone();
+        w.store
+            .lock()
+            .unwrap()
+            .set_bookmark_status_at("2026-01-01T00:00:00Z", &id, NotReached)
+            .unwrap();
+        // The page is read this time and Claude times out: no summary yet, not "not reached".
+        let got = w.run(|c| summarize(c, &id, None)).unwrap();
+        assert_eq!(w.reader.calls(), 2);
+        assert_eq!(got.bookmark.summary_status, Pending);
+        assert_eq!(w.stored(&id).summary_status, Pending);
+        assert!(got
+            .ai_error
+            .unwrap()
+            .message
+            .ends_with("You can summarize it later."));
+    }
+
+    /// A store whose `n`th call fails before it runs (nothing written).
+    struct FailNth {
+        inner: Mutex<Storage>,
+        n: usize,
+        calls: Mutex<usize>,
+    }
+
+    impl BookmarkStore for FailNth {
+        fn with_storage(
+            &self,
+            call: &mut dyn FnMut(&mut Storage) -> Result<Held, StorageError>,
+        ) -> Result<Held, SaveError> {
+            let mut calls = self.calls.lock().unwrap();
+            *calls += 1;
+            if *calls == self.n {
+                return Err(SaveError::Storage("disk I/O error".into()));
+            }
+            drop(calls);
+            self.inner.with_storage(call)
+        }
+    }
+
+    #[test]
+    fn a_storage_error_before_the_pasted_summary_is_stored_gives_the_card_its_status_back() {
+        for (read, before) in [
+            (FetchError::TooLittleText, Unreadable),
+            (FetchError::NotReached("dns"), NotReached),
+        ] {
+            let (s, _dir) = open_temp();
+            // Calls: 1 save, 2 release (read failed), 3 claim, 4 store the summary (fails).
+            let store = FailNth {
+                inner: Mutex::new(s),
+                n: 4,
+                calls: Mutex::new(0),
+            };
+            let reader = FakeReader::failing(read);
+            let runner = FakeRunner::new(FakeResult::Valid(GOOD.into()));
+            let ctx = context(&store, &reader, &runner);
+            let saved = save_link(&ctx, "https://example.org/").unwrap();
+            assert_eq!(saved.bookmark.summary_status, before);
+            let id = saved.bookmark.base.id.clone();
+            assert!(matches!(
+                summarize(&ctx, &id, Some(PAGE)),
+                Err(SaveError::Storage(_))
+            ));
+            // Released back (call 5): the card keeps "Paste the text", not "no summary yet".
+            let b = store.inner.lock().unwrap().get_saved_bookmark(&id).unwrap();
+            assert_eq!(b.summary_status, before);
+            assert_eq!(b.summary, None);
+        }
     }
 
     #[test]

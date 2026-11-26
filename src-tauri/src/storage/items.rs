@@ -496,7 +496,8 @@ impl Item for Bookmark {
     const KIND: ItemKind = ItemKind::Bookmark;
     // ?9 is the new link as the URL parser writes it (a save stores that form). The same link
     // sent in another form (case, a missing "/") is not a changed link: the stored form stays.
-    // A different link is stored as sent. The site (?8) follows the link. Any owner edit drops a summary run's claim, so the run
+    // A different link is stored in the parsed form too, so a later edit in either form matches
+    // it. The site (?8) follows the link. Any owner edit drops a summary run's claim, so the run
     // stops and never writes over it. A bookmark with a summary is done (no AI run takes an
     // owner's summary over); a removed summary, an edit during a read, or a changed link (an
     // old "unreadable" or "not reached" verdict no longer holds) gives pending; any other
@@ -507,7 +508,7 @@ impl Item for Bookmark {
         // The insert and the update share the values: NULLIF(?9, ?9) is NULL and only names ?9.
         insert: "?3, ?4, ?5, ?6, ?7, COALESCE(?8, NULLIF(?9, ?9)),
             CASE WHEN ?5 IS NULL THEN 'pending' ELSE 'done' END",
-        set: "url = CASE WHEN url IS ?3 OR url IS ?9 THEN url ELSE ?3 END, title = ?4, summary = ?5, reason = ?6, reason_is_guess = ?7, site = ?8,
+        set: "url = CASE WHEN url IS ?3 OR url IS ?9 THEN url ELSE ?9 END, title = ?4, summary = ?5, reason = ?6, reason_is_guess = ?7, site = ?8,
             claim = NULL,
             summary_status = CASE WHEN ?5 IS NOT NULL THEN 'done'
                 WHEN summary_status IN ('done', 'reading')

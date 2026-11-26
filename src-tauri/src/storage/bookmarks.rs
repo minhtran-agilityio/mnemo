@@ -1332,6 +1332,26 @@ mod tests {
                 "{same}"
             );
         }
+        // A changed link is stored as the URL parser writes it, so a later edit that sends it in
+        // either form is the same link.
+        let id = &b.base.id;
+        let _: Bookmark = s
+            .update_at(T3, id, &bookmark("https://Other.example"))
+            .unwrap();
+        assert_eq!(
+            s.get_saved_bookmark(id).unwrap().url,
+            "https://other.example/"
+        );
+        let (_, claim) = s.claim_bookmark_for_summary_at(T3, id).unwrap();
+        written(s.release_bookmark_at(T3, id, &claim, SummaryStatus::NotReached));
+        for same in ["https://other.example/", "https://Other.example"] {
+            let _: Bookmark = s.update_at(T3, id, &bookmark(same)).unwrap();
+            assert_eq!(
+                s.get_saved_bookmark(id).unwrap().summary_status,
+                SummaryStatus::NotReached,
+                "{same}"
+            );
+        }
     }
 
     #[test]
