@@ -477,3 +477,29 @@
 .lcard .lcard-folder > .trust {
   flex: none;
 }
+
+/* The app's reason for the folder (issue 193): a second line under the folder name, started under
+   "Filed in" (after the icon and its gap), in secondary text, then the Guess label, as the bookmark
+   reason is. With a reason, this one label covers the folder and the reason. A long reason wraps,
+   at any character if a word is longer than the line, and the label wraps under it when the line
+   has no room for it. */
+.lcard .lcard-folder-reason {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  padding-inline-start: calc(var(--icon-sm) + var(--space-1));
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.lcard .lcard-folder-reason > .trust {
+  flex: none;
+}
+
+.lcard .lcard-folder-reason-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
