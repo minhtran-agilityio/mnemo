@@ -2,7 +2,13 @@
 import { expect, test, vi } from "vitest";
 import type { Page, SavedBookmark, SaveResult } from "../../shared/api";
 import { type BookmarksDeps, renderBookmarks } from "./bookmarks";
-import { actionsFor, savedDate, toLinkItem, upsert } from "./bookmarks-logic";
+import {
+  actionsFor,
+  moveToTop,
+  savedDate,
+  toLinkItem,
+  upsert,
+} from "./bookmarks-logic";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
@@ -406,4 +412,59 @@ test("a load failure says so, and leaving stops the event listener", async () =>
   );
   leave();
   expect(stop).toHaveBeenCalled();
+});
+
+// ---- a link saved again (#28) ----
+
+test("moveToTop puts a link saved again first and leaves no second row for it", () => {
+  const a = bm({ id: "a" });
+  const b = bm({ id: "b" });
+  const c = bm({ id: "c" });
+  expect(moveToTop([a, b, c], c).map((x) => x.id)).toEqual(["c", "a", "b"]);
+  expect(moveToTop([a, b], c).map((x) => x.id)).toEqual(["c", "a", "b"]);
+  expect(
+    moveToTop([a, b], bm({ id: "b", deletedAt: "2026-11-25T10:01:00Z" })).map(
+      (x) => x.id,
+    ),
+  ).toEqual(["a"]);
+});
+
+test("toLinkItem marks the card Already saved only when asked", () => {
+  expect(toLinkItem(bm()).alreadySaved).toBeUndefined();
+  expect(toLinkItem(bm(), true).alreadySaved).toBe(true);
+});
+
+test("saving a link that is already saved shows its old card on top with the note and adds no card", async () => {
+  const one = bm({
+    id: "o1",
+    url: "https://a.example/",
+    summary: "Summary one.",
+  });
+  const two = bm({
+    id: "o2",
+    url: "https://b.example/",
+    summary: "Summary two.",
+  });
+  const { d } = deps({
+    listBookmarkCards: vi.fn(async () => page([two, one])),
+    saveLink: vi.fn(async () => res({ ...one, alreadySaved: true })),
+  });
+  const { box } = mount(d);
+  await flush();
+  expect(box.textContent).not.toContain("Already saved");
+  (box.querySelector("input") as HTMLInputElement).value = "https://a.example/";
+  box.querySelector("form")?.dispatchEvent(new Event("submit"));
+  await flush();
+  const cards = [...box.querySelectorAll("article")];
+  expect(cards).toHaveLength(2);
+  expect(cards[0]?.textContent).toContain("Summary one.");
+  expect(cards[0]?.textContent).toContain("Already saved");
+  expect(cards[1]?.textContent).not.toContain("Already saved");
+  expect(d.summarizeBookmark).not.toHaveBeenCalled();
+  // The next save clears the note.
+  d.saveLink = vi.fn(async (url: string) => res({ id: "n2", url }));
+  (box.querySelector("input") as HTMLInputElement).value = "https://c.example/";
+  box.querySelector("form")?.dispatchEvent(new Event("submit"));
+  await flush();
+  expect(box.textContent).not.toContain("Already saved");
 });

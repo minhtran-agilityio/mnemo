@@ -47,8 +47,9 @@ export function savedDate(iso: string): string {
 /**
  * A saved link as the link card shows it. The title falls back to the site, then the link. A
  * summary is passed only when the status is done, so a link that was not read never shows one.
+ * `alreadySaved` adds the "Already saved" note (#28): the owner saved this link again.
  */
-export function toLinkItem(b: SavedBookmark): LinkItem {
+export function toLinkItem(b: SavedBookmark, alreadySaved = false): LinkItem {
   const done = b.summaryStatus === "done";
   return {
     title: b.title ?? b.site ?? b.url,
@@ -61,6 +62,7 @@ export function toLinkItem(b: SavedBookmark): LinkItem {
     tagsKind: "ai",
     reason: done ? (b.reason ?? undefined) : undefined,
     reasonKind: b.reasonIsGuess ? "guess" : "owner",
+    alreadySaved: alreadySaved ? true : undefined,
   };
 }
 
@@ -98,4 +100,17 @@ export function upsert<T extends SavedBookmark>(
   const next = items.slice();
   next[at] = b;
   return next;
+}
+
+/**
+ * The list with the bookmark `b` first, taken out of its old place when it is in the list (a link
+ * the owner saved again, #28): the list gets no second row for it. A deleted bookmark leaves the
+ * list, as in `upsert`.
+ */
+export function moveToTop<T extends SavedBookmark>(
+  items: readonly T[],
+  b: T,
+): T[] {
+  const rest = items.filter((x) => x.id !== b.id);
+  return b.deletedAt ? rest : [b, ...rest];
 }

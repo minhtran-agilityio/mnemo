@@ -33,6 +33,7 @@ import {
   ACTION_LABELS,
   actionsFor,
   type CardAction,
+  moveToTop,
   toLinkItem,
   upsert,
 } from "./bookmarks-logic";
@@ -60,6 +61,11 @@ export function renderBookmarks(
   let unlisten: (() => void) | null = null;
   // The one place this screen keeps its state: the saved links, newest first.
   let items: SavedBookmark[] = [];
+  /**
+   * The bookmark the owner just saved again (#28): its card shows "Already saved" on top. It
+   * clears when the owner saves the next link.
+   */
+  let alreadySavedId: string | null = null;
   /** Bookmarks with a summary call going, so their action is not sent twice. */
   const busy = new Set<string>();
 
@@ -118,11 +124,19 @@ export function renderBookmarks(
     setFieldError(field, null);
     showProblem(null);
     input.value = "";
+    alreadySavedId = null;
     deps
       .saveLink(url)
       .then((result) => {
         if (left) return;
-        put(result);
+        if (result.alreadySaved) {
+          // The old card goes to the top with its note; no row is added and no summary starts.
+          alreadySavedId = result.id;
+          items = moveToTop(items, result);
+          draw();
+        } else {
+          put(result);
+        }
         if (result.aiError) toasts.show(result.aiError.message);
       })
       .catch((error: unknown) => {
@@ -236,7 +250,7 @@ export function renderBookmarks(
     grid.className = "bookmarks-cards";
     grid.append(
       ...items.map((b) =>
-        createLinkCard(doc, toLinkItem(b), {
+        createLinkCard(doc, toLinkItem(b, b.id === alreadySavedId), {
           actions: actionsOf(b),
         }),
       ),
