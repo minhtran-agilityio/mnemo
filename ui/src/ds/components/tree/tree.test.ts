@@ -792,3 +792,195 @@ test("a 60 character Vietnamese name keeps its full text in the node and the fie
   expect(field(t).value).toBe(long);
   t.remove();
 });
+
+// Flat folder mode (issue 192): folder words, Rename and Delete only.
+const UNSORTED_WHY = "Unsorted is fixed. It holds what has no folder.";
+const folders: TreeNode[] = [
+  { label: "AI and agents", kind: "folder", count: 12, id: "f1" },
+  { label: "Dev tools", kind: "folder", count: 8, id: "f2" },
+  { label: "Design", kind: "folder", count: 3, id: "f3" },
+  { label: "Reading", kind: "folder", count: 5, id: "f4" },
+  {
+    label: "Unsorted",
+    kind: "folder",
+    count: 2,
+    id: "unsorted",
+    refused: { rename: UNSORTED_WHY, delete: UNSORTED_WHY },
+  },
+];
+const flatFolders = (
+  list: TreeNode[] = folders,
+  extra: Partial<TreeActionsOptions> = {},
+) => withActions(list, { noun: "folder", flat: true, ...extra });
+const menuTexts = (t: HTMLElement, owner: string) =>
+  [
+    ...(node(t, owner)
+      .closest("li")
+      ?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []),
+  ].map((i) => i.firstChild?.textContent ?? "");
+
+test("flat folders: each row shows its count, in the order given, with Unsorted last", () => {
+  const { t } = flatFolders();
+  const rows = [...t.querySelectorAll<HTMLButtonElement>(".tnode")];
+  expect(rows.map((r) => r.querySelector(".tname")?.textContent)).toEqual([
+    "AI and agents",
+    "Dev tools",
+    "Design",
+    "Reading",
+    "Unsorted",
+  ]);
+  expect(rows.map((r) => r.querySelector(".cnt")?.textContent)).toEqual([
+    "12",
+    "8",
+    "3",
+    "5",
+    "2",
+  ]);
+  expect(t.classList.contains("is-flat")).toBe(true);
+  t.remove();
+});
+
+test("flat folders: the menu has Rename and Delete only, named for the row", () => {
+  const { t } = flatFolders();
+  const items = menuTexts(t, "Design");
+  expect(items).toHaveLength(2);
+  expect(items[0]).toContain("Rename");
+  expect(items[1]).toContain("Delete");
+  expect(menuItem(t, "Design", "New")).toBeUndefined();
+  expect(menuItem(t, "Design", "Move")).toBeUndefined();
+  expect(
+    node(t, "Design")
+      .closest(".trow")
+      ?.querySelector(".tmore")
+      ?.getAttribute("aria-label"),
+  ).toBe("Actions for Design");
+  t.remove();
+});
+
+test("flat folders: the button, the field and the empty state say folder", () => {
+  const { t, events } = flatFolders();
+  const add = t.querySelector<HTMLButtonElement>(".tree-new");
+  expect(add?.textContent).toBe("New folder");
+  add?.click();
+  expect(field(t).getAttribute("aria-label")).toBe("New folder name");
+  key(typeIn(t, "Recipes"), "Enter");
+  expect(events).toEqual([
+    { action: "create", id: null, label: "", name: "Recipes" },
+  ]);
+  t.remove();
+  const empty = flatFolders([]);
+  const box = empty.t.querySelector<HTMLElement>(".state-box");
+  expect(box?.textContent).toContain("No folders yet");
+  expect(box?.textContent).not.toContain("nest");
+  expect(box?.querySelector("button")?.textContent).toBe("New folder");
+  empty.t.remove();
+});
+
+test("flat folders: Unsorted refuses Rename and Delete with its reason, by menu and by key", () => {
+  const { t, events } = flatFolders();
+  for (const text of ["Rename", "Delete"]) {
+    const item = menuItem(t, "Unsorted", text);
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.querySelector(".tmenu-why")?.textContent).toBe(UNSORTED_WHY);
+    expect(item.getAttribute("aria-describedby")).toBe(
+      item.querySelector(".tmenu-why")?.id,
+    );
+    item.click();
+  }
+  const unsorted = node(t, "Unsorted");
+  key(unsorted, "F2");
+  key(unsorted, "Delete");
+  expect(t.querySelector(".tedit")).toBeNull();
+  expect(events).toEqual([]);
+  expect(
+    unsorted.closest(".trow")?.querySelector<HTMLElement>(".tmenu")?.hidden,
+  ).toBe(false);
+  t.remove();
+});
+
+test("flat folders: F2 and Delete work on a folder; arrows move between rows", () => {
+  const { t, events } = flatFolders();
+  const design = node(t, "Design");
+  design.focus();
+  key(design, "ArrowDown");
+  expect(document.activeElement).toBe(node(t, "Reading"));
+  key(node(t, "Reading"), "ArrowUp");
+  expect(document.activeElement).toBe(design);
+  key(design, "Delete");
+  key(design, "F2");
+  key(typeIn(t, "Design systems"), "Enter");
+  expect(events).toEqual([
+    { action: "delete", id: "f3", label: "Design" },
+    { action: "rename", id: "f3", label: "Design", name: "Design systems" },
+  ]);
+  t.remove();
+});
+
+test("flat folders: an empty or duplicate name is refused at the field in folder words", () => {
+  const { t, events } = flatFolders();
+  t.querySelector<HTMLButtonElement>(".tree-new")?.click();
+  key(typeIn(t, "  "), "Enter");
+  expect(t.querySelector(".tedit .err-text")?.textContent).toContain(
+    "Type a name",
+  );
+  key(typeIn(t, "dev TOOLS"), "Enter");
+  expect(t.querySelector(".tedit .err-text")?.textContent).toBe(
+    'A folder named "dev TOOLS" already exists.',
+  );
+  expect(field(t).getAttribute("aria-invalid")).toBe("true");
+  expect(events).toEqual([]);
+  t.remove();
+});
+
+test("flat folders: children are not drawn and no row has a chevron", () => {
+  const { t } = flatFolders([
+    {
+      label: "Reading",
+      kind: "folder",
+      expanded: true,
+      children: [{ label: "Hidden child", kind: "folder" }],
+    },
+  ]);
+  expect(node(t, "Hidden child")).toBeUndefined();
+  expect(node(t, "Reading").hasAttribute("aria-expanded")).toBe(false);
+  expect(t.querySelector(".chev")).toBeNull();
+  t.remove();
+});
+
+test("flat folders: a long name, a Vietnamese name and 30 folders keep their full text", () => {
+  const long = `${"Thư mục đọc sau về kiến trúc phần mềm ".repeat(3)}end`;
+  const many: TreeNode[] = Array.from({ length: 30 }, (_, i) => ({
+    label: `Folder ${i + 1}`,
+    kind: "folder",
+    count: i,
+  }));
+  const { t } = flatFolders([
+    { label: long, kind: "folder", count: 1 },
+    { label: "Sức khoẻ", kind: "folder", count: 4 },
+    ...many,
+  ]);
+  expect(node(t, long).querySelector<HTMLElement>(".tname")?.title).toBe(long);
+  expect(node(t, "Sức khoẻ")).toBeDefined();
+  expect(t.querySelectorAll(".tnode")).toHaveLength(32);
+  key(node(t, long), "F2");
+  expect(field(t).value).toBe(long);
+  t.remove();
+});
+
+test("the default stays nested labels: label words and four menu actions", () => {
+  const { t } = withActions();
+  expect(t.classList.contains("is-flat")).toBe(false);
+  expect(t.querySelector(".tree-new")?.textContent).toBe("New label");
+  expect(menuTexts(t, "Mnemo")).toHaveLength(4);
+  expect(menuItem(t, "Mnemo", "New label inside")).toBeDefined();
+  t.remove();
+});
+
+test("flat folders: the flat rule hides the chevron spacer", () => {
+  const rule = cssRule(
+    import.meta.dirname,
+    "tree.css",
+    ".tree-box.is-flat .spacer",
+  );
+  expect(rule.display).toBe("none");
+});
