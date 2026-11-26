@@ -461,10 +461,51 @@ test("saving a link that is already saved shows its old card on top with the not
   expect(cards[0]?.textContent).toContain("Already saved");
   expect(cards[1]?.textContent).not.toContain("Already saved");
   expect(d.summarizeBookmark).not.toHaveBeenCalled();
+  // The result is announced through the screen's live status region.
+  const status = box.querySelector('[role="status"][aria-live="polite"]');
+  expect(status?.textContent).toContain("This link was already saved.");
   // The next save clears the note.
   d.saveLink = vi.fn(async (url: string) => res({ id: "n2", url }));
   (box.querySelector("input") as HTMLInputElement).value = "https://c.example/";
   box.querySelector("form")?.dispatchEvent(new Event("submit"));
   await flush();
   expect(box.textContent).not.toContain("Already saved");
+});
+
+test("a link saved again before the list has loaded stays on top with its note after the list loads", async () => {
+  const older = bm({
+    id: "o1",
+    url: "https://a.example/",
+    createdAt: "2026-11-24T10:00:00Z",
+    summary: "Summary one.",
+  });
+  const newer = bm({
+    id: "o2",
+    url: "https://b.example/",
+    createdAt: "2026-11-25T10:00:00Z",
+    summary: "Summary two.",
+  });
+  let loaded: (p: Page<SavedBookmark>) => void = () => {};
+  const { d } = deps({
+    listBookmarkCards: vi.fn(
+      () =>
+        new Promise<Page<SavedBookmark>>((r) => {
+          loaded = r;
+        }),
+    ),
+    saveLink: vi.fn(async () => res({ ...older, alreadySaved: true })),
+  });
+  const { box } = mount(d);
+  (box.querySelector("input") as HTMLInputElement).value = "https://a.example/";
+  box.querySelector("form")?.dispatchEvent(new Event("submit"));
+  await flush();
+  // The duplicate answered first; the list resolves after it.
+  loaded(page([newer, older]));
+  await flush();
+  const cards = [...box.querySelectorAll("article")];
+  expect(cards).toHaveLength(2);
+  expect(cards[0]?.textContent).toContain("Summary one.");
+  expect(cards[0]?.textContent).toContain("Already saved");
+  expect(cards[1]?.textContent).toContain("Summary two.");
+  expect(cards[1]?.textContent).not.toContain("Already saved");
 });

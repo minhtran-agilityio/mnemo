@@ -51,6 +51,10 @@ export interface BookmarksDeps {
 /** How many saved links the screen reads (one page). #27 adds paging. */
 export const BOOKMARKS_PAGE = 100;
 
+/** What the status region says when the owner saves a link that is already saved (#28). */
+const ALREADY_SAVED_ANNOUNCEMENT =
+  "This link was already saved. Its card is now on top.";
+
 /** Fills `container` with the Bookmarks screen. Returns a function that cleans up on leave. */
 export function renderBookmarks(
   container: HTMLElement,
@@ -134,6 +138,8 @@ export function renderBookmarks(
           alreadySavedId = result.id;
           items = moveToTop(items, result);
           draw();
+          // The card's note is not a live region: announce the result through the toast region.
+          toasts.show(ALREADY_SAVED_ANNOUNCEMENT);
         } else {
           put(result);
         }
@@ -278,6 +284,9 @@ export function renderBookmarks(
       const known = new Set(items.map((b) => b.id));
       items = [...items, ...page.items.filter((b) => !known.has(b.id))];
       items.sort((a, z) => z.createdAt.localeCompare(a.createdAt));
+      // A link the owner saved again before the list loaded stays on top, not at its date.
+      const again = items.find((b) => b.id === alreadySavedId);
+      if (again) items = moveToTop(items, again);
       draw();
     })
     .catch((error: unknown) => {
