@@ -1434,3 +1434,162 @@ test("overflow: a long folder name is cut, with its full text in the tooltip and
     cssRule(import.meta.dirname, "link-card.css", ".lcard .lcard-notice"),
   ).toMatchObject({ "max-width": "100%", "white-space": "normal" });
 });
+
+// Issue 193: the app's reason for the folder, labelled Guess.
+const reasoned: LinkItem = {
+  ...wiki,
+  folder: "Dev tools",
+  folderIsGuess: true,
+  folderReason: "It is a reference page for a database engine.",
+};
+
+test("empty: with no folder reason the folder line is as before", () => {
+  for (const folderReason of [undefined, "", "   "]) {
+    const card = createLinkCard(document, { ...reasoned, folderReason });
+    const line = card.querySelector(".lcard-folder");
+    expect(line?.querySelector(".lcard-folder-reason")).toBeNull();
+    expect(line?.textContent).toBe("Filed in Dev toolsGuess");
+    // The one Guess label sits after the folder name.
+    expect(line?.lastElementChild?.classList.contains("trust-guess")).toBe(
+      true,
+    );
+  }
+});
+
+test("success: a guessed folder shows its reason under the name, with one Guess label after it", () => {
+  const card = createLinkCard(document, reasoned);
+  const line = card.querySelector(".lcard-folder");
+  const why = line?.querySelector(".lcard-folder-reason");
+  expect(why?.querySelector(".lcard-folder-reason-text")?.textContent).toBe(
+    "It is a reference page for a database engine.",
+  );
+  expect(why?.querySelector(".trust-guess")?.textContent).toBe("Guess");
+  // One label for the folder and its reason, after the reason, as the bookmark reason has it.
+  expect(line?.querySelectorAll(".trust")).toHaveLength(1);
+  expect(why?.lastElementChild?.classList.contains("trust-guess")).toBe(true);
+  // The reason comes after the folder name; a screen reader reads the folder, the reason, then Guess.
+  expect(line?.textContent).toBe(
+    "Filed in Dev toolsIt is a reference page for a database engine.Guess",
+  );
+  // The reason is text, not markup, and plain text with no role of its own.
+  const tagged = createLinkCard(document, {
+    ...reasoned,
+    folderReason: "<b>Docs</b>",
+  });
+  expect(tagged.querySelector(".lcard-folder-reason-text")?.textContent).toBe(
+    "<b>Docs</b>",
+  );
+  expect(tagged.querySelector(".lcard-folder-reason b")).toBeNull();
+  expect(why?.getAttribute("role")).toBeNull();
+});
+
+test("a reason without folderIsGuess (the owner moved the link) is not shown", () => {
+  for (const folderIsGuess of [false, undefined]) {
+    const card = createLinkCard(document, { ...reasoned, folderIsGuess });
+    expect(card.querySelector(".lcard-folder-reason")).toBeNull();
+    expect(card.querySelector(".lcard-folder .trust")).toBeNull();
+    expect(card.textContent).not.toContain("reference page");
+  }
+  // No folder: no line, so no reason either.
+  const none = createLinkCard(document, { ...reasoned, folder: undefined });
+  expect(none.querySelector(".lcard-folder")).toBeNull();
+  expect(none.textContent).not.toContain("reference page");
+});
+
+test("partial: a card that is not done hides the folder reason and keeps the folder's Guess label (rule 1)", () => {
+  for (const status of [
+    "pending",
+    "reading",
+    "unreadable",
+    "ai-off",
+  ] as const) {
+    const card = createLinkCard(document, {
+      ...reasoned,
+      summary: undefined,
+      status,
+    });
+    expect(card.querySelector(".lcard-folder-reason")).toBeNull();
+    expect(card.textContent).not.toContain("reference page");
+    expect(card.querySelector(".lcard-folder")?.textContent).toBe(
+      "Filed in Dev toolsGuess",
+    );
+    expect(
+      card
+        .querySelector(".lcard-folder")
+        ?.lastElementChild?.classList.contains("trust-guess"),
+    ).toBe(true);
+  }
+});
+
+test("AI off: the card shows folderIsGuess as the screen passes it (the core decides it)", () => {
+  // A link filed with AI off: the core files it in Unsorted with folderIsGuess false.
+  const unsorted = createLinkCard(document, {
+    ...reasoned,
+    summary: undefined,
+    status: "ai-off",
+    folder: "Unsorted",
+    folderIsGuess: false,
+  });
+  expect(unsorted.querySelector(".lcard-folder")?.textContent).toBe(
+    "Filed in Unsorted",
+  );
+  expect(unsorted.querySelector(".lcard-folder .trust")).toBeNull();
+  expect(unsorted.querySelector(".lcard-folder-reason")).toBeNull();
+  // The card never overrides the flag: a guessed folder keeps its label with AI off.
+  const guessed = createLinkCard(document, {
+    ...reasoned,
+    summary: undefined,
+    status: "ai-off",
+  });
+  expect(guessed.querySelector(".lcard-folder .trust-guess")).not.toBeNull();
+  expect(guessed.querySelector(".lcard-folder-reason")).toBeNull();
+});
+
+test("the rows show no folder reason", () => {
+  expect(createLinkRow(document, reasoned).textContent).not.toContain(
+    "reference page",
+  );
+  expect(createCompactRow(document, reasoned).textContent).not.toContain(
+    "reference page",
+  );
+});
+
+test("overflow: a long or Vietnamese reason wraps under the name, in secondary text from tokens", () => {
+  const long =
+    "Đây là trang tham khảo về một hệ quản trị cơ sở dữ liệu nhúng, averyveryveryveryverylongwordwithnobreak.";
+  const card = createLinkCard(document, { ...reasoned, folderReason: long });
+  expect(card.querySelector(".lcard-folder-reason-text")?.textContent).toBe(
+    long,
+  );
+  // It takes its own line (flex-basis 100%) and wraps, at any character if it must.
+  expect(
+    cssRule(
+      import.meta.dirname,
+      "link-card.css",
+      ".lcard .lcard-folder-reason",
+    ),
+  ).toMatchObject({
+    display: "flex",
+    flex: "1 1 100%",
+    "flex-wrap": "wrap",
+    "min-width": "0",
+    "padding-inline-start": "calc(var(--icon-sm) + var(--space-1))",
+    color: "var(--muted)",
+    "font-size": "var(--text-sm)",
+  });
+  expect(
+    cssRule(
+      import.meta.dirname,
+      "link-card.css",
+      ".lcard .lcard-folder-reason-text",
+    ),
+  ).toMatchObject({ "min-width": "0", "overflow-wrap": "anywhere" });
+  // The label after the reason never shrinks.
+  expect(
+    cssRule(
+      import.meta.dirname,
+      "link-card.css",
+      ".lcard .lcard-folder-reason > .trust",
+    ),
+  ).toMatchObject({ flex: "none" });
+});

@@ -356,6 +356,68 @@ function noticeFolderStates(doc: Document): HTMLElement[] {
       { ...filed, folder: "Cơ sở dữ liệu nhúng và công cụ phát triển" },
       "folder: Vietnamese name",
     ),
+    ...folderReasonStates(wiki, card),
+  ];
+}
+
+/**
+ * The app's reason for the folder (issue 193), with the request's sample: "Dev tools" (Guess),
+ * "It is a reference page for a database engine."
+ */
+function folderReasonStates(
+  wiki: LinkItem,
+  card: (item: LinkItem, caption: string, narrow?: boolean) => HTMLElement,
+): HTMLElement[] {
+  const why: LinkItem = {
+    ...wiki,
+    folder: "Dev tools",
+    folderIsGuess: true,
+    folderReason: "It is a reference page for a database engine.",
+  };
+  const unread = { summary: undefined };
+  return [
+    card(why, "folder reason: Guess, on a done card"),
+    card(
+      { ...why, ...unread, status: "pending" },
+      "folder reason: pending, hidden (rule 1)",
+    ),
+    card(
+      { ...why, ...unread, status: "unreadable" },
+      "folder reason: could not read, hidden (rule 1)",
+    ),
+    card(
+      { ...why, folderIsGuess: false },
+      "folder reason: the owner moved it, not shown",
+    ),
+    card(
+      {
+        ...why,
+        ...unread,
+        status: "ai-off",
+        folder: "Unsorted",
+        folderIsGuess: false,
+        folderReason: undefined,
+      },
+      "folder reason: AI off, Unsorted, none",
+    ),
+    card(
+      {
+        ...why,
+        folderReason:
+          "It is a reference page for a database engine that runs inside the app, with notes on storage formats, write-ahead logs and averyveryveryverylongwordthatwraps.",
+      },
+      "folder reason: long, on a narrow card",
+      true,
+    ),
+    card(
+      {
+        ...why,
+        folder: "Công cụ phát triển",
+        folderReason:
+          "Đây là trang tham khảo về một hệ quản trị cơ sở dữ liệu nhúng.",
+      },
+      "folder reason: Vietnamese",
+    ),
   ];
 }
 
