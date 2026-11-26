@@ -673,7 +673,10 @@ test('AC3: control, the List row audit reports a site 1px under --size-link-site
 // - when the parts do not fit one line, a wrapped part starts at the row's content edge, under the title, and no
 //   row wraps at a list of 280px or wider.
 // The counts make sure each check ran.
-const COMPACT_WIDTHS = [150, 155, 158, 160, 161, 166, 170, 180, 190, 200, 210, 220, 240, 260, 280, 320, 360, 400, 480, 560, 640, 720, 800];
+// 145 is under the narrowest catalog column: since the vietnamese subsets are bundled (issue 189) the Vietnamese
+// titles are narrower than in the old fallback font, so a reading row's site first wraps near 148px, not at 150px, and
+// the control below needs a width where it does.
+const COMPACT_WIDTHS = [145, 150, 155, 158, 160, 161, 166, 170, 180, 190, 200, 210, 220, 240, 260, 280, 320, 360, 400, 480, 560, 640, 720, 800];
 const COMPACT_SEEN = ['rows', 'cutTitles', 'cutHosts', 'hosts', 'shortHosts', 'dates', 'spinners', 'wrapped', 'oneLine', 'parts', 'titlesBesideCutHost', 'shortTitles', 'longTitlesBesideCutHost', 'datesAtEnd', 'noSite', 'wrappedSites'];
 const COMPACT_AUDIT = `(() => {
   const bad = [];
