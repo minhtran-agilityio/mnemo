@@ -55,36 +55,36 @@
   padding-bottom: var(--space-1);
 }
 
-.field-control,
-.field-action {
+.field--action > .field-control,
+.field--action > .field-action {
   display: flex;
   align-self: center;
   min-width: 0;
 }
 
-.field-control {
+.field--action > .field-control {
   flex-direction: column;
   align-items: stretch;
 }
 
-.field-action {
+.field--action > .field-action {
   align-items: center;
 }
 
 /* Under the control: the hint or the error, in the control's column only, so a long hint wraps there
    and never moves the action. The spacing sits on the lines, so an empty line takes no room. */
-.field-under {
+.field--action > .field-under {
   display: flex;
   flex-direction: column;
   grid-column: 1;
   min-width: 0;
 }
 
-.field-under > .hint,
-.field-under > .field-note:not(:empty) {
+.field--action > .field-under > .hint,
+.field--action > .field-under > .field-note:not(:empty) {
   margin-top: var(--space-1);
 }
 
-.field-under > .field-note:empty {
+.field--action > .field-under > .field-note:empty {
   margin-top: 0;
 }

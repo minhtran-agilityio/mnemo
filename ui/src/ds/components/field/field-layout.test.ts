@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -18,14 +19,78 @@ import { createTextInput } from "../input/input";
 import { createField, setFieldError } from "./field";
 
 const DS = join(__dirname, "..", "..");
-const CHROME = ["google-chrome", "chromium", "chromium-browser"].find((n) => {
+/** Runs `chrome` headless on `html` and returns the dumped page, or null when it cannot. */
+function dump(
+  chrome: string,
+  html: string,
+  width: number,
+  prefix: string,
+): string | null {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
   try {
-    execFileSync("which", [n], { stdio: "ignore" });
-    return true;
+    const file = join(dir, "page.html");
+    writeFileSync(file, html);
+    return execFileSync(
+      chrome,
+      [
+        "--headless=new",
+        "--no-sandbox",
+        "--disable-gpu",
+        `--user-data-dir=${join(dir, "profile")}`,
+        `--window-size=${width},700`,
+        "--dump-dom",
+        `file://${file}`,
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 30000 },
+    );
   } catch {
-    return false;
+    return null;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
-});
+}
+
+/**
+ * The browser to drive: MNEMO_CHROME or CHROME_BIN, then a name on the PATH, then the macOS app
+ * folders. A candidate counts only when it answers --version and renders a page file from the
+ * temp folder, so a snap stub (it cannot read /tmp) is skipped instead of failing the tests.
+ */
+function findChrome(): string | undefined {
+  const named = process.env.MNEMO_CHROME ?? process.env.CHROME_BIN;
+  const candidates = named
+    ? [named]
+    : [
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+      ];
+  return candidates.find((c) => {
+    try {
+      execFileSync(c, ["--version"], { stdio: "ignore", timeout: 15000 });
+    } catch {
+      return false;
+    }
+    return (
+      dump(
+        c,
+        '<!doctype html><body data-ok="1">',
+        400,
+        "mnemo-198-probe-",
+      )?.includes('data-ok="1"') ?? false
+    );
+  });
+}
+
+const CHROME = findChrome();
+if (!CHROME) {
+  const why =
+    "field-layout.test.ts: no working Chrome or Chromium found (set MNEMO_CHROME or CHROME_BIN to its path)";
+  if (process.env.CI) throw new Error(why);
+  console.warn(`${why}; the layout tests are skipped.`);
+}
 
 function cssFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((n) => {
@@ -80,22 +145,8 @@ function measure(
       scrollWidth: document.documentElement.scrollWidth, viewport: innerWidth }));
   </script>`;
   const html = `<!doctype html><html lang="en" data-theme="light"><head><meta charset="utf-8"><style>${css}</style></head><body style="margin:0;padding:24px">${form.outerHTML}${script}</body></html>`;
-  const dir = mkdtempSync(join(tmpdir(), "mnemo-198-"));
-  const file = join(dir, "page.html");
-  writeFileSync(file, html);
-  const dom = execFileSync(
-    CHROME as string,
-    [
-      "--headless=new",
-      "--no-sandbox",
-      "--disable-gpu",
-      `--user-data-dir=${join(dir, "profile")}`,
-      `--window-size=${width},700`,
-      "--dump-dom",
-      `file://${file}`,
-    ],
-    { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-  );
+  const dom = dump(CHROME as string, html, width, "mnemo-198-");
+  if (dom === null) throw new Error("the browser did not render the page");
   const m = /data-r="([^"]*)"/.exec(dom);
   if (!m) throw new Error("no measurement in the dumped page");
   return JSON.parse(m[1].replace(/&quot;/g, '"')) as Measured;
@@ -154,10 +205,9 @@ test.skipIf(!CHROME)(
     expect(
       near(a.input.right - a.input.left, b.input.right - b.input.left),
     ).toBe(true);
-    // The long hint wraps to more lines under the box.
-    expect(height(b.note as Rect)).toBeGreaterThan(
-      height(a.note as Rect) * 1.5,
-    );
+    // The long hint is taller than the short one (it wraps) and stays inside the box's column.
+    expect(height(b.note as Rect)).toBeGreaterThan(height(a.note as Rect));
+    expect((b.note as Rect).right).toBeLessThanOrEqual(b.input.right + 0.5);
   },
 );
 

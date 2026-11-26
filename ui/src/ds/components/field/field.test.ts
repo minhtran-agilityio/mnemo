@@ -311,33 +311,66 @@ test("with an action and an error at the start, the hint can come back", () => {
   form.remove();
 });
 
-test("with an action, Enter in the box submits the form through the button", () => {
+test("with an action, the box and the submit button share the form: Tab order, one default button, and the button submits", () => {
   const { input, form, save } = buildAction({ hint: "H" });
+  let submitter: unknown = null;
   let submitted = 0;
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     submitted += 1;
+    submitter = (e as SubmitEvent).submitter;
   });
   input.focus();
   expect(document.activeElement).toBe(input);
   // The box and the action are both reachable with Tab, in that order.
   const tabbable = [...form.querySelectorAll<HTMLElement>("input, button")];
   expect(tabbable).toEqual([input, save]);
-  save.click();
+  // Enter in the box submits through the form's default (first submit) button: the action.
+  const submitButtons = [
+    ...form.querySelectorAll<HTMLButtonElement>("button"),
+  ].filter((b) => b.type === "submit");
+  expect(submitButtons).toEqual([save]);
+  // The submission Enter causes: the form submits with that button as the submitter.
+  form.requestSubmit(save);
   expect(submitted).toBe(1);
+  expect(submitter).toBe(save);
+  save.click();
+  expect(submitted).toBe(2);
   form.remove();
 });
 
-test("a busy or disabled action stays the button's own", () => {
-  const input = createTextInput(document, {});
-  const save = createButton(document, {
+test("a disabled or busy action stays the button's own", () => {
+  const disabled = createButton(document, {
     label: "Save link",
     variant: "primary",
     disabled: true,
   });
-  const f = createField(document, { label: "L", control: input, action: save });
-  expect(save.disabled).toBe(true);
-  expect(f.querySelector(".field-action button")).toBe(save);
+  const f = createField(document, {
+    label: "L",
+    control: createTextInput(document, {}),
+    action: disabled,
+  });
+  expect(disabled.disabled).toBe(true);
+  expect(f.querySelector(".field-action button")).toBe(disabled);
+  expect(disabled.hasAttribute("aria-busy")).toBe(false);
+  // A busy button keeps its own aria-busy and label; the field neither adds nor removes them.
+  const busy = createButton(document, {
+    label: "Saving…",
+    variant: "primary",
+    busy: true,
+  });
+  const g = createField(document, {
+    label: "L",
+    control: createTextInput(document, {}),
+    action: busy,
+    hint: "H",
+  });
+  expect(busy.getAttribute("aria-busy")).toBe("true");
+  setFieldError(g, "Bad");
+  setFieldError(g, null);
+  expect(busy.getAttribute("aria-busy")).toBe("true");
+  expect(busy.disabled).toBe(false);
+  expect(busy.textContent).toContain("Saving…");
 });
 
 test("long content stays text in the hint and error of a field with an action", () => {
