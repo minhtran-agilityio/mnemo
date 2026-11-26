@@ -2,7 +2,13 @@
 import { expect, test, vi } from "vitest";
 import type { Page, SavedBookmark, SaveResult } from "../../shared/api";
 import { type BookmarksDeps, renderBookmarks } from "./bookmarks";
-import { actionsFor, savedDate, toLinkItem, upsert } from "./bookmarks-logic";
+import {
+  actionsFor,
+  moveToTop,
+  savedDate,
+  toLinkItem,
+  upsert,
+} from "./bookmarks-logic";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
@@ -26,6 +32,11 @@ function bm(over: Partial<SavedBookmark> = {}): SavedBookmark {
   };
 }
 
+/** A save or summary result: the bookmark, not already saved. */
+function res(over: Partial<SaveResult> = {}): SaveResult {
+  return { ...bm(), alreadySaved: false, ...over };
+}
+
 const page = <T>(items: T[]): Page<T> => ({ items, next: null });
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
@@ -33,8 +44,8 @@ function deps(over: Partial<BookmarksDeps> = {}) {
   let emit: (b: SavedBookmark) => void = () => {};
   const stop = vi.fn();
   const d: BookmarksDeps = {
-    saveLink: vi.fn(async (url: string) => bm({ id: "new", url })),
-    summarizeBookmark: vi.fn(async (id: string) => bm({ id })),
+    saveLink: vi.fn(async (url: string) => res({ id: "new", url })),
+    summarizeBookmark: vi.fn(async (id: string) => res({ id })),
     listBookmarkCards: vi.fn(async () => page<SavedBookmark>([])),
     onBookmarkChanged: vi.fn(async (h: (b: SavedBookmark) => void) => {
       emit = h;
@@ -160,7 +171,7 @@ test("Save sends the link, clears the box at once, and the card follows the even
   expect(input.value).toBe("");
   emit(bm({ summaryStatus: "reading", summary: null, title: null }));
   expect(box.textContent).toContain("Reading the page");
-  finish(bm());
+  finish(res());
   await flush();
   expect(box.textContent).toContain(
     "Each window gets a list of allowed commands.",
@@ -220,7 +231,7 @@ test("Paste the text opens a dialog and Make summary sends the text for that boo
   const { d } = deps({
     listBookmarkCards: vi.fn(async () => page([unreadable])),
     summarizeBookmark: vi.fn(async (id: string) =>
-      bm({ id, summary: "Summary made from the pasted text." }),
+      res({ id, summary: "Summary made from the pasted text." }),
     ),
   });
   const { box } = mount(d);
@@ -254,7 +265,7 @@ test("Summarize later asks again without pasted text and an AI error shows as a 
   const { d } = deps({
     listBookmarkCards: vi.fn(async () => page([off])),
     summarizeBookmark: vi.fn(async (id: string) => ({
-      ...bm({ id, summaryStatus: "pending", summary: null, tags: [] }),
+      ...res({ id, summaryStatus: "pending", summary: null, tags: [] }),
       aiError: { code: "timeout", message: "Claude did not answer in time." },
     })),
   });
@@ -272,7 +283,7 @@ test("Summarize later asks again without pasted text and an AI error shows as a 
 test("a link whose page could not be reached offers both actions, and pasted text makes its summary", async () => {
   const { d } = deps({
     saveLink: vi.fn(async (url: string) => ({
-      ...bm({
+      ...res({
         id: "n1",
         url,
         summaryStatus: "not_reached",
@@ -286,7 +297,7 @@ test("a link whose page could not be reached offers both actions, and pasted tex
       },
     })),
     summarizeBookmark: vi.fn(async (id: string) =>
-      bm({ id, summary: "Summary made from the pasted text." }),
+      res({ id, summary: "Summary made from the pasted text." }),
     ),
   });
   const { box } = mount(d);
@@ -367,7 +378,7 @@ function expectBothActions(card: HTMLElement): void {
 test("a bookmark deleted while it was read leaves the list quietly", async () => {
   const { d, emit } = deps({
     saveLink: vi.fn(async (url: string) =>
-      bm({
+      res({
         id: "g1",
         url,
         summaryStatus: "reading",
@@ -401,4 +412,100 @@ test("a load failure says so, and leaving stops the event listener", async () =>
   );
   leave();
   expect(stop).toHaveBeenCalled();
+});
+
+// ---- a link saved again (#28) ----
+
+test("moveToTop puts a link saved again first and leaves no second row for it", () => {
+  const a = bm({ id: "a" });
+  const b = bm({ id: "b" });
+  const c = bm({ id: "c" });
+  expect(moveToTop([a, b, c], c).map((x) => x.id)).toEqual(["c", "a", "b"]);
+  expect(moveToTop([a, b], c).map((x) => x.id)).toEqual(["c", "a", "b"]);
+  expect(
+    moveToTop([a, b], bm({ id: "b", deletedAt: "2026-11-25T10:01:00Z" })).map(
+      (x) => x.id,
+    ),
+  ).toEqual(["a"]);
+});
+
+test("toLinkItem marks the card Already saved only when asked", () => {
+  expect(toLinkItem(bm()).alreadySaved).toBeUndefined();
+  expect(toLinkItem(bm(), true).alreadySaved).toBe(true);
+});
+
+test("saving a link that is already saved shows its old card on top with the note and adds no card", async () => {
+  const one = bm({
+    id: "o1",
+    url: "https://a.example/",
+    summary: "Summary one.",
+  });
+  const two = bm({
+    id: "o2",
+    url: "https://b.example/",
+    summary: "Summary two.",
+  });
+  const { d } = deps({
+    listBookmarkCards: vi.fn(async () => page([two, one])),
+    saveLink: vi.fn(async () => res({ ...one, alreadySaved: true })),
+  });
+  const { box } = mount(d);
+  await flush();
+  expect(box.textContent).not.toContain("Already saved");
+  (box.querySelector("input") as HTMLInputElement).value = "https://a.example/";
+  box.querySelector("form")?.dispatchEvent(new Event("submit"));
+  await flush();
+  const cards = [...box.querySelectorAll("article")];
+  expect(cards).toHaveLength(2);
+  expect(cards[0]?.textContent).toContain("Summary one.");
+  expect(cards[0]?.textContent).toContain("Already saved");
+  expect(cards[1]?.textContent).not.toContain("Already saved");
+  expect(d.summarizeBookmark).not.toHaveBeenCalled();
+  // The result is announced through the screen's live status region.
+  const status = box.querySelector('[role="status"][aria-live="polite"]');
+  expect(status?.textContent).toContain("This link was already saved.");
+  // The next save clears the note.
+  d.saveLink = vi.fn(async (url: string) => res({ id: "n2", url }));
+  (box.querySelector("input") as HTMLInputElement).value = "https://c.example/";
+  box.querySelector("form")?.dispatchEvent(new Event("submit"));
+  await flush();
+  expect(box.textContent).not.toContain("Already saved");
+});
+
+test("a link saved again before the list has loaded stays on top with its note after the list loads", async () => {
+  const older = bm({
+    id: "o1",
+    url: "https://a.example/",
+    createdAt: "2026-11-24T10:00:00Z",
+    summary: "Summary one.",
+  });
+  const newer = bm({
+    id: "o2",
+    url: "https://b.example/",
+    createdAt: "2026-11-25T10:00:00Z",
+    summary: "Summary two.",
+  });
+  let loaded: (p: Page<SavedBookmark>) => void = () => {};
+  const { d } = deps({
+    listBookmarkCards: vi.fn(
+      () =>
+        new Promise<Page<SavedBookmark>>((r) => {
+          loaded = r;
+        }),
+    ),
+    saveLink: vi.fn(async () => res({ ...older, alreadySaved: true })),
+  });
+  const { box } = mount(d);
+  (box.querySelector("input") as HTMLInputElement).value = "https://a.example/";
+  box.querySelector("form")?.dispatchEvent(new Event("submit"));
+  await flush();
+  // The duplicate answered first; the list resolves after it.
+  loaded(page([newer, older]));
+  await flush();
+  const cards = [...box.querySelectorAll("article")];
+  expect(cards).toHaveLength(2);
+  expect(cards[0]?.textContent).toContain("Summary one.");
+  expect(cards[0]?.textContent).toContain("Already saved");
+  expect(cards[1]?.textContent).toContain("Summary two.");
+  expect(cards[1]?.textContent).not.toContain("Already saved");
 });

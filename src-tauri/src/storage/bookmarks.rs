@@ -21,6 +21,7 @@ use super::error::StorageError;
 use super::items::encoded_web_address;
 use super::items::{invalid, optional_chars, required_text, web_address, MAX_TITLE_CHARS};
 use super::labels::{clean_name, MAX_LABELS};
+use super::link_key::compare_key;
 use super::record::{now_iso, Cursor, Page, PageRequest, RecordBase};
 use super::Storage;
 
@@ -30,6 +31,12 @@ pub const MAX_TAGS: usize = 6;
 pub const MAX_SUMMARY_CHARS: usize = 2000;
 /// Longest reason, in characters.
 pub const MAX_REASON_CHARS: usize = 500;
+
+/// What the insert did, before a claim token is attached.
+enum Inserted {
+    New(SavedBookmark),
+    Duplicate(SavedBookmark),
+}
 
 const BOOKMARK_NOT_FOUND: StorageError = StorageError::NotFound { kind: "bookmark" };
 
@@ -135,6 +142,16 @@ impl ClaimToken {
     }
 }
 
+/// What a save of a link did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkSave {
+    /// A new bookmark, stored and claimed for its first summary.
+    New(SavedBookmark, ClaimToken),
+    /// The link is already saved: the old bookmark, unchanged. Nothing was stored, and no
+    /// summary run is due.
+    Duplicate(SavedBookmark),
+}
+
 /// What a write that needs the summary claim did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Held {
@@ -148,11 +165,17 @@ pub enum Held {
 
 // ---- SQL. Fixed text, parameters only. ----
 
-// ?5 the status, ?6 the claim (only with reading).
+// ?5 the status, ?6 the claim (only with reading), ?7 the compare key (NULL when unknown).
 const INSERT_SQL: &str = "INSERT INTO bookmark
          (id, created_at, updated_at, url, title, summary, reason, reason_is_guess, site,
-          summary_status, claim)
-     VALUES (?1, ?2, ?2, ?3, NULL, NULL, NULL, 0, ?4, ?5, ?6)";
+          summary_status, claim, compare_key)
+     VALUES (?1, ?2, ?2, ?3, NULL, NULL, NULL, 0, ?4, ?5, ?6, ?7)";
+
+// The live bookmarks with compare key ?1 (old duplicates are kept, so there may be several; the
+// caller takes the oldest). No ORDER BY: with one, SQLite walks idx_bookmark_list instead of
+// idx_bookmark_compare_key and a new link would read every live bookmark.
+pub(super) const FIND_BY_KEY_SQL: &str = "SELECT id, created_at FROM bookmark
+     WHERE compare_key = ?1 AND deleted_at IS NULL";
 
 const GET_SQL: &str =
     "SELECT b.id, b.created_at, b.updated_at, b.deleted_at, b.url, b.title, b.site,
@@ -384,28 +407,45 @@ impl Storage {
         now: &str,
         url: &str,
     ) -> Result<SavedBookmark, StorageError> {
-        self.insert_link(now, url, None)
+        match self.insert_link(now, url, None)? {
+            Inserted::New(b) | Inserted::Duplicate(b) => Ok(b),
+        }
     }
 
-    /// Stores a new link at once, already claimed for its first summary (`reading`): no title,
-    /// no summary, and the site taken from the link. The link must be an http or https web
-    /// address. The insert, the read-back and the commit are one transaction: with no commit
-    /// there is no row and no claim.
-    pub fn save_link_to_read(
-        &mut self,
-        url: &str,
-    ) -> Result<(SavedBookmark, ClaimToken), StorageError> {
-        self.save_link_to_read_at(&now_iso(), url)
+    /// Saves a link, unless it is already saved. A new link is stored at once, already claimed
+    /// for its first summary (`reading`): no title, no summary, and the site taken from the link.
+    /// A link whose compare key belongs to a live bookmark stores nothing and gives that
+    /// bookmark (the oldest, when old duplicates exist) as `LinkSave::Duplicate`; a soft-deleted
+    /// bookmark does not count. The link must be an http or https web address. The lookup, the
+    /// insert, the read-back and the commit are one transaction: with no commit there is no row
+    /// and no claim, and two saves of one link cannot both pass the lookup.
+    pub fn save_link_to_read(&mut self, url: &str) -> Result<LinkSave, StorageError> {
+        self.save_link_or_find_at(&now_iso(), url)
     }
 
+    /// Tests only: a save that must store a new link (a duplicate is an error), as a pair.
+    #[cfg(test)]
     pub(crate) fn save_link_to_read_at(
         &mut self,
         now: &str,
         url: &str,
     ) -> Result<(SavedBookmark, ClaimToken), StorageError> {
+        match self.save_link_or_find_at(now, url)? {
+            LinkSave::New(b, token) => Ok((b, token)),
+            LinkSave::Duplicate(_) => Err(invalid("This link is already saved.".to_string())),
+        }
+    }
+
+    pub(crate) fn save_link_or_find_at(
+        &mut self,
+        now: &str,
+        url: &str,
+    ) -> Result<LinkSave, StorageError> {
         let token = ClaimToken::new(SummaryStatus::Pending);
-        let b = self.insert_link(now, url, Some(&token))?;
-        Ok((b, token))
+        Ok(match self.insert_link(now, url, Some(&token))? {
+            Inserted::New(b) => LinkSave::New(b, token),
+            Inserted::Duplicate(b) => LinkSave::Duplicate(b),
+        })
     }
 
     fn insert_link(
@@ -413,11 +453,12 @@ impl Storage {
         now: &str,
         url: &str,
         claim: Option<&ClaimToken>,
-    ) -> Result<SavedBookmark, StorageError> {
+    ) -> Result<Inserted, StorageError> {
         let url = url.trim();
         web_address(url)?;
         let parsed = parsed_link(url)?;
         encoded_web_address(&parsed)?;
+        let key = compare_key(&parsed);
         let base = RecordBase::new_at(now);
         let status = if claim.is_some() {
             SummaryStatus::Reading
@@ -425,6 +466,18 @@ impl Storage {
             SummaryStatus::Pending
         };
         let tx = self.immediate()?;
+        if let Some(key) = &key {
+            let found: Vec<(String, String)> = {
+                let mut st = tx.prepare_cached(FIND_BY_KEY_SQL)?;
+                let rows = st.query_map([key], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                rows.collect::<Result<_, _>>()?
+            };
+            // The oldest (time, then id) when old duplicates exist.
+            if let Some((_, id)) = found.into_iter().map(|(id, at)| (at, id)).min() {
+                let b = saved_bookmark_on(&tx, &id)?;
+                return Ok(Inserted::Duplicate(b));
+            }
+        }
         tx.execute(
             INSERT_SQL,
             params![
@@ -433,12 +486,13 @@ impl Storage {
                 parsed.as_str(),
                 site_of(&parsed),
                 status.as_str(),
-                claim.map(|c| c.0.as_str())
+                claim.map(|c| c.0.as_str()),
+                key
             ],
         )?;
         let b = saved_bookmark_on(&tx, &base.id)?;
         tx.commit()?;
-        Ok(b)
+        Ok(Inserted::New(b))
     }
 
     /// The live bookmark with its site, status and tags.
@@ -1486,5 +1540,235 @@ mod tests {
         assert_eq!(json["reasonIsGuess"], false);
         assert!(json["tags"].as_array().unwrap().is_empty());
         assert!(json.get("createdAt").is_some());
+    }
+
+    // ---- The duplicate check (#28, LIB-02) ----
+
+    /// Saves `url` and says whether it was a duplicate of `of` (a live bookmark's id).
+    fn saved_again(s: &mut Storage, url: &str, of: &str) -> bool {
+        match s.save_link_or_find_at(T2, url).unwrap() {
+            LinkSave::Duplicate(b) => {
+                assert_eq!(b.base.id, of, "{url}");
+                true
+            }
+            LinkSave::New(..) => false,
+        }
+    }
+
+    fn live_rows(s: &Storage) -> i64 {
+        s.conn
+            .query_row(
+                "SELECT count(*) FROM bookmark WHERE deleted_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn duplicate_save_of_the_same_link_twice_gives_the_old_bookmark_and_adds_nothing() {
+        let (mut s, _d) = open_temp();
+        let LinkSave::New(first, _) = s.save_link_or_find_at(T1, "https://example.org/a").unwrap()
+        else {
+            panic!("the first save is new");
+        };
+        let LinkSave::Duplicate(second) =
+            s.save_link_or_find_at(T2, "https://example.org/a").unwrap()
+        else {
+            panic!("the second save is a duplicate");
+        };
+        // The old bookmark as it is now: its id, its time and its claim are unchanged.
+        assert_eq!(second, s.get_saved_bookmark(&first.base.id).unwrap());
+        assert_eq!(second.base.created_at, T1);
+        assert_eq!(live_rows(&s), 1);
+    }
+
+    #[test]
+    fn duplicate_planted_links_are_caught_with_www_utm_fragment_slash_host_case_fbclid_and_gclid() {
+        let (mut s, _d) = open_temp();
+        let first = s.save_link_at(T1, "https://example.org/read/me").unwrap();
+        let id = first.base.id.as_str();
+        for same in [
+            "https://www.example.org/read/me",
+            "https://example.org/read/me?utm_source=news&utm_medium=mail",
+            "https://example.org/read/me#section-2",
+            "https://example.org/read/me/",
+            "https://EXAMPLE.org/read/me",
+            "https://example.org/read/me?fbclid=abc",
+            "https://example.org/read/me?gclid=abc",
+            "https://example.org./read/me",
+            "https://example.org:443/read/me",
+        ] {
+            assert!(saved_again(&mut s, same, id), "{same} is not caught");
+        }
+        assert_eq!(live_rows(&s), 1);
+    }
+
+    #[test]
+    fn duplicate_check_keeps_two_different_pages_the_path_case_and_other_query_parameters_apart() {
+        let (mut s, _d) = open_temp();
+        let first = s.save_link_at(T1, "https://example.org/Read?id=7").unwrap();
+        let id = first.base.id.as_str();
+        for other in [
+            "https://example.org/read?id=7",
+            "https://example.org/Read?id=8",
+            "https://example.org/Read",
+            "https://example.org/Other?id=7",
+            "https://example.org/Read?id=7&page=2",
+            "https://sub.example.org/Read?id=7",
+        ] {
+            assert!(!saved_again(&mut s, other, id), "{other} is a duplicate");
+        }
+        assert_eq!(live_rows(&s), 7);
+    }
+
+    #[test]
+    fn duplicate_check_keeps_http_and_https_and_another_parameter_order_apart() {
+        let (mut s, _d) = open_temp();
+        let first = s.save_link_at(T1, "https://example.org/a?x=1&y=2").unwrap();
+        for other in [
+            "http://example.org/a?x=1&y=2",
+            "https://example.org/a?y=2&x=1",
+        ] {
+            assert!(!saved_again(&mut s, other, &first.base.id), "{other}");
+        }
+    }
+
+    #[test]
+    fn duplicate_check_ignores_a_soft_deleted_bookmark_and_saves_the_link_again() {
+        let (mut s, _d) = open_temp();
+        let first = s.save_link_at(T1, "https://example.org/a").unwrap();
+        s.delete_at::<Bookmark>(T2, &first.base.id).unwrap();
+        let LinkSave::New(again, _) = s
+            .save_link_or_find_at(T3, "https://www.example.org/a#x")
+            .unwrap()
+        else {
+            panic!("a deleted bookmark must not block a new save");
+        };
+        assert_ne!(again.base.id, first.base.id);
+        // The new one is now the live bookmark of the link.
+        assert!(saved_again(&mut s, "https://example.org/a", &again.base.id));
+    }
+
+    #[test]
+    fn duplicate_check_finds_the_oldest_when_old_duplicates_exist_and_keeps_them() {
+        let (mut s, _d) = open_temp();
+        // Two live rows with one key, as old data (before the check) can hold.
+        let a = s.save_link_at(T1, "https://example.org/a").unwrap();
+        s.conn
+            .execute(
+                "INSERT INTO bookmark (id, created_at, updated_at, url, compare_key)
+                 VALUES ('dup-2', ?1, ?1, 'https://example.org/a#again', 'https://example.org/a')",
+                [T2],
+            )
+            .unwrap();
+        assert!(saved_again(&mut s, "https://example.org/a", &a.base.id));
+        assert_eq!(live_rows(&s), 2);
+    }
+
+    #[test]
+    fn duplicate_edit_to_a_link_already_saved_is_allowed_and_only_updates_the_key() {
+        let (mut s, _d) = open_temp();
+        let a = s.save_link_at(T1, "https://example.org/a").unwrap();
+        let b = s.save_link_at(T2, "https://example.org/b").unwrap();
+        let edited: Bookmark = s
+            .update_at(T3, &b.base.id, &bookmark("https://www.example.org/a/#top"))
+            .unwrap();
+        assert_eq!(edited.url, "https://www.example.org/a/#top");
+        assert_eq!(
+            s.compare_key_of_bookmark(&b.base.id).unwrap().as_deref(),
+            Some("https://example.org/a")
+        );
+        // Both rows stay live, and a save of the link finds the older one.
+        assert_eq!(live_rows(&s), 2);
+        assert!(saved_again(&mut s, "https://example.org/a", &a.base.id));
+        // The key follows the edit: the old link is free again.
+        assert!(!saved_again(&mut s, "https://example.org/b", &a.base.id));
+    }
+
+    #[test]
+    fn duplicate_key_is_stored_by_a_save_and_by_the_generic_add() {
+        let (mut s, _d) = open_temp();
+        let saved = s
+            .save_link_at(T1, "https://WWW.Example.org/a/?utm_x=1")
+            .unwrap();
+        let added: Bookmark = s.add_at(T1, &bookmark("https://example.org/c#f")).unwrap();
+        assert_eq!(
+            s.compare_key_of_bookmark(&saved.base.id)
+                .unwrap()
+                .as_deref(),
+            Some("https://example.org/a")
+        );
+        assert_eq!(
+            s.compare_key_of_bookmark(&added.base.id)
+                .unwrap()
+                .as_deref(),
+            Some("https://example.org/c")
+        );
+        // A link added the generic way is found by a later save.
+        assert!(saved_again(&mut s, "https://example.org/c", &added.base.id));
+    }
+
+    #[test]
+    fn duplicate_saves_of_one_link_from_many_connections_keep_one_bookmark() {
+        let (_s, dir) = open_temp();
+        let path = dir.path().join("mnemo.db");
+        let results: Vec<bool> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let path = path.clone();
+                    scope.spawn(move || {
+                        let mut s = Storage::open(&path).unwrap();
+                        matches!(
+                            s.save_link_or_find_at(T1, "https://example.org/race")
+                                .unwrap(),
+                            LinkSave::New(..)
+                        )
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        assert_eq!(results.iter().filter(|new| **new).count(), 1);
+        let s = Storage::open(&path).unwrap();
+        assert_eq!(live_rows(&s), 1);
+    }
+
+    #[test]
+    fn duplicate_open_fills_the_key_of_an_old_bookmark_so_a_save_of_its_link_is_caught() {
+        let (s, dir) = open_temp();
+        // A row from before migration 10: no key.
+        s.conn
+            .execute(
+                "INSERT INTO bookmark (id, created_at, updated_at, url) VALUES ('old', ?1, ?1, 'https://www.example.org/old/')",
+                [T1],
+            )
+            .unwrap();
+        assert_eq!(s.compare_key_of_bookmark("old").unwrap(), None);
+        drop(s);
+        let mut s = Storage::open(&dir.path().join("mnemo.db")).unwrap();
+        assert_eq!(
+            s.compare_key_of_bookmark("old").unwrap().as_deref(),
+            Some("https://example.org/old")
+        );
+        assert!(saved_again(&mut s, "https://example.org/old#x", "old"));
+    }
+    #[test]
+    fn duplicate_lookup_is_one_indexed_query_on_the_compare_key_index() {
+        let (s, _d) = open_temp();
+        let plan: Vec<String> = {
+            let mut st = s
+                .conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {FIND_BY_KEY_SQL}"))
+                .unwrap();
+            let rows = st
+                .query_map(["https://example.org/a"], |r| r.get::<_, String>(3))
+                .unwrap();
+            rows.map(Result::unwrap).collect()
+        };
+        assert!(
+            plan.iter().any(|d| d.contains("idx_bookmark_compare_key")),
+            "the lookup does not use idx_bookmark_compare_key: {plan:?}"
+        );
     }
 }

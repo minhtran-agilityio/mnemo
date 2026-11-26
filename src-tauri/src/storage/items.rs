@@ -524,11 +524,14 @@ impl Item for Bookmark {
     // status stays.
     item_sql!(
         table: "bookmark",
-        columns: "url, title, summary, reason, reason_is_guess, site, summary_status",
+        columns: "url, title, summary, reason, reason_is_guess, site, summary_status, compare_key",
         // The insert and the update share the values: NULLIF(?9, ?9) is NULL and only names ?9.
+        // ?10 is the compare key of the link (#28); an edit that changes the link only updates it,
+        // even when the new link is already saved.
         insert: "?3, ?4, ?5, ?6, ?7, COALESCE(?8, NULLIF(?9, ?9)),
-            CASE WHEN ?5 IS NULL THEN 'pending' ELSE 'done' END",
+            CASE WHEN ?5 IS NULL THEN 'pending' ELSE 'done' END, ?10",
         set: "url = CASE WHEN url IS ?3 OR url IS ?9 THEN url ELSE ?9 END, title = ?4, summary = ?5, reason = ?6, reason_is_guess = ?7, site = ?8,
+            compare_key = ?10,
             claim = NULL,
             summary_status = CASE WHEN ?5 IS NOT NULL THEN 'done'
                 WHEN summary_status IN ('done', 'reading')
@@ -590,6 +593,7 @@ impl Item for Bookmark {
                     .map(|u| u.to_string())
                     .unwrap_or_else(|_| i.url.clone()),
             ),
+            opt_text(&super::link_key::compare_key_of(&i.url)),
         ]
     }
 

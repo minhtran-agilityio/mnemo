@@ -33,6 +33,7 @@ import {
   ACTION_LABELS,
   actionsFor,
   type CardAction,
+  moveToTop,
   toLinkItem,
   upsert,
 } from "./bookmarks-logic";
@@ -50,6 +51,10 @@ export interface BookmarksDeps {
 /** How many saved links the screen reads (one page). #27 adds paging. */
 export const BOOKMARKS_PAGE = 100;
 
+/** What the status region says when the owner saves a link that is already saved (#28). */
+const ALREADY_SAVED_ANNOUNCEMENT =
+  "This link was already saved. Its card is now on top.";
+
 /** Fills `container` with the Bookmarks screen. Returns a function that cleans up on leave. */
 export function renderBookmarks(
   container: HTMLElement,
@@ -60,6 +65,11 @@ export function renderBookmarks(
   let unlisten: (() => void) | null = null;
   // The one place this screen keeps its state: the saved links, newest first.
   let items: SavedBookmark[] = [];
+  /**
+   * The bookmark the owner just saved again (#28): its card shows "Already saved" on top. It
+   * clears when the owner saves the next link.
+   */
+  let alreadySavedId: string | null = null;
   /** Bookmarks with a summary call going, so their action is not sent twice. */
   const busy = new Set<string>();
 
@@ -118,11 +128,21 @@ export function renderBookmarks(
     setFieldError(field, null);
     showProblem(null);
     input.value = "";
+    alreadySavedId = null;
     deps
       .saveLink(url)
       .then((result) => {
         if (left) return;
-        put(result);
+        if (result.alreadySaved) {
+          // The old card goes to the top with its note; no row is added and no summary starts.
+          alreadySavedId = result.id;
+          items = moveToTop(items, result);
+          draw();
+          // The card's note is not a live region: announce the result through the toast region.
+          toasts.show(ALREADY_SAVED_ANNOUNCEMENT);
+        } else {
+          put(result);
+        }
         if (result.aiError) toasts.show(result.aiError.message);
       })
       .catch((error: unknown) => {
@@ -236,7 +256,7 @@ export function renderBookmarks(
     grid.className = "bookmarks-cards";
     grid.append(
       ...items.map((b) =>
-        createLinkCard(doc, toLinkItem(b), {
+        createLinkCard(doc, toLinkItem(b, b.id === alreadySavedId), {
           actions: actionsOf(b),
         }),
       ),
@@ -264,6 +284,9 @@ export function renderBookmarks(
       const known = new Set(items.map((b) => b.id));
       items = [...items, ...page.items.filter((b) => !known.has(b.id))];
       items.sort((a, z) => z.createdAt.localeCompare(a.createdAt));
+      // A link the owner saved again before the list loaded stays on top, not at its date.
+      const again = items.find((b) => b.id === alreadySavedId);
+      if (again) items = moveToTop(items, again);
       draw();
     })
     .catch((error: unknown) => {

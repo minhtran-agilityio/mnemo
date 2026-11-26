@@ -9,6 +9,7 @@ pub mod files;
 pub mod ideas;
 pub mod items;
 pub mod labels;
+mod link_key;
 pub mod links;
 mod migrate;
 pub mod record;
@@ -80,7 +81,7 @@ impl Storage {
             .parent()
             .unwrap_or_else(|| Path::new(""))
             .join(files::FILES_DIR);
-        let storage = Storage {
+        let mut storage = Storage {
             conn,
             files_dir,
             db_path: path.to_path_buf(),
@@ -93,6 +94,13 @@ impl Storage {
             Ok(0) => {}
             Ok(n) => log::info!("marked {n} interrupted AI runs as failed (app closed)"),
             Err(e) => log::error!("could not mark interrupted AI runs as failed: {e}"),
+        }
+        // Bookmarks saved before the compare key existed get theirs, so the duplicate check sees
+        // them (#28). A failure is logged: those rows stay unkeyed until the next open.
+        match storage.fill_compare_keys() {
+            Ok(0) => {}
+            Ok(n) => log::info!("{n} bookmarks got their compare key"),
+            Err(e) => log::error!("could not fill the compare key of old bookmarks: {e}"),
         }
         // The same for a page read a closed app left going: back to "no summary yet".
         match storage.reset_reading_bookmarks_at(&record::now_iso()) {
@@ -200,7 +208,7 @@ mod tests {
         assert_eq!(s.journal_mode().unwrap(), "wal");
         assert_eq!(s.busy_timeout_ms().unwrap(), 5000);
         assert_eq!(s.synchronous_level().unwrap(), 1, "NORMAL");
-        assert_eq!(s.schema_version().unwrap(), 9);
+        assert_eq!(s.schema_version().unwrap(), 10);
     }
 
     #[test]
@@ -208,7 +216,7 @@ mod tests {
         let (_d, p) = temp_db();
         drop(Storage::open(&p).unwrap());
         let s = Storage::open(&p).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 9);
+        assert_eq!(s.schema_version().unwrap(), 10);
     }
 
     #[test]
