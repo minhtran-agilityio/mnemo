@@ -13,11 +13,13 @@ Closes #
 
 ## Screenshots
 
-Every pull request has screenshots, whatever it changes. Attach them as a comment (`gh pr comment <n> --attach <file>`) before review.
+Every pull request has screenshots, whatever it changes. Attach them before review. Rules and how to attach: `.claude/rules/technical.md` (Change hygiene).
+
+- How to attach: `gh pr comment <n> --attach <file>` only if `gh pr comment --help` lists `--attach` (gh 2.97.0 does not). Otherwise use the `pr-evidence` branch under `pr-<n>/` and post a comment with pinned `raw.githubusercontent.com` URLs. Design-system pull requests keep `pr-assets`. Never commit screenshots to the pull request's own branch.
 
 - [ ] Changes a screen: before and after of each changed screen (light theme at least; dark too when colours change).
 - [ ] No screen (Rust, data, scripts, docs): a screenshot of the evidence, such as the test run or the command output that shows the change works.
-- [ ] No personal data, secrets or private text in any screenshot.
+- [ ] No personal data, secrets or private text in any screenshot (this repository is public): no home paths, environment values, tokens, or real saved links or notes.
 
 ## Shared rules
 
