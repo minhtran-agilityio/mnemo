@@ -12,6 +12,7 @@
 //! - the fragment is dropped.
 
 use rusqlite::params;
+use rusqlite::types::Value;
 
 use super::error::StorageError;
 use super::Storage;
@@ -68,12 +69,18 @@ impl Storage {
     /// Fills `compare_key` for every bookmark that has none (rows saved before migration 10), in
     /// batches inside one transaction each. A link that cannot be parsed keeps a NULL key (it is
     /// never invented) and is tried again at the next open. Returns the rows filled.
+    ///
+    /// One transaction per batch is safe: each row's key is independent of every other row, the
+    /// write only fills a NULL key, and a fill that stops half way leaves the rest NULL for the
+    /// next open, never a half-written row.
     pub(crate) fn fill_compare_keys(&mut self) -> Result<usize, StorageError> {
         let mut filled = 0;
         let mut after = String::new();
         loop {
             let tx = self.immediate()?;
-            let rows: Vec<(String, String)> = {
+            // SQLite does not enforce the TEXT type, so a url may be any value: read it as one, and
+            // skip a row whose url is not text (it keeps a NULL key) instead of stopping the fill.
+            let rows: Vec<(String, Value)> = {
                 let mut st = tx.prepare_cached(UNKEYED_SQL)?;
                 let rows =
                     st.query_map(params![after, FILL_BATCH], |r| Ok((r.get(0)?, r.get(1)?)))?;
@@ -84,6 +91,7 @@ impl Storage {
             };
             after = last.clone();
             for (id, url) in &rows {
+                let Value::Text(url) = url else { continue };
                 if let Some(key) = compare_key_of(url) {
                     filled += tx.execute(SET_KEY_SQL, params![id, key])?;
                 }
@@ -92,8 +100,7 @@ impl Storage {
         }
     }
 
-    /// The oldest live bookmark with this compare key, read through `tx`'s connection by the
-    /// caller; kept here so the key's SQL stays in one place.
+    /// Tests only: the stored compare key of bookmark `id`, deleted or not.
     #[cfg(test)]
     pub(crate) fn compare_key_of_bookmark(&self, id: &str) -> Result<Option<String>, StorageError> {
         use rusqlite::OptionalExtension;
@@ -224,5 +231,29 @@ mod tests {
         // finds nothing new.
         assert_eq!(s.compare_key_of_bookmark("b-3").unwrap(), None);
         assert_eq!(s.fill_compare_keys().unwrap(), 0);
+    }
+    #[test]
+    fn duplicate_fill_at_open_skips_a_row_whose_url_is_not_text_and_keys_the_rows_after_it() {
+        let (mut s, _d) = open_temp();
+        // SQLite does not enforce TEXT: a blob url sorts first (id 'a'), rows after it must still
+        // get their key.
+        s.conn
+            .execute(
+                "INSERT INTO bookmark (id, created_at, updated_at, url) VALUES ('a', ?1, ?1, X'6162')",
+                ["2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        s.conn
+            .execute(
+                "INSERT INTO bookmark (id, created_at, updated_at, url) VALUES ('b', ?1, ?1, 'https://example.org/b')",
+                ["2026-01-01T00:00:00Z"],
+            )
+            .unwrap();
+        assert_eq!(s.fill_compare_keys().unwrap(), 1);
+        assert_eq!(s.compare_key_of_bookmark("a").unwrap(), None);
+        assert_eq!(
+            s.compare_key_of_bookmark("b").unwrap().as_deref(),
+            Some("https://example.org/b")
+        );
     }
 }

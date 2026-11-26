@@ -171,10 +171,11 @@ const INSERT_SQL: &str = "INSERT INTO bookmark
           summary_status, claim, compare_key)
      VALUES (?1, ?2, ?2, ?3, NULL, NULL, NULL, 0, ?4, ?5, ?6, ?7)";
 
-// The oldest live bookmark with compare key ?1 (old duplicates are kept, so there may be several).
-// idx_bookmark_compare_key is partial on deleted_at IS NULL and serves it.
-const FIND_BY_KEY_SQL: &str = "SELECT id FROM bookmark
-     WHERE compare_key = ?1 AND deleted_at IS NULL ORDER BY created_at, id LIMIT 1";
+// The live bookmarks with compare key ?1 (old duplicates are kept, so there may be several; the
+// caller takes the oldest). No ORDER BY: with one, SQLite walks idx_bookmark_list instead of
+// idx_bookmark_compare_key and a new link would read every live bookmark.
+pub(super) const FIND_BY_KEY_SQL: &str = "SELECT id, created_at FROM bookmark
+     WHERE compare_key = ?1 AND deleted_at IS NULL";
 
 const GET_SQL: &str =
     "SELECT b.id, b.created_at, b.updated_at, b.deleted_at, b.url, b.title, b.site,
@@ -466,10 +467,13 @@ impl Storage {
         };
         let tx = self.immediate()?;
         if let Some(key) = &key {
-            let old: Option<String> = tx
-                .query_row(FIND_BY_KEY_SQL, [key], |r| r.get(0))
-                .optional()?;
-            if let Some(id) = old {
+            let found: Vec<(String, String)> = {
+                let mut st = tx.prepare_cached(FIND_BY_KEY_SQL)?;
+                let rows = st.query_map([key], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                rows.collect::<Result<_, _>>()?
+            };
+            // The oldest (time, then id) when old duplicates exist.
+            if let Some((_, id)) = found.into_iter().map(|(id, at)| (at, id)).min() {
                 let b = saved_bookmark_on(&tx, &id)?;
                 return Ok(Inserted::Duplicate(b));
             }
@@ -1748,5 +1752,23 @@ mod tests {
             Some("https://example.org/old")
         );
         assert!(saved_again(&mut s, "https://example.org/old#x", "old"));
+    }
+    #[test]
+    fn duplicate_lookup_is_one_indexed_query_on_the_compare_key_index() {
+        let (s, _d) = open_temp();
+        let plan: Vec<String> = {
+            let mut st = s
+                .conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {FIND_BY_KEY_SQL}"))
+                .unwrap();
+            let rows = st
+                .query_map(["https://example.org/a"], |r| r.get::<_, String>(3))
+                .unwrap();
+            rows.map(Result::unwrap).collect()
+        };
+        assert!(
+            plan.iter().any(|d| d.contains("idx_bookmark_compare_key")),
+            "the lookup does not use idx_bookmark_compare_key: {plan:?}"
+        );
     }
 }
