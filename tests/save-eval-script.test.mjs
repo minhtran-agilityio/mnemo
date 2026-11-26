@@ -31,7 +31,7 @@ function run(args) {
 }
 
 test('an unknown argument prints the usage, exits 2 and starts nothing', () => {
-  for (const args of [['comapre', 'a', 'b'], ['-x'], ['run', 'extra'], ['compare', 'a'], ['usage', 'x']]) {
+  for (const args of [['comapre', 'a', 'b'], [''], ['-x'], ['run', 'extra'], ['compare', 'a'], ['usage', 'x']]) {
     const r = run(args);
     assert.equal(r.status, 2, `${args.join(' ')}: exit ${r.status}`);
     assert.match(r.stderr, /usage: bash scripts\/save-eval\.sh/);

@@ -6,7 +6,7 @@
 #     current expectations, from its stored summaries and judge answers (no runs)
 #   bash scripts/save-eval.sh usage                         2 tiny runs: print the usage percent twice
 #   bash scripts/save-eval.sh --help                        this list (an unknown argument runs nothing)
-# It is not part of `npm test`, `npm run check` or CI. One eval starts about 34 `claude -p` runs and uses
+# It is not part of `npm test`, `npm run check` or CI. One eval starts 36 `claude -p` runs and uses
 # the owner's Claude usage. It prints a score per page, the total, "runs used: N" (36 for a
 # full eval: 17 pages x 2 runs plus 2 usage probe runs) and the usage % before and after (Unverified scale). The result goes to evals/save/results/<date>.json (-2, -3 ... when the
 # file exists). It never reads the Claude token.
@@ -17,7 +17,7 @@ USAGE='usage: bash scripts/save-eval.sh [run] | compare <a.json> <b.json> | resc
   compare, rescore      read stored results only, no run
   usage                 2 tiny runs: print the usage percent twice'
 
-case "${1:-run}" in
+case "${1-run}" in
   -h | --help | help) echo "$USAGE"; exit 0 ;;
   run) [ $# -le 1 ] || { echo "$USAGE" >&2; exit 2; } ;;
   compare) [ $# -eq 3 ] || { echo "$USAGE" >&2; exit 2; } ;;
