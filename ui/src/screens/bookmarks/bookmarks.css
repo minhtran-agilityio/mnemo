@@ -1,16 +1,7 @@
 /* The Bookmarks screen (#25): layout only, with token values. Every look comes from ui/src/ds. */
 .bookmarks-linkbox {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: var(--space-3);
   margin-top: var(--space-5);
   max-width: var(--measure-intro);
-}
-
-.bookmarks-linkbox > .field {
-  flex: 1 1 var(--size-basis-column);
-  min-width: 0;
 }
 
 .bookmarks-notice:empty {

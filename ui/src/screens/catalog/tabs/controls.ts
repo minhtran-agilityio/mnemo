@@ -236,6 +236,103 @@ function inputRow(ctx: TabContext) {
   ];
 }
 
+// A field with an action beside its control: the sample is the Bookmarks link box.
+const LINK_HINT = "A web link that starts with http:// or https://.";
+const LONG_HINT =
+  "Dán một liên kết web bắt đầu bằng http:// hoặc https://, ví dụ một bài viết, một trang tài liệu hay một kho mã nguồn.";
+const LONG_HINT_EN =
+  "A web link that starts with http:// or https://, for example an article, a documentation page or a source code repository, copied from the address bar of your browser.";
+
+function fieldActionRow(ctx: TabContext) {
+  const doc = ctx.doc;
+  const make = (
+    caption: string,
+    options: {
+      input?: Parameters<typeof createTextInput>[1];
+      button?: Partial<ButtonOptions>;
+      hint?: string;
+      error?: string;
+    } = {},
+  ) => {
+    const input = createTextInput(doc, { type: "url", ...options.input });
+    const save = createButton(doc, {
+      label: "Save link",
+      variant: "primary",
+      ...options.button,
+    });
+    save.type = "submit";
+    const field = createField(doc, {
+      label: "Link",
+      control: input,
+      action: save,
+      hint: options.hint,
+      error: options.error,
+    });
+    return state(doc, caption, field, { grow: true });
+  };
+  // Live: Enter in the box saves; an empty box shows the error, typing clears it.
+  const liveInput = createTextInput(doc, { type: "url" });
+  const liveSave = createButton(doc, {
+    label: "Save link",
+    variant: "primary",
+  });
+  liveSave.type = "submit";
+  const liveField = createField(doc, {
+    label: "Link",
+    control: liveInput,
+    action: liveSave,
+    hint: LINK_HINT,
+  });
+  const form = doc.createElement("form");
+  form.noValidate = true;
+  form.append(liveField);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    setFieldError(
+      liveField,
+      liveInput.value.trim() ? null : "Paste a link first.",
+    );
+  });
+  liveInput.addEventListener("input", () => setFieldError(liveField, null));
+  return [
+    make("with hint", { hint: LINK_HINT }),
+    make("hover", {
+      input: { value: LINK, forced: "hover" },
+      button: { forced: "hover" },
+      hint: LINK_HINT,
+    }),
+    make("focus", {
+      input: { value: LINK, forced: "focus" },
+      button: { forced: "focus" },
+      hint: LINK_HINT,
+    }),
+    make("active (pressed)", {
+      input: { value: LINK },
+      button: { forced: "pressed" },
+      hint: LINK_HINT,
+    }),
+    make("error replaces the hint", {
+      error: "Paste a link first.",
+      hint: LINK_HINT,
+    }),
+    make("long hint", { hint: LONG_HINT_EN }),
+    make("long Vietnamese hint", { hint: LONG_HINT }),
+    make("busy: the action is the button's own", {
+      input: { value: LINK, disabled: true },
+      button: { busy: true, label: "Saving…" },
+      hint: LINK_HINT,
+    }),
+    make("disabled", {
+      input: { value: LINK },
+      button: { disabled: true },
+      hint: LINK_HINT,
+    }),
+    state(doc, "live: press Save link with the box empty", form, {
+      grow: true,
+    }),
+  ];
+}
+
 // Two linked fields that validate on input: the error is set and cleared in place.
 function liveLines(ctx: TabContext) {
   const doc = ctx.doc;
@@ -287,6 +384,7 @@ export const renderControls: TabRenderer = (panel, ctx) => {
     entryRows(ctx, "Controls", {
       button: buttonRow,
       input: inputRow,
+      "field with action": fieldActionRow,
       textarea: () => {
         const note = createTextarea(doc, {
           value: "Đọc lại phần về chỉ mục FTS5 trước thứ Sáu.",

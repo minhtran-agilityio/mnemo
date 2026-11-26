@@ -77,17 +77,18 @@ export function renderBookmarks(
   const input = createTextInput(doc, { type: "url" });
   input.autocomplete = "off";
   input.spellcheck = false;
+  const save = createButton(doc, { label: "Save link", variant: "primary" });
+  save.type = "submit";
   const field = createField(doc, {
     label: "Link",
     control: input,
     hint: "A web link that starts with http:// or https://.",
+    action: save,
   });
-  const save = createButton(doc, { label: "Save link", variant: "primary" });
-  save.type = "submit";
   const form = doc.createElement("form");
   form.className = "bookmarks-linkbox";
   form.noValidate = true;
-  form.append(field, save);
+  form.append(field);
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     submit();
