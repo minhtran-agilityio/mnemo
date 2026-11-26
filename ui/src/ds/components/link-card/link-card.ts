@@ -10,7 +10,9 @@
 // Issue 169 added the site, the saved date, tags, the reason, the action slot and `pending`.
 // Issue 179: the slot holds more than one action (`actions`).
 // Issue 172: the rows show the host of the URL when there is no site, never its scheme.
-import { Clock, Link, PowerOff } from "lucide";
+// Issue 186: the card shows an "Already saved" note (`alreadySaved`) and the folder line
+// (`folder`, labelled Guess when `folderIsGuess`). The rows show neither.
+import { BookmarkCheck, Clock, Folder, Link, PowerOff } from "lucide";
 import { createIcon } from "../../icon";
 import { createListRow } from "../list-row/list-row";
 import {
@@ -18,6 +20,7 @@ import {
   createAppBadge,
   createMetaLine,
 } from "../metadata-line/metadata-line";
+import { buildPill } from "../pill/pill";
 import { buildSpinner } from "../spinner/spinner";
 import { createTagList } from "../tag-list/tag-list";
 import { buildTrustLabel } from "../trust-label/trust-label";
@@ -64,6 +67,19 @@ export interface LinkItem {
   readonly reason?: string;
   /** Who wrote the reason. `guess` (the app wrote it) is labelled Guess. Default `guess`. */
   readonly reasonKind?: "guess" | "owner";
+  /**
+   * The owner saved this link again: the card shows "Already saved" on top, as information, not as
+   * an error. Default false. Only the card shows it.
+   */
+  readonly alreadySaved?: boolean;
+  /**
+   * The folder the link is filed in ("Dev tools", "Unsorted"). The card shows "Filed in <folder>";
+   * a long name is cut with its full text in the tooltip. Left out or empty: no line. Only the card
+   * shows it.
+   */
+  readonly folder?: string;
+  /** The app chose the folder: the folder line is labelled Guess. Default false (no label). */
+  readonly folderIsGuess?: boolean;
 }
 
 export interface LinkCardOptions {
@@ -316,6 +332,38 @@ function tagLine(doc: Document, item: LinkItem): HTMLElement {
   return line;
 }
 
+/** The words of the note on a link the owner saved again. */
+export const ALREADY_SAVED = "Already saved";
+
+/** The note on a link the owner saved again: an info pill, text that a screen reader reads. */
+function alreadySavedNote(): HTMLElement {
+  const note = buildPill({
+    text: ALREADY_SAVED,
+    tint: "info",
+    icon: BookmarkCheck,
+  });
+  note.classList.add("lcard-notice");
+  return note;
+}
+
+/** "Filed in <folder>", with the Guess label when the app chose the folder. */
+function folderLine(
+  doc: Document,
+  folder: string,
+  guess: boolean,
+): HTMLElement {
+  const line = doc.createElement("div");
+  line.className = "lcard-folder";
+  const where = doc.createElement("span");
+  where.className = "lcard-folder-where";
+  const name = textEl(doc, "span", "lcard-folder-name", folder);
+  name.title = folder;
+  where.append(createIcon(Folder), doc.createTextNode("Filed in "), name);
+  line.append(where);
+  if (guess) line.append(buildTrustLabel("guess"));
+  return line;
+}
+
 export function createLinkCard(
   doc: Document,
   item: LinkItem,
@@ -330,6 +378,7 @@ export function createLinkCard(
     thumb.append(createIcon(Link));
     card.append(thumb);
   }
+  if (item.alreadySaved) card.append(alreadySavedNote());
   const meta = metaLine(doc, item);
   if (meta) card.append(meta);
   const title = textEl(doc, "div", "title", item.title);
@@ -354,6 +403,9 @@ export function createLinkCard(
     card.append(tagLine(doc, item));
   const guessed = (item.reasonKind ?? "guess") === "guess";
   if (item.reason && (read || !guessed)) card.append(reasonLine(doc, item));
+  // The folder shows in every status: a link is filed as soon as it is saved.
+  const folder = item.folder?.trim();
+  if (folder) card.append(folderLine(doc, folder, item.folderIsGuess === true));
   const actions = cardActions(options);
   if (actions.length > 0) {
     const slot = doc.createElement("div");

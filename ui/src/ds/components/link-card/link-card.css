@@ -425,3 +425,55 @@
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
+
+/* "Already saved" (issue 186): the info pill at the top of the card, as wide as its words. It is
+   information, not an error, so it uses the info tint of the pill part. On a card narrower than the
+   words, they wrap inside the pill. */
+.lcard .lcard-notice {
+  align-self: flex-start;
+  max-width: 100%;
+  white-space: normal;
+}
+
+/* The folder line (issue 186): "Filed in <folder>", then the Guess label when the app chose the
+   folder. The folder name is cut with an ellipsis (full name in its tooltip) and has room for
+   stacked Vietnamese marks. The words and the name are one piece; the label wraps under them when
+   the line has no room for it. */
+.lcard .lcard-folder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  color: var(--ink2);
+  font-size: var(--text-md);
+}
+
+/* The space after "Filed in" is kept (pre), so the words and the name read as one phrase; the icon
+   keeps its own space. */
+.lcard .lcard-folder-where {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 0;
+  white-space: pre;
+}
+
+.lcard .lcard-folder-where > .ic {
+  margin-inline-end: var(--space-1);
+}
+
+.lcard .lcard-folder-name {
+  min-width: 0;
+  padding-block: var(--border-2);
+  margin-block: calc(-1 * var(--border-2));
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lcard .lcard-folder > .trust {
+  flex: none;
+}

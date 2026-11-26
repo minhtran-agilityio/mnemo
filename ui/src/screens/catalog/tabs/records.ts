@@ -280,10 +280,83 @@ function linkCardRow(ctx: TabContext) {
       "long title and URL",
     ),
   );
+  // The note and the folder line (issue 186) start their own group of examples.
+  const notices = el(doc, "div", "rec-wrap");
+  notices.append(...noticeFolderStates(doc));
   return {
-    nodes: [sw, out, states, ...linkRowStates(doc, pasted)],
+    nodes: [sw, out, states, notices, ...linkRowStates(doc, pasted)],
     column: true,
   };
+}
+
+/**
+ * The card's "Already saved" note and its folder line (issue 186), with the request's sample (renamed: ui files never name the database engine): a
+ * done card, "Embedded database - Wikipedia", filed by the app in "Dev tools".
+ */
+function noticeFolderStates(doc: Document): HTMLElement[] {
+  const wiki: LinkItem = {
+    title: "Embedded database - Wikipedia",
+    url: "https://en.wikipedia.org/wiki/Embedded_database",
+    site: "en.wikipedia.org",
+    saved: "26 Nov 2026",
+    status: "done",
+    summary: "A database engine built into the app that uses it.",
+  };
+  const filed: LinkItem = {
+    ...wiki,
+    folder: "Dev tools",
+    folderIsGuess: true,
+  };
+  const unread = { summary: undefined };
+  const card = (item: LinkItem, caption: string, narrow = false) => {
+    const box = state(doc, caption, createLinkCard(doc, item), { grow: true });
+    if (narrow) box.classList.add("rec-narrow");
+    return box;
+  };
+  return [
+    card(wiki, "folder: none, no note"),
+    card({ ...wiki, alreadySaved: true }, "already saved"),
+    card(
+      { ...filed, alreadySaved: true },
+      "already saved, with a folder (Guess)",
+    ),
+    card(filed, "folder: Guess, on a done card"),
+    card({ ...filed, ...unread, status: "pending" }, "folder: pending"),
+    card({ ...filed, ...unread, status: "reading" }, "folder: reading"),
+    card(
+      {
+        ...filed,
+        ...unread,
+        status: "unreadable",
+        folder: "Unsorted",
+        folderIsGuess: false,
+      },
+      "folder: could not read",
+    ),
+    card(
+      {
+        ...wiki,
+        ...unread,
+        status: "ai-off",
+        folder: "Unsorted",
+        folderIsGuess: false,
+      },
+      "folder: AI off, Unsorted, no label",
+    ),
+    card(
+      {
+        ...filed,
+        folder:
+          "Databases, storage engines and everything about local-first desktop apps",
+      },
+      "folder: long name on a narrow card",
+      true,
+    ),
+    card(
+      { ...filed, folder: "Cơ sở dữ liệu nhúng và công cụ phát triển" },
+      "folder: Vietnamese name",
+    ),
+  ];
 }
 
 /**
