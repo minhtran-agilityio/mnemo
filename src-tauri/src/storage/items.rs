@@ -224,6 +224,14 @@ pub trait Item: sealed::Sealed + Sized {
     const EXISTS_SQL: &'static str;
     /// Refuses input that must not be saved. Runs before any write.
     fn validate(input: &Self::Input) -> Result<(), StorageError>;
+    /// Refuses an update that must not be saved given the stored row (after `validate`).
+    fn validate_update(
+        _conn: &rusqlite::Connection,
+        _id: &str,
+        _input: &Self::Input,
+    ) -> Result<(), StorageError> {
+        Ok(())
+    }
     #[doc(hidden)]
     fn values(input: &Self::Input) -> Vec<Value>;
     #[doc(hidden)]
@@ -380,6 +388,18 @@ pub(super) fn optional_text(field: &str, v: &Option<String>) -> Result<(), Stora
     }
 }
 
+/// The form the URL parser writes of a link that passed `web_address`: the same check, with a
+/// message for a link that is too long only once encoded.
+pub(super) fn encoded_web_address(parsed: &url::Url) -> Result<(), StorageError> {
+    if parsed.as_str().chars().count() > MAX_URL_CHARS {
+        return Err(invalid(
+            "The link is too long once encoded (letters such as é take more room in a link)."
+                .to_string(),
+        ));
+    }
+    web_address(parsed.as_str())
+}
+
 /// A web address: http or https, a host, no spaces, at most 2048 characters.
 pub(super) fn web_address(v: &str) -> Result<(), StorageError> {
     let bad = || {
@@ -518,11 +538,6 @@ impl Item for Bookmark {
 
     fn validate(i: &BookmarkInput) -> Result<(), StorageError> {
         web_address(&i.url)?;
-        // A changed link is stored as the URL parser writes it (?9), which percent-encoding or
-        // punycode can make longer: check that form too, as a save does.
-        if let Ok(parsed) = url::Url::parse(i.url.trim()) {
-            web_address(parsed.as_str())?;
-        }
         optional_chars("title", &i.title, MAX_TITLE_CHARS)?;
         optional_text("summary", &i.summary)?;
         optional_text("reason", &i.reason)?;
@@ -532,6 +547,30 @@ impl Item for Bookmark {
             ));
         }
         Ok(())
+    }
+
+    /// A changed link is stored as the URL parser writes it (?9), which percent-encoding or
+    /// punycode can make longer: only then is that form checked too, as a save does. The same
+    /// link (as stored, or in its parsed form) keeps the stored form and is not checked again.
+    fn validate_update(
+        conn: &rusqlite::Connection,
+        id: &str,
+        i: &BookmarkInput,
+    ) -> Result<(), StorageError> {
+        let Ok(parsed) = url::Url::parse(i.url.trim()) else {
+            return Ok(());
+        };
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT url FROM bookmark WHERE id = ?1 AND deleted_at IS NULL",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match stored {
+            Some(url) if url != i.url && url != parsed.as_str() => encoded_web_address(&parsed),
+            _ => Ok(()),
+        }
     }
 
     fn values(i: &BookmarkInput) -> Vec<Value> {
@@ -1021,6 +1060,7 @@ impl Storage {
         input: &T::Input,
     ) -> Result<T, StorageError> {
         T::validate(input)?;
+        T::validate_update(&self.conn, id, input)?;
         let mut values = vec![text(id), text(now)];
         values.extend(T::values(input));
         self.conn

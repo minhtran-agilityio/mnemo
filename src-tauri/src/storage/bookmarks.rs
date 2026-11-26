@@ -18,6 +18,7 @@ use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
 use serde::{Deserialize, Serialize};
 
 use super::error::StorageError;
+use super::items::encoded_web_address;
 use super::items::{invalid, optional_chars, required_text, web_address, MAX_TITLE_CHARS};
 use super::labels::{clean_name, MAX_LABELS};
 use super::record::{now_iso, Cursor, Page, PageRequest, RecordBase};
@@ -416,7 +417,7 @@ impl Storage {
         let url = url.trim();
         web_address(url)?;
         let parsed = parsed_link(url)?;
-        web_address(parsed.as_str())?;
+        encoded_web_address(&parsed)?;
         let base = RecordBase::new_at(now);
         let status = if claim.is_some() {
             SummaryStatus::Reading
@@ -1322,8 +1323,43 @@ mod tests {
             url::Url::parse(&long).unwrap().as_str().len() > crate::storage::items::MAX_URL_CHARS
         );
         let got = s.update_at::<Bookmark>(T2, &b.base.id, &bookmark(&long));
-        assert!(matches!(got, Err(StorageError::Invalid(_))), "{got:?}");
+        // Only the encoded form is over the limit, so the message says that, not the number.
+        match got {
+            Err(StorageError::Invalid(m)) => {
+                assert!(m.contains("too long once encoded"), "{m}");
+                assert!(!m.contains("2048"), "{m}");
+            }
+            other => panic!("{other:?}"),
+        }
         assert_eq!(s.get_saved_bookmark(&b.base.id).unwrap(), b);
+    }
+
+    #[test]
+    fn a_row_stored_as_sent_with_a_long_encoded_link_still_takes_a_title_edit() {
+        let (s, _d) = open_temp();
+        let head = "https://example.org/";
+        let long = format!(
+            "{head}{}{}",
+            "é".repeat(300),
+            "a".repeat(2000 - head.len() - 300)
+        );
+        // The generic add (and import) stores the link as sent, as before round 10.
+        let b: Bookmark = s.add_at(T1, &bookmark(&long)).unwrap();
+        assert_eq!(b.url, long);
+        // A title-only edit sends the same link: it is not a changed link, so it is not checked
+        // again and the stored form stays.
+        let edited: Bookmark = s
+            .update_at(
+                T2,
+                &b.base.id,
+                &BookmarkInput {
+                    title: Some("Mine".into()),
+                    ..bookmark(&long)
+                },
+            )
+            .unwrap();
+        assert_eq!(edited.title.as_deref(), Some("Mine"));
+        assert_eq!(edited.url, long);
     }
 
     #[test]

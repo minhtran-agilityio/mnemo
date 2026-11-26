@@ -275,9 +275,9 @@ pub fn summarize(
 /// (`storage::bookmarks::Held`):
 /// - when the run lost it (the owner edited the bookmark, or deleted it) the run stops quietly
 ///   and gives the bookmark as it is now (a deleted one with its `deletedAt`), with no error;
-/// - when a storage call fails, the run ends by `end_status` (only while it still holds the
-///   claim, so a committed summary is never undone) and the error is returned. `back` is the
-///   card's status for a pasted run on an unreadable or not-reached card, else `pending`.
+/// - when a storage call fails, the run releases the bookmark to `back` (only while it still
+///   holds the claim, so a committed summary is never undone) and the error is returned. `back`
+///   is the card's status for a pasted run on an unreadable or not-reached card, else `pending`.
 fn summarize_from(
     ctx: &SaveContext<'_>,
     b: SavedBookmark,
