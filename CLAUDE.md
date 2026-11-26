@@ -35,6 +35,7 @@ Mnemo is a local-first Tauri 2 desktop app: a Rust core in `src-tauri/`, a web U
 - One issue is one pull request.
 - Every Rust function that touches data has a test.
 - Done means it passes on both machines: macOS (Apple Silicon) and Ubuntu 22.04.
+- Every pull request has screenshots attached before review, whatever it changes. The reviewer reads them. Details in `.claude/rules/technical.md` (Change hygiene).
 
 ## More detail
 

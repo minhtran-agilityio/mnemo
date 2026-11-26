@@ -11,6 +11,14 @@ Closes #
 - [ ] Mac (Apple Silicon): `npm run check` passes
 - [ ] Ubuntu 22.04: `npm run check` passes
 
+## Screenshots
+
+Every pull request has screenshots, whatever it changes. Attach them as a comment (`gh pr comment <n> --attach <file>`) before review.
+
+- [ ] Changes a screen: before and after of each changed screen (light theme at least; dark too when colours change).
+- [ ] No screen (Rust, data, scripts, docs): a screenshot of the evidence, such as the test run or the command output that shows the change works.
+- [ ] No personal data, secrets or private text in any screenshot.
+
 ## Shared rules
 
 - [ ] Honest failure: if something could not be read, only the link is saved, with no summary. A reason the app wrote is marked as a guess.

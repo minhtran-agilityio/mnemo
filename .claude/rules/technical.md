@@ -42,3 +42,9 @@ Mnemo is a Tauri 2 desktop app: a small Rust core in `src-tauri/`, a web UI (HTM
 - Done means the issue's acceptance criteria pass on both macOS and Ubuntu, and CI (GitHub Actions, both OSes) is green.
 - Anything not checked against a source or a real run is written as **Unverified**, in docs and in code comments.
 - When behaviour changes, update the doc that describes it in the same change.
+- **Every pull request attaches screenshots for the reviewer, before review.** No pull request is exempt: Rust, data, scripts and docs pull requests too.
+  - A pull request that changes a screen: before and after screenshots of each changed screen (after only, when the screen is new). Light theme at least; dark too when colours change. Take them from the running app, or from a headless browser with mock data.
+  - A pull request with no screen (Rust, data, scripts, docs): a screenshot of the evidence the reviewer needs, for example the test run, the command output or the rendered text that shows the change works.
+  - No personal data, secrets or private text in a screenshot. Look at each image before you attach it.
+  - How to attach: `gh pr comment <n> --attach <file>` (gh 2.99 or newer). With an older gh, put the files on the `pr-evidence` branch under `pr-<n>/` and post a comment with pinned `raw.githubusercontent.com` URLs. Never commit screenshots to the pull request's own branch.
+  - A design-system pull request follows the same rule; its catalog screenshots (DESIGN.md §8) are its screenshots.
