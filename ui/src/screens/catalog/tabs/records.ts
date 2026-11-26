@@ -12,8 +12,10 @@ import {
   createAppBadge,
   createButton,
   createCite,
+  createCompactRow,
   createKanbanCard,
   createLinkCard,
+  createLinkRow,
   createLinkView,
   createList,
   createMarkdownView,
@@ -25,6 +27,7 @@ import {
   createTagList,
   createTaskRow,
   type LinkItem,
+  type LinkRowOptions,
   type LinkView,
 } from "../../../ds/index";
 import {
@@ -95,9 +98,29 @@ function linkCardRow(ctx: TabContext) {
   const states = el(doc, "div", "rec-wrap");
   const card = (item: LinkItem, caption: string, action?: Node) =>
     state(doc, caption, createLinkCard(doc, item, { action }), { grow: true });
+  // A card with more than one action (issue 179). `narrow` holds the card in a narrow column, so
+  // its buttons wrap.
+  const cardWith = (
+    item: LinkItem,
+    caption: string,
+    actions: readonly Node[],
+    narrow = false,
+  ) => {
+    // `grow` also stretches the card to its column; .rec-narrow then caps the column.
+    const box = state(doc, caption, createLinkCard(doc, item, { actions }), {
+      grow: true,
+    });
+    if (narrow) box.classList.add("rec-narrow");
+    return box;
+  };
   const act = (
     label: string,
-    more: { busy?: boolean; disabled?: boolean } = {},
+    more: {
+      busy?: boolean;
+      disabled?: boolean;
+      forced?: "hover" | "focus" | "pressed";
+      variant?: "ghost";
+    } = {},
   ) =>
     createButton(doc, {
       label,
@@ -105,6 +128,8 @@ function linkCardRow(ctx: TabContext) {
       ...more,
       onClick: () => ctx.toast(`${label}: an example action`),
     });
+  // Every action after the main one is quieter (issue 179).
+  const ghost = { variant: "ghost" } as const;
   // The request's sample (issue 169): a link pasted into Mnemo, so no source app.
   const pasted: LinkItem = {
     title: "Tauri 2 capabilities",
@@ -140,6 +165,63 @@ function linkCardRow(ctx: TabContext) {
       { ...pasted, ...unread, status: "unreadable" },
       "action disabled",
       act("Paste the text", { disabled: true }),
+    ),
+    // Issue 179, the owner's "Offer both": a pending card whose page could not be reached. A list
+    // holds many cards and a view has one primary action, so no card button is primary: the main
+    // action is a default sm button and the other one a quieter ghost sm button.
+    cardWith(
+      { ...pasted, ...unread, status: "pending" },
+      "two actions: pending, the main one default, the other ghost",
+      [act("Summarize later"), act("Paste the text", ghost)],
+    ),
+    cardWith(
+      { ...pasted, ...unread, status: "pending" },
+      "two actions on a narrow card: they wrap",
+      [act("Summarize later"), act("Paste the text", ghost)],
+      true,
+    ),
+    cardWith(
+      {
+        ...pasted,
+        ...unread,
+        status: "pending",
+        title: "Hướng dẫn quyền trong Tauri 2",
+      },
+      "overflow: two long Vietnamese labels on a narrow card",
+      [
+        act("Tóm tắt sau khi có mạng trở lại"),
+        act("Dán toàn bộ nội dung của trang vào đây", ghost),
+      ],
+      true,
+    ),
+    cardWith(
+      { ...pasted, ...unread, status: "pending" },
+      "two actions: the first busy",
+      [act("Summarize later", { busy: true }), act("Paste the text", ghost)],
+    ),
+    cardWith(
+      { ...pasted, ...unread, status: "pending" },
+      "two actions: the first disabled",
+      [
+        act("Summarize later", { disabled: true }),
+        act("Paste the text", ghost),
+      ],
+    ),
+    cardWith(
+      { ...pasted, ...unread, status: "pending" },
+      "two actions: focus-visible on the second",
+      [
+        act("Summarize later"),
+        act("Paste the text", { ...ghost, forced: "focus" }),
+      ],
+    ),
+    cardWith(
+      { ...pasted, ...unread, status: "pending" },
+      "two actions: hover on the first, active on the second",
+      [
+        act("Summarize later", { forced: "hover" }),
+        act("Paste the text", { ...ghost, forced: "pressed" }),
+      ],
     ),
     card(
       { ...pasted, tags: undefined, reason: undefined },
@@ -198,7 +280,190 @@ function linkCardRow(ctx: TabContext) {
       "long title and URL",
     ),
   );
-  return { nodes: [sw, out, states], column: true };
+  return {
+    nodes: [sw, out, states, ...linkRowStates(doc, pasted)],
+    column: true,
+  };
+}
+
+/**
+ * The List and Compact rows in each state (issue 171): the List row labels its summary, and both
+ * rows leave out tags and the reason.
+ */
+function linkRowStates(doc: Document, pasted: LinkItem): HTMLElement[] {
+  const unread = { summary: undefined, tags: undefined, reason: undefined };
+  const overflow: LinkItem = {
+    ...pasted,
+    title:
+      "Hướng dẫn đầy đủ về quyền và khả năng trong Tauri 2 — Ở ĐÂU, KHI NÀO, VÌ SAO cần giới hạn lệnh?",
+    site: "rất-nhiều-tên-miền-con.tài-liệu.v2.tauri.app",
+    summary:
+      "Mỗi cửa sổ chỉ gọi được những lệnh đã khai báo trong tệp capabilities; lệnh nào không có trong danh sách sẽ bị lõi từ chối.",
+    tags: ["tauri", "security", "rust", "ipc", "capabilities", "đặc-tả"],
+    reason:
+      "Có thể liên quan đến danh sách lệnh được phép của Mnemo, vì mỗi cửa sổ chỉ gọi được những lệnh đã khai báo.",
+  };
+  type Case = [LinkItem, string, LinkRowOptions?];
+  // The request's samples (issue 172): a Telegram link, and links with no site, whose host comes
+  // from the URL with or without its scheme.
+  const telegram: LinkItem = { ...pasted, app: "telegram" };
+  const noSite: LinkItem = {
+    ...pasted,
+    site: undefined,
+    url: "https://v2.tauri.app/security/capabilities",
+  };
+  const noScheme: LinkItem = {
+    ...noSite,
+    url: "v2.tauri.app/security/capabilities",
+  };
+  // Hosts shorter than --size-link-site-min (8ch): the site's box is its own text width.
+  const shortTg: LinkItem = {
+    ...telegram,
+    site: "t.me",
+    url: "https://t.me/tauri_apps/1234",
+  };
+  const shortX: LinkItem = {
+    ...pasted,
+    site: "x.com",
+    url: "https://x.com/tauriapps/status/1",
+  };
+  const listCases: Case[] = [
+    [pasted, "done: summary Written by AI; tags and reason left out"],
+    [
+      telegram,
+      "Telegram badge, site and date: on a narrow line the site and date wrap under the badge, together",
+    ],
+    [shortTg, "short host t.me with a Telegram badge: no gap before the date"],
+    [shortX, "short host x.com: no gap before the date"],
+    [noSite, "partial: no site, the host from a URL with https://"],
+    [noScheme, "partial: no site, the host from a URL with no scheme"],
+    [
+      {
+        ...pasted,
+        summaryKind: "guess",
+        summary: "Probably a guide to window permissions.",
+      },
+      "done: guessed summary, labelled Guess",
+    ],
+    [{ ...pasted, ...unread, status: "pending" }, "pending: no label"],
+    [
+      { ...pasted, ...unread, status: "reading" },
+      "reading: spinner and words as a status, no label",
+    ],
+    [
+      { ...pasted, ...unread, status: "unreadable" },
+      "could not read: link only, no label",
+    ],
+    [
+      { ...pasted, ...unread, status: "ai-off" },
+      "AI off: no summary, no label",
+    ],
+    [
+      { ...pasted, tags: undefined, reason: undefined },
+      "partial: summary only",
+    ],
+    [
+      { ...pasted, tagsKind: "owner", reasonKind: "owner" },
+      "the owner's tags and reason: left out too",
+    ],
+    [
+      overflow,
+      "overflow: long title, summary and host; many tags and a long reason left out",
+    ],
+    [pasted, "hover", { forceState: "hover" }],
+    [pasted, "focus-visible", { forceState: "focus" }],
+    [
+      overflow,
+      "focus-visible: a cut host shows in full, wrapped",
+      { forceState: "focus" },
+    ],
+    [pasted, "active", { forceState: "active" }],
+  ];
+  // The Compact row shows no summary, tags or reason, so it has no label in any status.
+  const compactCases: Case[] = [
+    [pasted, "done: title, site, date; nothing the app wrote, so no label"],
+    [shortTg, "short host t.me"],
+    [shortX, "short host x.com"],
+    [noSite, "partial: no site, the host from a URL with https://"],
+    [noScheme, "partial: no site, the host from a URL with no scheme"],
+    [
+      { ...pasted, site: undefined, url: "file:///home/me/notes/tauri.pdf" },
+      "partial: no host (a file link), the date at the row's end",
+    ],
+    [{ ...pasted, ...unread, status: "pending" }, "pending"],
+    [
+      { ...pasted, ...unread, status: "reading" },
+      "reading: spinner after the title, named Reading the page",
+    ],
+    [{ ...pasted, ...unread, status: "unreadable" }, "could not read"],
+    [{ ...pasted, ...unread, status: "ai-off" }, "AI off"],
+    [
+      overflow,
+      "overflow: long Vietnamese title and host; the title keeps 8ch and the host is cut first, the date wraps under the title in a narrow column",
+    ],
+    [
+      { ...overflow, site: "t.me", url: "https://t.me/tauri_apps/1234" },
+      "overflow: long title, short host t.me kept whole",
+    ],
+    [
+      { ...overflow, title: "Go" },
+      "short title, long host: the title box stops at 8ch, the host takes the rest",
+    ],
+    [
+      { ...overflow, ...unread, status: "reading" },
+      "reading, long title and host: the spinner stays on the title's line",
+    ],
+    [
+      {
+        ...pasted,
+        ...unread,
+        status: "reading",
+        site: "github.io",
+        url: "https://github.io/tauri-apps/plugins",
+      },
+      "reading, medium host github.io: in a narrow column the site and date wrap under the title, from its edge",
+    ],
+    [
+      {
+        ...pasted,
+        ...unread,
+        status: "reading",
+        site: "example.org",
+        url: "https://example.org/tauri/capabilities",
+      },
+      "reading, medium host example.org: in a narrow column the site and date wrap under the title, from its edge",
+    ],
+    [pasted, "hover", { forceState: "hover" }],
+    [pasted, "focus-visible", { forceState: "focus" }],
+    [
+      overflow,
+      "focus-visible: a cut host shows in full, wrapped",
+      { forceState: "focus" },
+    ],
+    [pasted, "active", { forceState: "active" }],
+  ];
+  const block = (
+    label: string,
+    cases: Case[],
+    build: (item: LinkItem, options?: LinkRowOptions) => HTMLElement,
+  ) =>
+    // Each row at the full width of the example column, as in the Bookmarks list.
+    cases.map(([item, caption, options]) =>
+      state(
+        doc,
+        `${label}: ${caption}`,
+        createList(doc, `${label}, ${caption}`, [build(item, options)]),
+        { grow: true },
+      ),
+    );
+  return [
+    ...block("List row", listCases, (item, options) =>
+      createLinkRow(doc, item, options),
+    ),
+    ...block("Compact row", compactCases, (item, options) =>
+      createCompactRow(doc, item, options),
+    ),
+  ];
 }
 
 function noteRows(ctx: TabContext) {
