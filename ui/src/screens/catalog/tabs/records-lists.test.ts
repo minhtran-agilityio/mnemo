@@ -102,7 +102,7 @@ test("Records shows the link card's note and folder line in each state (issue 18
     (c) => c.textContent ?? "",
   );
   const mine = (entry?.states ?? []).filter((st) =>
-    /^(folder|already saved)/.test(st),
+    /^(folder:|already saved)/.test(st),
   );
   expect(mine).toHaveLength(10);
   for (const st of mine) expect(caps).toContain(st);
@@ -148,4 +148,41 @@ test("Lists sorts the table, opens the tree and moves a kanban card", () => {
     }),
   );
   expect(card.closest(".kcol")?.getAttribute("data-col")).toBe("Doing");
+});
+
+test("Records shows the folder reason in each state (issue 193)", () => {
+  const panel = mount(renderRecords);
+  const entry = RECORDS.find((e) => e.name === "link card");
+  const caps = [...panel.querySelectorAll(".st > .cap")].map(
+    (c) => c.textContent ?? "",
+  );
+  const mine = (entry?.states ?? []).filter((st) =>
+    st.startsWith("folder reason:"),
+  );
+  expect(mine.length).toBeGreaterThan(0);
+  for (const st of mine) expect(caps).toContain(st);
+  for (const cap of caps.filter((c) => c.startsWith("folder reason:")))
+    expect(mine).toContain(cap);
+  const cardOf = (cap: string) =>
+    [...panel.querySelectorAll(".st")]
+      .find((s) => s.querySelector(":scope > .cap")?.textContent === cap)
+      ?.querySelector(".lcard");
+  const reasonOf = (cap: string) =>
+    cardOf(cap)?.querySelector(".lcard-folder-reason");
+  // The request's sample.
+  expect(reasonOf("folder reason: Guess, on a done card")?.textContent).toBe(
+    "It is a reference page for a database engine.Guess",
+  );
+  expect(reasonOf("folder reason: pending")).not.toBeNull();
+  expect(reasonOf("folder reason: could not read")).not.toBeNull();
+  expect(reasonOf("folder reason: the owner moved it, not shown")).toBeNull();
+  expect(reasonOf("folder reason: AI off, Unsorted, none")).toBeNull();
+  expect(
+    cardOf("folder reason: AI off, Unsorted, none")?.querySelector(
+      ".lcard-folder .trust",
+    ),
+  ).toBeNull();
+  expect(
+    cardOf("folder reason: long, on a narrow card")?.closest(".rec-narrow"),
+  ).not.toBeNull();
 });

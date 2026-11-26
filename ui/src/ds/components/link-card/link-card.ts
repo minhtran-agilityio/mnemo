@@ -12,6 +12,8 @@
 // Issue 172: the rows show the host of the URL when there is no site, never its scheme.
 // Issue 186: the card shows an "Already saved" note (`alreadySaved`) and the folder line
 // (`folder`, labelled Guess when `folderIsGuess`). The rows show neither.
+// Issue 193: the folder line shows the app's reason for the folder (`folderReason`) under the
+// folder name, labelled Guess. `folderIsGuess` is ignored on an `ai-off` card.
 import { BookmarkCheck, Clock, Folder, Link, PowerOff } from "lucide";
 import { createIcon } from "../../icon";
 import { createListRow } from "../list-row/list-row";
@@ -78,8 +80,19 @@ export interface LinkItem {
    * shows it.
    */
   readonly folder?: string;
-  /** The app chose the folder: the folder line is labelled Guess. Default false (no label). */
+  /**
+   * The app chose the folder: the folder line is labelled Guess. Default false (no label). Ignored
+   * on an `ai-off` card: with AI off the app files a link in Unsorted and guesses nothing, so the
+   * card shows no Guess label and no folder reason whatever the screen passes.
+   */
   readonly folderIsGuess?: boolean;
+  /**
+   * Why the app chose the folder ("It is a reference page for a database engine."). Shown only
+   * with `folderIsGuess` (and a folder), on a second line under the folder name, in secondary text
+   * followed by the Guess label, as the bookmark reason is. A long reason wraps. Left out, empty,
+   * or with no `folderIsGuess` (the owner moved the link): not shown. Only the card shows it.
+   */
+  readonly folderReason?: string;
 }
 
 export interface LinkCardOptions {
@@ -346,11 +359,15 @@ function alreadySavedNote(): HTMLElement {
   return note;
 }
 
-/** "Filed in <folder>", with the Guess label when the app chose the folder. */
+/**
+ * "Filed in <folder>", with the Guess label when the app chose the folder. With the app's reason,
+ * the reason takes a second line under the name and the one Guess label follows the reason.
+ */
 function folderLine(
   doc: Document,
   folder: string,
   guess: boolean,
+  reason?: string,
 ): HTMLElement {
   const line = doc.createElement("div");
   line.className = "lcard-folder";
@@ -360,7 +377,17 @@ function folderLine(
   name.title = folder;
   where.append(createIcon(Folder), doc.createTextNode("Filed in "), name);
   line.append(where);
-  if (guess) line.append(buildTrustLabel("guess"));
+  if (guess && reason) {
+    const why = doc.createElement("div");
+    why.className = "lcard-folder-reason";
+    why.append(
+      textEl(doc, "span", "lcard-folder-reason-text", reason),
+      buildTrustLabel("guess"),
+    );
+    line.append(why);
+  } else if (guess) {
+    line.append(buildTrustLabel("guess"));
+  }
   return line;
 }
 
@@ -403,9 +430,15 @@ export function createLinkCard(
     card.append(tagLine(doc, item));
   const guessed = (item.reasonKind ?? "guess") === "guess";
   if (item.reason && (read || !guessed)) card.append(reasonLine(doc, item));
-  // The folder shows in every status: a link is filed as soon as it is saved.
+  // The folder shows in every status: a link is filed as soon as it is saved. With AI off the app
+  // guesses nothing, so an `ai-off` card ignores folderIsGuess (no label, no reason).
   const folder = item.folder?.trim();
-  if (folder) card.append(folderLine(doc, folder, item.folderIsGuess === true));
+  if (folder) {
+    const folderGuess =
+      item.folderIsGuess === true && linkStatus(item) !== "ai-off";
+    const why = item.folderReason?.trim();
+    card.append(folderLine(doc, folder, folderGuess, why || undefined));
+  }
   const actions = cardActions(options);
   if (actions.length > 0) {
     const slot = doc.createElement("div");
