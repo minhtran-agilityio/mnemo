@@ -1496,32 +1496,53 @@ test("a reason without folderIsGuess (the owner moved the link) is not shown", (
   expect(none.textContent).not.toContain("reference page");
 });
 
-test("partial: a pending, reading or unreadable card shows a guessed folder's reason", () => {
-  for (const status of ["pending", "reading", "unreadable"] as const) {
+test("partial: a card that is not done hides the folder reason and keeps the folder's Guess label (rule 1)", () => {
+  for (const status of [
+    "pending",
+    "reading",
+    "unreadable",
+    "ai-off",
+  ] as const) {
     const card = createLinkCard(document, {
       ...reasoned,
       summary: undefined,
       status,
     });
-    expect(card.querySelector(".lcard-folder-reason-text")?.textContent).toBe(
-      "It is a reference page for a database engine.",
+    expect(card.querySelector(".lcard-folder-reason")).toBeNull();
+    expect(card.textContent).not.toContain("reference page");
+    expect(card.querySelector(".lcard-folder")?.textContent).toBe(
+      "Filed in Dev toolsGuess",
     );
-    expect(card.querySelector(".lcard-folder .trust-guess")).not.toBeNull();
+    expect(
+      card
+        .querySelector(".lcard-folder")
+        ?.lastElementChild?.classList.contains("trust-guess"),
+    ).toBe(true);
   }
 });
 
-test("AI off: folderIsGuess is ignored, so the card shows no Guess label and no reason", () => {
-  const card = createLinkCard(document, {
+test("AI off: the card shows folderIsGuess as the screen passes it (the core decides it)", () => {
+  // A link filed with AI off: the core files it in Unsorted with folderIsGuess false.
+  const unsorted = createLinkCard(document, {
     ...reasoned,
     summary: undefined,
     status: "ai-off",
     folder: "Unsorted",
+    folderIsGuess: false,
   });
-  expect(card.querySelector(".lcard-folder")?.textContent).toBe(
+  expect(unsorted.querySelector(".lcard-folder")?.textContent).toBe(
     "Filed in Unsorted",
   );
-  expect(card.querySelector(".lcard-folder .trust")).toBeNull();
-  expect(card.querySelector(".lcard-folder-reason")).toBeNull();
+  expect(unsorted.querySelector(".lcard-folder .trust")).toBeNull();
+  expect(unsorted.querySelector(".lcard-folder-reason")).toBeNull();
+  // The card never overrides the flag: a guessed folder keeps its label with AI off.
+  const guessed = createLinkCard(document, {
+    ...reasoned,
+    summary: undefined,
+    status: "ai-off",
+  });
+  expect(guessed.querySelector(".lcard-folder .trust-guess")).not.toBeNull();
+  expect(guessed.querySelector(".lcard-folder-reason")).toBeNull();
 });
 
 test("the rows show no folder reason", () => {
@@ -1563,4 +1584,12 @@ test("overflow: a long or Vietnamese reason wraps under the name, in secondary t
       ".lcard .lcard-folder-reason-text",
     ),
   ).toMatchObject({ "min-width": "0", "overflow-wrap": "anywhere" });
+  // The label after the reason never shrinks.
+  expect(
+    cssRule(
+      import.meta.dirname,
+      "link-card.css",
+      ".lcard .lcard-folder-reason > .trust",
+    ),
+  ).toMatchObject({ flex: "none" });
 });

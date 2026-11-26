@@ -173,8 +173,16 @@ test("Records shows the folder reason in each state (issue 193)", () => {
   expect(reasonOf("folder reason: Guess, on a done card")?.textContent).toBe(
     "It is a reference page for a database engine.Guess",
   );
-  expect(reasonOf("folder reason: pending")).not.toBeNull();
-  expect(reasonOf("folder reason: could not read")).not.toBeNull();
+  // Rule 1: a card that is not done hides the reason and keeps the folder's Guess label.
+  for (const cap of [
+    "folder reason: pending, hidden (rule 1)",
+    "folder reason: could not read, hidden (rule 1)",
+  ]) {
+    expect(reasonOf(cap)).toBeNull();
+    expect(
+      cardOf(cap)?.querySelector(".lcard-folder .trust-guess"),
+    ).not.toBeNull();
+  }
   expect(reasonOf("folder reason: the owner moved it, not shown")).toBeNull();
   expect(reasonOf("folder reason: AI off, Unsorted, none")).toBeNull();
   expect(

@@ -13,7 +13,7 @@
 // Issue 186: the card shows an "Already saved" note (`alreadySaved`) and the folder line
 // (`folder`, labelled Guess when `folderIsGuess`). The rows show neither.
 // Issue 193: the folder line shows the app's reason for the folder (`folderReason`) under the
-// folder name, labelled Guess. `folderIsGuess` is ignored on an `ai-off` card.
+// folder name, labelled Guess, only on a read (`done`) link.
 import { BookmarkCheck, Clock, Folder, Link, PowerOff } from "lucide";
 import { createIcon } from "../../icon";
 import { createListRow } from "../list-row/list-row";
@@ -81,16 +81,18 @@ export interface LinkItem {
    */
   readonly folder?: string;
   /**
-   * The app chose the folder: the folder line is labelled Guess. Default false (no label). Ignored
-   * on an `ai-off` card: with AI off the app files a link in Unsorted and guesses nothing, so the
-   * card shows no Guess label and no folder reason whatever the screen passes.
+   * The app chose the folder: the folder line is labelled Guess. Default false (no label). The
+   * screen passes the core's flag as it is, in every status: the core decides it (a link filed with
+   * AI off goes to Unsorted with `folderIsGuess: false`), and the card never overrides it.
    */
   readonly folderIsGuess?: boolean;
   /**
    * Why the app chose the folder ("It is a reference page for a database engine."). Shown only
-   * with `folderIsGuess` (and a folder), on a second line under the folder name, in secondary text
+   * with `folderIsGuess` (and a folder) on a read (`done`) link (shared rule 1: a reason the app
+   * wrote shows only on a read link), on a second line under the folder name, in secondary text
    * followed by the Guess label, as the bookmark reason is. A long reason wraps. Left out, empty,
-   * or with no `folderIsGuess` (the owner moved the link): not shown. Only the card shows it.
+   * with no `folderIsGuess` (the owner moved the link), or on a card that is not `done` (the folder
+   * line stays, with its Guess label): not shown. Only the card shows it.
    */
   readonly folderReason?: string;
 }
@@ -430,14 +432,15 @@ export function createLinkCard(
     card.append(tagLine(doc, item));
   const guessed = (item.reasonKind ?? "guess") === "guess";
   if (item.reason && (read || !guessed)) card.append(reasonLine(doc, item));
-  // The folder shows in every status: a link is filed as soon as it is saved. With AI off the app
-  // guesses nothing, so an `ai-off` card ignores folderIsGuess (no label, no reason).
+  // The folder shows in every status: a link is filed as soon as it is saved. The core decides
+  // folderIsGuess; the card shows it as passed. Shared rule 1: the app's reason for the folder
+  // shows only on a read (`done`) link.
   const folder = item.folder?.trim();
   if (folder) {
-    const folderGuess =
-      item.folderIsGuess === true && linkStatus(item) !== "ai-off";
-    const why = item.folderReason?.trim();
-    card.append(folderLine(doc, folder, folderGuess, why || undefined));
+    const why = read ? item.folderReason?.trim() : undefined;
+    card.append(
+      folderLine(doc, folder, item.folderIsGuess === true, why || undefined),
+    );
   }
   const actions = cardActions(options);
   if (actions.length > 0) {

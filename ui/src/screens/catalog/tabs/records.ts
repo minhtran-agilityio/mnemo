@@ -377,10 +377,13 @@ function folderReasonStates(
   const unread = { summary: undefined };
   return [
     card(why, "folder reason: Guess, on a done card"),
-    card({ ...why, ...unread, status: "pending" }, "folder reason: pending"),
+    card(
+      { ...why, ...unread, status: "pending" },
+      "folder reason: pending, hidden (rule 1)",
+    ),
     card(
       { ...why, ...unread, status: "unreadable" },
-      "folder reason: could not read",
+      "folder reason: could not read, hidden (rule 1)",
     ),
     card(
       { ...why, folderIsGuess: false },
@@ -392,6 +395,8 @@ function folderReasonStates(
         ...unread,
         status: "ai-off",
         folder: "Unsorted",
+        folderIsGuess: false,
+        folderReason: undefined,
       },
       "folder reason: AI off, Unsorted, none",
     ),
