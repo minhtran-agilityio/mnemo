@@ -451,14 +451,32 @@ fn text_within<R: Read + Send + 'static>(
         FetchError::NotReached("body timeout"),
         move || read_until(body, cap, deadline),
     )?;
+    parse_within(bytes, content_type, limits, deadline)
+}
+
+/// Makes the text of a body that is all in, on a helper thread, in the time left.
+fn parse_within(
+    bytes: Vec<u8>,
+    content_type: String,
+    limits: &FetchLimits,
+    deadline: Instant,
+) -> Result<PageText, FetchError> {
     // The body came in too late to walk its HTML: the site was slow, not the page too big
-    // (decision 34). Plain text has no walk that can run out of time, so it needs no budget.
+    // (decision 34). Plain text has no walk that can run out of time, so it needs no budget,
+    // and running out of time on it means the site was slow too (not reached). Only an HTML walk
+    // that started with its budget and ran out is too slow.
+    let html = text_kind(&content_type) == Some(TextKind::Html);
     let left = deadline.saturating_duration_since(Instant::now());
-    if text_kind(&content_type) == Some(TextKind::Html) && left < limits.parse_budget {
+    if html && left < limits.parse_budget {
         return Err(FetchError::NotReached("body timeout"));
     }
+    let late = if html {
+        FetchError::TooSlow
+    } else {
+        FetchError::NotReached("body timeout")
+    };
     let limits = limits.clone();
-    on_helper(deadline, FetchError::TooSlow, move || {
+    on_helper(deadline, late, move || {
         page_text_until(&bytes, &content_type, &limits, deadline)
     })
 }
@@ -1685,6 +1703,22 @@ mod tests {
         assert!(text_within(body, "text/plain".into(), &limits, deadline).is_ok());
         // The budget is a part of the whole read, never all of it.
         assert!(DEFAULT_LIMITS.parse_budget < DEFAULT_LIMITS.timeout);
+        // With no time left once the body is in, plain text was not reached either (the site
+        // was slow), never too slow.
+        let gone = Instant::now();
+        assert_eq!(
+            parse_within(long_text().into_bytes(), "text/plain".into(), &limits, gone),
+            Err(FetchError::NotReached("body timeout"))
+        );
+        // An HTML walk with no budget asked and no time left is too slow.
+        let no_budget = FetchLimits {
+            parse_budget: Duration::ZERO,
+            ..DEFAULT_LIMITS
+        };
+        assert_eq!(
+            parse_within(b"<p>x</p>".to_vec(), "text/html".into(), &no_budget, gone),
+            Err(FetchError::TooSlow)
+        );
         // A parse that started with its budget and ran out is too slow (the page is too big).
         let html = two_mb("<div/>");
         assert_eq!(

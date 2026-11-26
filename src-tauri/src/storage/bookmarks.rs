@@ -1307,6 +1307,26 @@ mod tests {
     }
 
     #[test]
+    fn an_owner_edit_whose_parsed_link_is_too_long_is_refused_and_changes_nothing() {
+        let (mut s, _d) = open_temp();
+        let b = s.save_link_at(T1, "https://example.org/").unwrap();
+        // 2000 characters as sent; each 'é' becomes "%C3%A9" in the parsed form (over 3500).
+        let head = "https://example.org/";
+        let long = format!(
+            "{head}{}{}",
+            "é".repeat(300),
+            "a".repeat(2000 - head.len() - 300)
+        );
+        assert_eq!(long.chars().count(), 2000);
+        assert!(
+            url::Url::parse(&long).unwrap().as_str().len() > crate::storage::items::MAX_URL_CHARS
+        );
+        let got = s.update_at::<Bookmark>(T2, &b.base.id, &bookmark(&long));
+        assert!(matches!(got, Err(StorageError::Invalid(_))), "{got:?}");
+        assert_eq!(s.get_saved_bookmark(&b.base.id).unwrap(), b);
+    }
+
+    #[test]
     fn an_owner_edit_that_sends_the_same_link_in_another_form_keeps_the_verdict() {
         let (mut s, _d) = open_temp();
         let (b, claim) = s.save_link_to_read_at(T1, "https://example.org/").unwrap();

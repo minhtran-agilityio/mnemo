@@ -518,6 +518,11 @@ impl Item for Bookmark {
 
     fn validate(i: &BookmarkInput) -> Result<(), StorageError> {
         web_address(&i.url)?;
+        // A changed link is stored as the URL parser writes it (?9), which percent-encoding or
+        // punycode can make longer: check that form too, as a save does.
+        if let Ok(parsed) = url::Url::parse(i.url.trim()) {
+            web_address(parsed.as_str())?;
+        }
         optional_chars("title", &i.title, MAX_TITLE_CHARS)?;
         optional_text("summary", &i.summary)?;
         optional_text("reason", &i.reason)?;

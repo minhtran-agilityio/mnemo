@@ -3,7 +3,9 @@
 // 1. The link is stored at once, before any page read or AI work, so it is never lost. It is
 //    stored already claimed (`reading`, with a fresh claim token) in one transaction, so
 //    "Summarize later" cannot start a second read of it.
-// 2. With AI off or at the limit, the bookmark stays link only (`ai_off`, "no summary yet").
+// 2. With AI off or at the limit, the bookmark stays link only (`ai_off`, "no summary yet"), or
+//    keeps its status when the run was from pasted text on an unreadable or not-reached card
+//    (`end_status`).
 // 3. The core reads the page (`fetch`). A page it cannot read stays link only, with a null
 //    summary: nothing is made up from the link or the title. A site that was not reached (any
 //    network failure, HTTP 408, 429 or 5xx) is `not_reached` ("Summarize later" and "Paste the
@@ -11,8 +13,11 @@
 //    wall, a missing page) is `unreadable` ("Paste the text").
 // 4. Claude gets only the page text (or the text the owner pasted), with no tools, and must
 //    answer in the JSON schema below. A good answer stores the summary, the tags and the reason
-//    (always a guess) together (`done`). A failed run stores nothing (`pending`, or `ai_off`
-//    when AI went off or reached the limit).
+//    (always a guess) together (`done`). A failed run stores nothing and ends by one rule,
+//    `end_status`: a run from pasted text on an unreadable or not-reached card gives the card that
+//    status back, so "Paste the text" stays; any other run is `pending`, or `ai_off` when AI went
+//    off or reached the limit. Its message names only the actions the card then has
+//    (`next_step`).
 // Every write of a run names its claim token: when the owner edited or deleted the bookmark
 // meanwhile, the run stops quietly and writes nothing. Every step sends the bookmark to `emit`,
 // so the screen can show it as it changes. Storage is never locked while the page is read or
@@ -270,8 +275,9 @@ pub fn summarize(
 /// (`storage::bookmarks::Held`):
 /// - when the run lost it (the owner edited the bookmark, or deleted it) the run stops quietly
 ///   and gives the bookmark as it is now (a deleted one with its `deletedAt`), with no error;
-/// - when a storage call fails, the run ends as `pending` (only while it still holds the claim,
-///   so a committed summary is never undone) and the error is returned.
+/// - when a storage call fails, the run ends by `end_status` (only while it still holds the
+///   claim, so a committed summary is never undone) and the error is returned. `back` is the
+///   card's status for a pasted run on an unreadable or not-reached card, else `pending`.
 fn summarize_from(
     ctx: &SaveContext<'_>,
     b: SavedBookmark,
@@ -414,11 +420,23 @@ fn not_reached() -> Problem {
     }
 }
 
+/// `s` with its first letter in lower case ("You can …" → "you can …").
+fn lower_first(s: &str) -> String {
+    let mut chars = s.chars();
+    chars
+        .next()
+        .map(|c| c.to_lowercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
 /// Why a pasted run with AI off gave no summary, for a card that keeps `status`.
 fn ai_off(status: SummaryStatus) -> Problem {
     Problem {
         code: "ai_off",
-        message: format!("AI is off. No summary was saved. {}", next_step(status)),
+        message: format!(
+            "AI is off. No summary was saved. Turn AI on, then {}",
+            lower_first(next_step(status))
+        ),
     }
 }
 
@@ -832,6 +850,10 @@ mod tests {
             let problem = got.ai_error.unwrap();
             assert_eq!(problem.code, "ai_off");
             assert!(problem.message.contains(next), "{problem:?}");
+            assert!(
+                problem.message.contains("Turn AI on, then you can"),
+                "{problem:?}"
+            );
         }
         // A plain save with AI off is still AI off, with no message (unchanged).
         let mut w = World::new(FakeReader::page(), FakeResult::Valid(GOOD.into()));
