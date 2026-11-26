@@ -4,9 +4,9 @@
 // Save stores the link at once in the core; the card then follows the core's bookmark-changed
 // events (reading, then done, link only or no summary yet). A link the core could not read
 // offers "Paste the text"; a link with no summary yet offers "Summarize later". A link whose page
-// could not be reached for now should offer both (owner decision); until the link card takes
-// several actions (UI request issue 179) it offers "Paste the text". Every part comes from ui/src/ds;
-// bookmarks.css lays them out. All text goes in as text.
+// could not be reached for now offers both (owner decision), in the link card's action slot (UI
+// request issue 179). Every part comes from ui/src/ds; bookmarks.css lays them out. All text goes
+// in as text.
 import {
   buildBanner,
   buildEmptyState,
@@ -31,8 +31,8 @@ import {
 } from "../../shared/api";
 import {
   ACTION_LABELS,
+  actionsFor,
   type CardAction,
-  shownAction,
   toLinkItem,
   upsert,
 } from "./bookmarks-logic";
@@ -200,10 +200,16 @@ export function renderBookmarks(
       });
   }
 
-  function actionButton(b: SavedBookmark, action: CardAction): HTMLElement {
+  /** The main action (`first`) is a default button; any other is ghost, as the link card asks. */
+  function actionButton(
+    b: SavedBookmark,
+    action: CardAction,
+    first: boolean,
+  ): HTMLElement {
     const button = createButton(doc, {
       label: ACTION_LABELS[action],
       size: "sm",
+      variant: first ? "default" : "ghost",
       busy: busy.has(b.id),
       onClick: () =>
         action === "paste" ? openPaste(b, button) : run(b.id, undefined),
@@ -211,10 +217,9 @@ export function renderBookmarks(
     return button;
   }
 
-  /** The card's one action button (several wait on UI request issue 179). */
-  function actionsOf(b: SavedBookmark): Node | undefined {
-    const action = shownAction(b);
-    return action ? actionButton(b, action) : undefined;
+  /** The card's action buttons, in order: the first is the main one. */
+  function actionsOf(b: SavedBookmark): Node[] {
+    return actionsFor(b).map((action, i) => actionButton(b, action, i === 0));
   }
 
   function draw(): void {
@@ -232,7 +237,7 @@ export function renderBookmarks(
     grid.append(
       ...items.map((b) =>
         createLinkCard(doc, toLinkItem(b), {
-          action: actionsOf(b),
+          actions: actionsOf(b),
         }),
       ),
     );

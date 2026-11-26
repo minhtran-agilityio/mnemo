@@ -85,16 +85,6 @@ export function actionsFor(b: SavedBookmark): CardAction[] {
 }
 
 /**
- * The one action the card shows until the link card takes several (UI request issue 179): "Paste the
- * text" when it is among the actions (the acceptance criterion names it for a link the app could
- * not read), else the first.
- */
-export function shownAction(b: SavedBookmark): CardAction | null {
-  const actions = actionsFor(b);
-  return actions.includes("paste") ? "paste" : (actions[0] ?? null);
-}
-
-/**
  * The list with `b` in it: an existing bookmark is replaced in place, a new one goes first. A
  * deleted bookmark (the owner deleted it while it was read) leaves the list.
  */

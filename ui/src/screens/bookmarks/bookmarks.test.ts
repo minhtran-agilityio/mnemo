@@ -2,13 +2,7 @@
 import { expect, test, vi } from "vitest";
 import type { Page, SavedBookmark, SaveResult } from "../../shared/api";
 import { type BookmarksDeps, renderBookmarks } from "./bookmarks";
-import {
-  actionsFor,
-  savedDate,
-  shownAction,
-  toLinkItem,
-  upsert,
-} from "./bookmarks-logic";
+import { actionsFor, savedDate, toLinkItem, upsert } from "./bookmarks-logic";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
@@ -122,10 +116,6 @@ test("a page that could not be reached offers both Summarize later and Paste the
   expect(actionsFor(timeout)).toEqual(["later"]);
   // Done or being read: no action, whatever the last error was.
   expect(actionsFor({ ...notReached, summaryStatus: "reading" })).toEqual([]);
-  // The card shows one of them until it takes several (UI request issue 179).
-  expect(shownAction(notReached)).toBe("paste");
-  expect(shownAction(timeout)).toBe("later");
-  expect(shownAction(bm())).toBeNull();
 });
 
 test("upsert replaces in place and puts a new link first", () => {
@@ -279,7 +269,7 @@ test("Summarize later asks again without pasted text and an AI error shows as a 
   expect(button(box, "Summarize later")).toBeDefined();
 });
 
-test("a link whose page could not be reached offers Paste the text, and pasted text makes its summary", async () => {
+test("a link whose page could not be reached offers both actions, and pasted text makes its summary", async () => {
   const { d } = deps({
     saveLink: vi.fn(async (url: string) => ({
       ...bm({
@@ -305,10 +295,10 @@ test("a link whose page could not be reached offers Paste the text, and pasted t
   box.querySelector("form")?.dispatchEvent(new Event("submit"));
   await flush();
   const card = box.querySelector("article") as HTMLElement;
-  // Link only, no summary, and "Paste the text" ("Summarize later" joins it with issue 179).
+  // Link only, no summary, and both actions (owner decision on #25: "Offer both").
   expect(card.textContent).toMatch(/no summary yet/i);
   expect(card.textContent).not.toContain("Summary made");
-  expect(button(card, "Paste the text")).toBeDefined();
+  expectBothActions(card);
   expect(document.body.textContent).toContain(
     "Mnemo could not reach the site.",
   );
@@ -324,7 +314,7 @@ test("a link whose page could not be reached offers Paste the text, and pasted t
   expect(button(box, "Summarize later")).toBeUndefined();
 });
 
-test("a not-reached link loaded from the list offers Paste the text, with no toast", async () => {
+test("a not-reached link loaded from the list offers both actions, with no toast", async () => {
   const { d } = deps({
     listBookmarkCards: vi.fn(async () =>
       page([
@@ -341,8 +331,38 @@ test("a not-reached link loaded from the list offers Paste the text, with no toa
   await flush();
   const card = box.querySelector("article") as HTMLElement;
   expect(card.textContent).toMatch(/no summary yet/i);
-  expect(button(card, "Paste the text")).toBeDefined();
+  expectBothActions(card);
+  expect(document.querySelector(".toast")).toBeNull();
 });
+
+test("Summarize later on a not-reached card asks again without pasted text", async () => {
+  const { d } = deps({
+    listBookmarkCards: vi.fn(async () =>
+      page([
+        bm({ id: "r2", summaryStatus: "not_reached", summary: null, tags: [] }),
+      ]),
+    ),
+  });
+  const { box } = mount(d);
+  await flush();
+  button(box, "Summarize later")?.click();
+  expect(d.summarizeBookmark).toHaveBeenCalledWith("r2", undefined);
+});
+
+/** "Summarize later" first (the main one, default), then "Paste the text" (ghost), per the link card of issue 179. */
+function expectBothActions(card: HTMLElement): void {
+  const later = button(card, "Summarize later");
+  const paste = button(card, "Paste the text");
+  expect(later).toBeDefined();
+  expect(paste).toBeDefined();
+  const shown = [...card.querySelectorAll(".lcard-action button")];
+  expect(shown.map((b) => b.textContent?.trim())).toEqual([
+    "Summarize later",
+    "Paste the text",
+  ]);
+  expect(later?.classList.contains("btn-ghost")).toBe(false);
+  expect(paste?.classList.contains("btn-ghost")).toBe(true);
+}
 
 test("a bookmark deleted while it was read leaves the list quietly", async () => {
   const { d, emit } = deps({
