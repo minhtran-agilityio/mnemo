@@ -4,9 +4,11 @@
 // labelled "Guess". The status decides what shows: only a `done` link shows its summary.
 // A long title wraps (card) or is cut off with its full text in the tooltip (rows); a long URL or
 // host is cut off with the full value in the tooltip; in a row, keyboard focus also shows the full
-// host. A card has one action slot: the screen passes the one button that fits the card's status
-// (for example "Paste the text").
+// host. A card has one action slot: the screen passes the buttons that fit the card's status, in
+// order, the main one first (for example "Summarize later" and "Paste the text" on a pending card
+// whose page could not be reached). On a narrow card they wrap, each whole, from the slot's start.
 // Issue 169 added the site, the saved date, tags, the reason, the action slot and `pending`.
+// Issue 179: the slot holds more than one action (`actions`).
 // Issue 172: the rows show the host of the URL when there is no site, never its scheme.
 import { Clock, Link, PowerOff } from "lucide";
 import { createIcon } from "../../icon";
@@ -67,8 +69,30 @@ export interface LinkItem {
 export interface LinkCardOptions {
   /** Shows a picture box on top (the Cards view). */
   readonly thumb?: boolean;
-  /** The one action of the card for its status, for example a `createButton`. */
+  /**
+   * The actions of the card for its status, in order: the first is the main one. They sit in the
+   * `.lcard-action` slot with a gap and wrap on a narrow card.
+   *
+   * The screen picks the buttons' variants; the card does not restyle them. A list holds many
+   * cards, and a view has one primary action, so no card button is `primary`: the main action is a
+   * default `createButton` with size `sm`, and each other one is a `ghost` `sm` button (quieter).
+   * For example "Summarize later" (default) then "Paste the text" (ghost).
+   *
+   * A non-empty list wins over `action`. Empty or left out, `action` is shown; with neither there
+   * is no slot.
+   */
+  readonly actions?: readonly Node[];
+  /** One action: the same as `actions: [action]`. Shown only when `actions` is empty or left out. */
   readonly action?: Node;
+}
+
+/** The actions to show: a non-empty `actions`, else `action` alone, else none. */
+function cardActions(options: LinkCardOptions): readonly Node[] {
+  return options.actions?.length
+    ? options.actions
+    : options.action
+      ? [options.action]
+      : [];
 }
 
 /** Options of a List or Compact row. */
@@ -330,10 +354,11 @@ export function createLinkCard(
     card.append(tagLine(doc, item));
   const guessed = (item.reasonKind ?? "guess") === "guess";
   if (item.reason && (read || !guessed)) card.append(reasonLine(doc, item));
-  if (options.action) {
+  const actions = cardActions(options);
+  if (actions.length > 0) {
     const slot = doc.createElement("div");
     slot.className = "lcard-action";
-    slot.append(options.action);
+    slot.append(...actions);
     card.append(slot);
   }
   return card;

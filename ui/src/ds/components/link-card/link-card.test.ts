@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { Link } from "lucide";
 import { expect, test } from "vitest";
 import { cssRule, MARKS_ROOM } from "../../../css-rule";
 import { createButton } from "../button/button";
@@ -268,6 +269,218 @@ test("a busy or disabled action stays in the slot and ignores clicks", () => {
   off.click();
   expect(offClicks).toBe(0);
   offCard.remove();
+});
+
+// Issue 179: the owner's "Offer both": a pending card whose page could not be reached shows two
+// actions, the main one first.
+const sm = (label: string, more: { busy?: boolean; disabled?: boolean } = {}) =>
+  createButton(document, { label, size: "sm", ...more });
+const slotOf = (card: HTMLElement) =>
+  card.querySelector<HTMLElement>(":scope > .lcard-action");
+const inSlot = (card: HTMLElement) => [...(slotOf(card)?.children ?? [])];
+const pending: LinkItem = { ...pasted, ...noSum, status: "pending" };
+
+test("the slot holds every action in the order given, the main one first, as the card's last part", () => {
+  const later = sm("Summarize later");
+  const paste = sm("Paste the text");
+  const card = createLinkCard(document, pending, { actions: [later, paste] });
+  expect(inSlot(card)).toEqual([later, paste]);
+  expect(card.lastElementChild).toBe(slotOf(card));
+  expect(card.querySelectorAll(".lcard-action")).toHaveLength(1);
+  const reversed = createLinkCard(document, pending, {
+    actions: [sm("Paste the text"), sm("Summarize later")],
+  });
+  expect(inSlot(reversed).map((b) => b.textContent)).toEqual([
+    "Paste the text",
+    "Summarize later",
+  ]);
+});
+
+test("no actions, an empty list or no options: no slot", () => {
+  expect(slotOf(createLinkCard(document, pending))).toBeNull();
+  expect(slotOf(createLinkCard(document, pending, {}))).toBeNull();
+  expect(slotOf(createLinkCard(document, pending, { actions: [] }))).toBeNull();
+});
+
+test("action is a one-item shorthand for actions; a non-empty actions wins, an empty one falls back to action", () => {
+  const one = sm("Paste the text");
+  const short = createLinkCard(document, pending, { action: one });
+  expect(inSlot(short)).toEqual([one]);
+  const long = createLinkCard(document, pending, {
+    actions: [sm("Paste the text")],
+  });
+  expect(slotOf(long)?.outerHTML).toBe(slotOf(short)?.outerHTML);
+  const ignored = sm("Ignored");
+  const later = sm("Summarize later");
+  const paste = sm("Paste the text");
+  const both = createLinkCard(document, pending, {
+    action: ignored,
+    actions: [later, paste],
+  });
+  expect(inSlot(both)).toEqual([later, paste]);
+  expect(both.contains(ignored)).toBe(false);
+  // An empty actions list does not drop the only action: the shorthand shows.
+  const only = sm("Paste the text");
+  const fallback = createLinkCard(document, pending, {
+    action: only,
+    actions: [],
+  });
+  expect(inSlot(fallback)).toEqual([only]);
+});
+
+test("the main action is a default sm button and the others ghost sm; the card keeps the variants the screen picks", () => {
+  const later = sm("Summarize later");
+  const paste = createButton(document, {
+    label: "Paste the text",
+    size: "sm",
+    variant: "ghost",
+  });
+  const before = [later.className, paste.className];
+  const card = createLinkCard(document, pending, { actions: [later, paste] });
+  expect(inSlot(card)).toEqual([later, paste]);
+  expect([later.className, paste.className]).toEqual(before);
+  expect(later.classList.contains("btn-ghost")).toBe(false);
+  expect(paste.classList.contains("btn-ghost")).toBe(true);
+  // A list holds many cards, and a view has one primary action: no card button is primary.
+  expect(card.querySelector(".btn-primary")).toBeNull();
+  // The slot's rules name no variant, so the card never restyles one.
+  const css = readFileSync(
+    resolve(import.meta.dirname, "link-card.css"),
+    "utf8",
+  );
+  expect(css).not.toMatch(/\.lcard-action[^{]*\.btn-(primary|ghost|danger)/);
+});
+
+test("two actions: Tab reaches them in order, each has its name and clicks on its own", () => {
+  const clicks: string[] = [];
+  const later = createButton(document, {
+    label: "Summarize later",
+    size: "sm",
+    onClick: () => clicks.push("later"),
+  });
+  const paste = createButton(document, {
+    label: "Paste the text",
+    size: "sm",
+    onClick: () => clicks.push("paste"),
+  });
+  const card = createLinkCard(document, pending, { actions: [later, paste] });
+  document.body.append(card);
+  const buttons = [...card.querySelectorAll("button")];
+  expect(buttons).toEqual([later, paste]);
+  // Document order is the Tab order: no tabindex changes it.
+  for (const b of buttons) expect(b.hasAttribute("tabindex")).toBe(false);
+  expect(buttons.map((b) => b.textContent)).toEqual([
+    "Summarize later",
+    "Paste the text",
+  ]);
+  paste.focus();
+  expect(document.activeElement).toBe(paste);
+  later.click();
+  paste.click();
+  expect(clicks).toEqual(["later", "paste"]);
+  card.remove();
+});
+
+test("a busy or disabled action next to an enabled one: only the enabled one clicks", () => {
+  let busyClicks = 0;
+  let pasteClicks = 0;
+  const busy = createButton(document, {
+    label: "Summarize later",
+    size: "sm",
+    busy: true,
+    onClick: () => busyClicks++,
+  });
+  const paste = createButton(document, {
+    label: "Paste the text",
+    size: "sm",
+    onClick: () => pasteClicks++,
+  });
+  const card = createLinkCard(document, pending, { actions: [busy, paste] });
+  expect(inSlot(card)).toEqual([busy, paste]);
+  expect(busy.getAttribute("aria-busy")).toBe("true");
+  busy.click();
+  paste.click();
+  expect(busyClicks).toBe(0);
+  expect(pasteClicks).toBe(1);
+  const off = sm("Summarize later", { disabled: true });
+  const on = sm("Paste the text");
+  const offCard = createLinkCard(document, pending, { actions: [off, on] });
+  expect(inSlot(offCard)).toEqual([off, on]);
+  expect(off.disabled).toBe(true);
+  expect(on.disabled).toBe(false);
+});
+
+test("long and Vietnamese labels stay whole in the slot, as text", () => {
+  const labels = [
+    "Tóm tắt sau khi có mạng trở lại",
+    "Dán toàn bộ nội dung của trang vào đây",
+  ];
+  const card = createLinkCard(document, pending, {
+    actions: labels.map((l) => sm(l)),
+  });
+  expect(inSlot(card).map((b) => b.textContent)).toEqual(labels);
+});
+
+test("the slot wraps its actions from its start edge with a token gap, and a long label wraps in its button", () => {
+  const slot = cssRule(
+    import.meta.dirname,
+    "link-card.css",
+    ".lcard .lcard-action",
+  );
+  expect(slot.display).toBe("flex");
+  expect(slot["flex-wrap"]).toBe("wrap");
+  expect(slot["justify-content"]).toBe("flex-start");
+  expect(slot.gap).toBe("var(--space-2)");
+  expect(slot["min-width"]).toBe("0");
+  const item = cssRule(
+    import.meta.dirname,
+    "link-card.css",
+    ".lcard .lcard-action > .btn",
+  );
+  expect(item["max-width"]).toBe("100%");
+  expect(item["min-width"]).toBe("0");
+  expect(item["overflow-wrap"]).toBe("anywhere");
+  // No auto margin, so a wrapped button starts at the slot's edge; no padding, so an icon-only
+  // button keeps its own.
+  expect(item["margin-inline-start"]).toBeUndefined();
+  expect(item.margin).toBeUndefined();
+  expect(item.padding).toBeUndefined();
+  expect(item["padding-block"]).toBeUndefined();
+  expect(item["padding-inline"]).toBeUndefined();
+  const label = cssRule(
+    import.meta.dirname,
+    "link-card.css",
+    ".lcard .lcard-action > .btn:not(.btn-icon)",
+  );
+  expect(label).toEqual({ "padding-block": "var(--space-1)" });
+  // Only the button part is touched: no rule styles any node in the slot.
+  expect(() =>
+    cssRule(import.meta.dirname, "link-card.css", ".lcard .lcard-action > *"),
+  ).toThrow();
+});
+
+test("an icon-only button in the slot keeps its classes, so its own padding applies", () => {
+  const icon = createButton(document, {
+    label: "More actions",
+    size: "sm",
+    iconOnly: true,
+    icon: Link,
+  });
+  const card = createLinkCard(document, pending, {
+    actions: [sm("Summarize later"), icon],
+  });
+  expect(inSlot(card)[1]).toBe(icon);
+  expect(icon.matches(".lcard .lcard-action > .btn")).toBe(true);
+  expect(icon.matches(".lcard .lcard-action > .btn:not(.btn-icon)")).toBe(
+    false,
+  );
+  expect(icon.getAttribute("aria-label")).toBe("More actions");
+  const own = cssRule(
+    resolve(import.meta.dirname, "../button"),
+    "button.css",
+    ".btn-icon",
+  );
+  expect(own.padding).toBe("0");
 });
 
 test("the status decides: a summary shows only when the link is done", () => {
