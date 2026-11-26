@@ -734,3 +734,75 @@ export async function dataFolderInfo(): Promise<DataFolderInfo> {
 export async function openDataFolder(): Promise<void> {
   await invoke<void>("open_data_folder");
 }
+
+// ---- Save a link (#25, BM-01) ----
+
+/** Where the summary of a saved link stands. */
+export type SummaryStatus =
+  | "pending"
+  | "reading"
+  | "unreadable"
+  | "ai_off"
+  | "not_reached"
+  | "done";
+
+/** One tag of a saved link: its label id and name. Tags are written by AI. */
+export interface BookmarkTag {
+  id: string;
+  name: string;
+}
+
+/** A saved link as its card shows it: the bookmark plus its site, summary status and tags. */
+export interface SavedBookmark extends Bookmark {
+  /** The host of the link, for example "example.org". Null when unknown. */
+  site: string | null;
+  summaryStatus: SummaryStatus;
+  tags: string[];
+  labels: BookmarkTag[];
+}
+
+/** A save or summary result: the bookmark, and why there is no summary when an AI run failed. */
+export interface SaveResult extends SavedBookmark {
+  aiError?: AppError;
+}
+
+/** Saves a link: the core stores it at once, then reads the page and asks for a summary. */
+export function saveLink(url: string): Promise<SaveResult> {
+  return invoke<SaveResult>("save_link", { url });
+}
+
+/**
+ * Makes the summary of a saved link again: from `pastedText` ("Paste the text"), or, without
+ * it, by reading the page again ("Summarize later").
+ */
+export function summarizeBookmark(
+  id: string,
+  pastedText?: string,
+): Promise<SaveResult> {
+  return invoke<SaveResult>(
+    "summarize_bookmark",
+    pastedText === undefined ? { id } : { id, pastedText },
+  );
+}
+
+/** One page of saved links with their site, status and tags, newest first. */
+export function listBookmarkCards(args: {
+  limit: number;
+  after?: Cursor | null;
+}): Promise<Page<SavedBookmark>> {
+  return invoke<Page<SavedBookmark>>("list_bookmark_cards", {
+    page: { limit: args.limit, after: args.after ?? null },
+  });
+}
+
+/** The event the core sends with the bookmark after each step of a save or a summary. */
+export const BOOKMARK_EVENT = "bookmark-changed";
+
+/** Calls `handler` with the bookmark after each step. Resolves to the unsubscribe call. */
+export function onBookmarkChanged(
+  handler: (bookmark: SavedBookmark) => void,
+): Promise<() => void> {
+  return listen<SavedBookmark>(BOOKMARK_EVENT, (event) =>
+    handler(event.payload),
+  );
+}

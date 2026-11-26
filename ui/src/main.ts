@@ -3,6 +3,7 @@ import "./ds";
 import "./style.css";
 import "./screens/settings/settings.css";
 import "./screens/ideas/ideas.css";
+import "./screens/bookmarks/bookmarks.css";
 import { getVersion } from "@tauri-apps/api/app";
 import { createToastRegion, type ToastRegion } from "./ds";
 import { renderEmptyState } from "./frame/empty-state";
@@ -25,6 +26,7 @@ import {
   ThemeReadTimeoutError,
 } from "./frame/theme";
 import { pingErrorText } from "./ping-text";
+import { renderBookmarks } from "./screens/bookmarks/bookmarks";
 import { renderIdeas } from "./screens/ideas/ideas";
 import { renderNotes } from "./screens/notes/notes";
 import { renderSettings } from "./screens/settings/settings";
@@ -41,12 +43,14 @@ import {
   getAiMode,
   getSetting,
   listAiModels,
+  listBookmarkCards,
   listBookmarks,
   listIdeas,
   listLabelledNotes,
   listLabels,
   listNotes,
   moveLabel,
+  onBookmarkChanged,
   openDataFolder,
   pickFolder,
   ping,
@@ -55,8 +59,10 @@ import {
   resetData,
   runTestPrompt,
   saveLabelledNote,
+  saveLink,
   setAiModel,
   setSetting,
+  summarizeBookmark,
   turnIdeaIntoProject,
   updateIdea,
 } from "./shared/api";
@@ -70,6 +76,8 @@ const SETTINGS_ID = "settings";
 const NOTES_ID = "notes";
 /** The id of the sidebar item that opens Ideas (#34). */
 const IDEAS_ID = "ideas";
+/** The id of the sidebar item that opens Bookmarks (#25; #27 replaces the screen). */
+const BOOKMARKS_ID = "bookmarks";
 
 const status = document.querySelector<HTMLElement>("#ping-status");
 const versionEl = document.querySelector<HTMLElement>("#app-version");
@@ -295,6 +303,13 @@ async function start(): Promise<void> {
         turnIdeaIntoProject,
         listBookmarks,
         listNotes,
+      });
+    } else if (item.id === BOOKMARKS_ID) {
+      leaveScreen = renderBookmarks(screen, {
+        saveLink,
+        summarizeBookmark,
+        listBookmarkCards,
+        onBookmarkChanged,
       });
     } else if (isRoadmapItem(item)) {
       renderEmptyState(screen, { item, query: route.query });

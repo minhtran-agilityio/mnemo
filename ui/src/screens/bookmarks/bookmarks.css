@@ -1,0 +1,36 @@
+/* The Bookmarks screen (#25): layout only, with token values. Every look comes from ui/src/ds. */
+.bookmarks-linkbox {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  max-width: var(--measure-intro);
+}
+
+.bookmarks-linkbox > .field {
+  flex: 1 1 var(--size-basis-column);
+  min-width: 0;
+}
+
+.bookmarks-notice:empty {
+  display: none;
+}
+
+.bookmarks-notice {
+  margin-top: var(--space-4);
+}
+
+.bookmarks-list {
+  margin-top: var(--space-5);
+}
+
+/* Columns of at least the column basis; the smallest window holds one column. */
+.bookmarks-cards {
+  display: grid;
+  grid-template-columns: repeat(
+      auto-fill,
+      minmax(var(--size-basis-column), 1fr)
+    );
+  gap: var(--space-4);
+}

@@ -169,6 +169,11 @@ const DELETE_LABEL_SQL: &str = "UPDATE label SET deleted_at = ?2, updated_at = ?
 const HIDE_LINKS_OF_LABEL_SQL: &str = "UPDATE note_label SET deleted_at = ?2, updated_at = ?2
      WHERE label_id = ?1 AND deleted_at IS NULL";
 
+// Bookmark tags (#25) are top labels: a deleted label leaves the bookmarks, only the link goes.
+const HIDE_BOOKMARK_LINKS_OF_LABEL_SQL: &str =
+    "UPDATE bookmark_label SET deleted_at = ?2, updated_at = ?2
+     WHERE label_id = ?1 AND deleted_at IS NULL";
+
 const MOVE_CHILDREN_SQL: &str = "UPDATE label SET parent_id = ?1, updated_at = ?2
      WHERE parent_id = ?3 AND deleted_at IS NULL";
 
@@ -229,7 +234,7 @@ fn label_from_row(r: &Row<'_>) -> rusqlite::Result<Label> {
 }
 
 /// The trimmed name, or why it is refused.
-fn clean_name(name: &str) -> Result<String, StorageError> {
+pub(super) fn clean_name(name: &str) -> Result<String, StorageError> {
     let name = name.trim();
     if name.is_empty() {
         return Err(StorageError::Invalid(
@@ -310,7 +315,7 @@ fn notes_to_move(tx: &Transaction<'_>, id: &str, parent: &str) -> Result<u32, St
 }
 
 impl Storage {
-    fn immediate(&mut self) -> Result<Transaction<'_>, StorageError> {
+    pub(super) fn immediate(&mut self) -> Result<Transaction<'_>, StorageError> {
         // Immediate: the checks and the writes see the same state, and a second writer
         // waits for the busy timeout instead of failing at once.
         Ok(self
@@ -487,6 +492,7 @@ impl Storage {
             }
         }
         tx.execute(HIDE_LINKS_OF_LABEL_SQL, params![id, now])?;
+        tx.execute(HIDE_BOOKMARK_LINKS_OF_LABEL_SQL, params![id, now])?;
         let moved_labels = tx
             .execute(MOVE_CHILDREN_SQL, params![parent, now, id])
             .map_err(label_write_failed)? as u32;
