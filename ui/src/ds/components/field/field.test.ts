@@ -217,7 +217,7 @@ test("a message of only spaces clears the error", () => {
   f.remove();
 });
 
-// Field with an action beside its control (#198).
+// Field with an action beside its control.
 function buildAction(options: { hint?: string; error?: string } = {}) {
   const input = createTextInput(document, { type: "url" });
   const save = createButton(document, {

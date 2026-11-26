@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// Layout check of the field with an action (#198). happy-dom has no layout, so this renders the
+// Layout check of the field with an action. happy-dom has no layout, so this renders the
 // real part with the real style sheets of ui/src/ds in headless Chrome and reads the boxes back.
 // It skips when no Chrome is installed.
 import { execFileSync } from "node:child_process";
