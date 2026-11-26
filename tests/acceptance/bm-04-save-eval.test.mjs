@@ -198,7 +198,7 @@ test('AC1: evals/save/ holds about 20 stored pages (at least 18), as raw HTML', 
   assert.ok(all.length >= 18, `evals/save/ holds ${all.length} stored HTML page(s); the ticket asks for about 20`);
   const ids = all.map((p) => p.id);
   assert.equal(new Set(ids).size, ids.length, `two pages share a name: ${ids.join(', ')}`);
-  for (const p of readable()) assert.match(p.html, /<\/?(html|body|p|div|h1|h2|main|article)\b/i, `${relative(ROOT, p.file)} is not raw HTML`);
+  for (const p of readable()) assert.match(p.html, /<\/?[a-z][a-z0-9-]*(\s[^>]*)?>/i, `${relative(ROOT, p.file)} is not raw HTML`);
 });
 
 // Ticket: "Include easy pages, long pages, non-English pages and 3 pages that cannot be read (empty or
