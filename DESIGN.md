@@ -98,6 +98,8 @@ The UI Catalog tabs need fixed lengths that no token covered (prototype v3 uses 
 | `--size-textarea-min` | 88px |
 | `--size-tags-max` | 360px |
 | `--size-tag-input-min` | 80px |
+| `--size-link-sub-min` | 6.75rem |
+| `--size-link-site-min` | 8ch |
 | `--size-label-picker-max` | 280px |
 | `--size-menu-min` | 220px |
 | `--size-menu-max` | 320px |
@@ -153,6 +155,8 @@ The UI Catalog tabs need fixed lengths that no token covered (prototype v3 uses 
 | `--size-token-bar-max` | 200px |
 | `--tracking-caption` | 0.02em |
 | `--tracking-caps` | 0.06em |
+
+#171 added `--size-link-sub-min` for the List row's body and summary line. #172 raised it from 6rem (96px, narrower than the 104.5px "Written by AI" label in Chrome) to 6.75rem (108px), so it holds a whole label, and added `--size-link-site-min` (8ch of the site's font, 52.8px in Chrome): the smallest width of the site in a List row before its date goes to the next line. #175 uses `--size-link-site-min` in the Compact row too, with no new token: the smallest width of a cut title (8ch of the title's font, 55.7px in Chrome) and of a cut site, so the site is cut before the title drops under it, and a narrow list puts the date on a second line instead. Both are checked in Chrome by `tests/acceptance/ds-09-limits.test.mjs`; **Unverified** in WebKit and WebKitGTK.
 
 Rules:
 

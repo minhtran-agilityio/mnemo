@@ -24,3 +24,10 @@
 .ui-catalog .cat-ex.col > .seg {
   align-self: flex-start;
 }
+
+/* A link card held in a narrow column (issue 179), so its action buttons wrap: two buttons that do
+   not fit side by side, and a long label wider than the card. */
+.ui-catalog .rec-wrap > .st.rec-narrow {
+  flex: 0 1 var(--size-basis-setting);
+  max-width: var(--size-basis-setting);
+}

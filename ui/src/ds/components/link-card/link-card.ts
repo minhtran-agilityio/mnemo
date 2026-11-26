@@ -3,9 +3,13 @@
 // summary the app wrote and tags it chose are labelled "Written by AI", and a reason it guessed is
 // labelled "Guess". The status decides what shows: only a `done` link shows its summary.
 // A long title wraps (card) or is cut off with its full text in the tooltip (rows); a long URL or
-// host is cut off with the full value in the tooltip. A card has one action slot: the screen
-// passes the one button that fits the card's status (for example "Paste the text").
+// host is cut off with the full value in the tooltip; in a row, keyboard focus also shows the full
+// host. A card has one action slot: the screen passes the buttons that fit the card's status, in
+// order, the main one first (for example "Summarize later" and "Paste the text" on a pending card
+// whose page could not be reached). On a narrow card they wrap, each whole, from the slot's start.
 // Issue 169 added the site, the saved date, tags, the reason, the action slot and `pending`.
+// Issue 179: the slot holds more than one action (`actions`).
+// Issue 172: the rows show the host of the URL when there is no site, never its scheme.
 import { Clock, Link, PowerOff } from "lucide";
 import { createIcon } from "../../icon";
 import { createListRow } from "../list-row/list-row";
@@ -65,8 +69,36 @@ export interface LinkItem {
 export interface LinkCardOptions {
   /** Shows a picture box on top (the Cards view). */
   readonly thumb?: boolean;
-  /** The one action of the card for its status, for example a `createButton`. */
+  /**
+   * The actions of the card for its status, in order: the first is the main one. They sit in the
+   * `.lcard-action` slot with a gap and wrap on a narrow card.
+   *
+   * The screen picks the buttons' variants; the card does not restyle them. A list holds many
+   * cards, and a view has one primary action, so no card button is `primary`: the main action is a
+   * default `createButton` with size `sm`, and each other one is a `ghost` `sm` button (quieter).
+   * For example "Summarize later" (default) then "Paste the text" (ghost).
+   *
+   * A non-empty list wins over `action`. Empty or left out, `action` is shown; with neither there
+   * is no slot.
+   */
+  readonly actions?: readonly Node[];
+  /** One action: the same as `actions: [action]`. Shown only when `actions` is empty or left out. */
   readonly action?: Node;
+}
+
+/** The actions to show: a non-empty `actions`, else `action` alone, else none. */
+function cardActions(options: LinkCardOptions): readonly Node[] {
+  return options.actions?.length
+    ? options.actions
+    : options.action
+      ? [options.action]
+      : [];
+}
+
+/** Options of a List or Compact row. */
+export interface LinkRowOptions {
+  /** Draws a state that cannot be live in a still view (the UI Catalog). */
+  readonly forceState?: "hover" | "focus" | "active";
 }
 
 /** Past this many tags the tag list shows one "+N" item. */
@@ -135,6 +167,116 @@ function metaLine(doc: Document, item: LinkItem): HTMLDivElement | null {
   const when = item.saved || item.age;
   if (when) parts.push(when);
   return parts.length > 0 ? createMetaLine(doc, parts) : null;
+}
+
+/** A scheme with an authority, as in `https://`. Group 1 is the scheme's name. */
+const SCHEME = /^([a-z][a-z\d+.-]*):\/\//i;
+
+/** The port a scheme uses when the URL names none; `new URL()` leaves it out of the host. */
+const DEFAULT_PORT: Readonly<Record<string, string>> = {
+  http: "80",
+  https: "443",
+  ws: "80",
+  wss: "443",
+  ftp: "21",
+};
+
+/**
+ * The authority of a URL written as text: after the scheme (or a protocol-relative `//`), before
+ * the path, without a user. Empty when the URL has none (`file:///a`).
+ */
+function authority(url: string): string {
+  const rest = url.replace(SCHEME, "").replace(/^\/\//, "");
+  const end = rest.search(/[/?#]/);
+  const auth = end < 0 ? rest : rest.slice(0, end);
+  return auth.slice(auth.lastIndexOf("@") + 1);
+}
+
+/** A host and a port with no scheme ("localhost:1420/a"), which `new URL()` reads as a scheme. */
+const HOST_PORT = /^[^:/?#]+:\d+(?:[/?#]|$)/;
+
+/** A scheme with no authority after it, as in `mailto:`, `about:` or `file:/a`. */
+const BARE_SCHEME = /^[a-z][a-z\d+.-]*:(?!\/\/)/i;
+
+/** Text with only printable ASCII. */
+const ASCII = /^[\x20-\x7e]*$/;
+
+/** A host written as text, lowercased, without the default port of its scheme. */
+function foldHost(host: string, scheme: string): string {
+  const port = DEFAULT_PORT[scheme.toLowerCase()];
+  const low = host.toLowerCase();
+  return port && low.endsWith(`:${port}`)
+    ? low.slice(0, -(port.length + 1))
+    : low;
+}
+
+/**
+ * Whether `new URL()` takes the text as an absolute URL. `URL.canParse` is in WebKit since Safari 17
+ * and WebKitGTK 2.42 (2023); support in the WebKitGTK that Ubuntu 22.04 ships is **Unverified**.
+ * Where it is missing, the URL is read as text only (the same host for an http or https link).
+ */
+function parses(url: string): boolean {
+  return typeof URL.canParse === "function" && URL.canParse(url);
+}
+
+/**
+ * The host to show for a link: its site, else the host of its URL, never the scheme
+ * ("https://v2.tauri.app/a" and "v2.tauri.app/a" both give "v2.tauri.app"). Empty when the URL has
+ * no host: `file:///a`, `about:blank`, `mailto:me@x.com`, `javascript:...`. Only the host text
+ * decides how it is read:
+ * - an ASCII host is parsed with `new URL()`, which lowercases it and drops a default port;
+ * - a host with letters outside ASCII is lowercased as written, with a default port dropped here,
+ *   since `new URL()` turns it into punycode ("xn--..."), which the owner cannot read;
+ * - a URL with no scheme ("v2.tauri.app/a", "//v2.tauri.app/a", "localhost:1420/a") is not an
+ *   absolute URL; its host text is lowercased as written.
+ * A path with letters outside ASCII changes nothing.
+ */
+export function linkHost(item: LinkItem): string {
+  const site = item.site?.trim();
+  if (site) return site;
+  const url = item.url.trim();
+  if (HOST_PORT.test(url)) return foldHost(authority(url), "");
+  if (parses(url)) {
+    const parsed = new URL(url);
+    // A scheme with no host (about:, mailto:, javascript:, file:) shows no site.
+    if (!parsed.host) return "";
+    const text = authority(url);
+    return ASCII.test(text)
+      ? parsed.host
+      : foldHost(text, parsed.protocol.slice(0, -1));
+  }
+  if (BARE_SCHEME.test(url)) return "";
+  return foldHost(authority(url), SCHEME.exec(url)?.[1] ?? "");
+}
+
+/**
+ * The List row's meta line: the app badge, then the host and the saved date, kept together in
+ * `.link-host` so they wrap as one piece. When the line has no room for the badge and the whole
+ * host and date, they wrap under the badge. There is no dot after the badge (it is its own tinted
+ * box), so a wrapped line never ends with a dot. Null when none is known.
+ */
+function rowMetaLine(doc: Document, item: LinkItem): HTMLDivElement | null {
+  const parts: (string | Node)[] = [];
+  const host = linkHost(item);
+  if (host) {
+    const site = textEl(doc, "span", "site", host);
+    site.title = host;
+    parts.push(site);
+  }
+  // An empty string falls back, as a missing value does.
+  const when = item.saved || item.age;
+  if (when) parts.push(when);
+  if (!item.app && parts.length === 0) return null;
+  const line = createMetaLine(
+    doc,
+    item.app ? [createAppBadge(doc, item.app)] : [],
+  );
+  if (parts.length > 0) {
+    const group = createMetaLine(doc, parts);
+    group.classList.add("link-host");
+    line.append(group);
+  }
+  return line;
 }
 
 function noSummary(doc: Document, item: LinkItem): HTMLElement {
@@ -212,39 +354,104 @@ export function createLinkCard(
     card.append(tagLine(doc, item));
   const guessed = (item.reasonKind ?? "guess") === "guess";
   if (item.reason && (read || !guessed)) card.append(reasonLine(doc, item));
-  if (options.action) {
+  const actions = cardActions(options);
+  if (actions.length > 0) {
     const slot = doc.createElement("div");
     slot.className = "lcard-action";
-    slot.append(options.action);
+    slot.append(...actions);
     card.append(slot);
   }
   return card;
 }
 
-/** The List view: one row per link, with the summary (or why there is none) on a second line. */
-export function createLinkRow(doc: Document, item: LinkItem): HTMLLIElement {
+/**
+ * The List view: one row per link, with the summary (or why there is none) on a second line. A
+ * summary shows only on a `done` link and keeps its Written by AI (or Guess) label after the text:
+ * the summary is cut with its ellipsis, and the label stays whole (under the summary when the line
+ * is tight). Tags and the reason are left out of the two-line row (each needs its own label and
+ * line); the Cards view shows them (issue 171).
+ */
+export function createLinkRow(
+  doc: Document,
+  item: LinkItem,
+  options: LinkRowOptions = {},
+): HTMLLIElement {
+  const summary = shownSummary(item);
   const row = createListRow(doc, {
     title: item.title,
-    sub: shownSummary(item) ?? noSummaryText(item),
+    sub: summary ?? noSummaryText(item),
     icon: Link,
   });
   row.classList.add("link-row");
-  const meta = metaLine(doc, item);
-  if (meta) row.append(meta);
+  if (options.forceState) row.classList.add(`is-${options.forceState}`);
+  row.dataset.status = linkStatus(item);
+  const sub = row.querySelector(".row-sub");
+  if (summary && sub) {
+    const line = doc.createElement("span");
+    line.className = "link-sub";
+    sub.replaceWith(line);
+    line.append(sub, buildTrustLabel(item.summaryKind ?? "ai"));
+  } else if (linkStatus(item) === "reading" && sub) {
+    // Reading is an AI task in progress: the spinner and the words, as a status region.
+    sub.replaceChildren(reading(doc));
+  }
+  // The body and the meta line share .link-main, after the icon: the meta line sits next to the
+  // body when it fits whole, else on its own line under the title.
+  const body = row.querySelector(":scope > .row-body");
+  const main = doc.createElement("span");
+  main.className = "link-main";
+  if (body) body.replaceWith(main);
+  else row.append(main);
+  if (body) main.append(body);
+  const meta = rowMetaLine(doc, item);
+  if (meta) main.append(meta);
   return row;
 }
 
-/** The Compact view: the title, the site and the age on one line. */
-export function createCompactRow(doc: Document, item: LinkItem): HTMLLIElement {
+/**
+ * The Compact view: the title, the site and the saved date on one line, and a spinner (named
+ * "Reading the page") while Mnemo reads it. The title and the site share the room, each up to its
+ * own width. The title keeps a readable minimum (8ch), so a short title keeps an 8ch box and any
+ * room beyond that goes to the site; the site is cut before the title goes under 8ch. The date goes
+ * to a second line under the title in a list of 220px or narrower with a host of 8ch or more (214px
+ * docs.rs, 201px x.com, 194px t.me, 160px no site; on a reading row 244, 238, 225, 218 and 184px);
+ * on a reading row the site goes there too at 166px or narrower (159px docs.rs, 146px x.com, 140px
+ * t.me). Measured in Chrome (issue 175). It shows nothing the app wrote (no summary, tags or
+ * reason), so it needs no trust label; the List and Cards views show them, labelled (issue 171).
+ */
+export function createCompactRow(
+  doc: Document,
+  item: LinkItem,
+  options: LinkRowOptions = {},
+): HTMLLIElement {
   const li = doc.createElement("li");
   li.className = "compact-row";
+  if (options.forceState) li.classList.add(`is-${options.forceState}`);
+  li.dataset.status = linkStatus(item);
   li.tabIndex = 0;
   const title = textEl(doc, "span", "row-title", item.title);
   title.title = item.title;
-  const host = item.site || item.url.split("/")[0];
-  const dom = textEl(doc, "span", "dom", host);
-  dom.title = item.url;
-  li.append(title, dom);
+  li.append(title);
+  // While Mnemo reads the page, a spinner sits after the title, as a status region. Its words are
+  // in the tooltip and hidden text, so the one-line row keeps room for the site and the date.
+  if (linkStatus(item) === "reading") {
+    const box = doc.createElement("span");
+    box.className = "compact-reading";
+    box.setAttribute("role", "status");
+    box.title = NO_SUMMARY.reading;
+    box.append(
+      buildSpinner(),
+      textEl(doc, "span", "compact-reading-words", NO_SUMMARY.reading),
+    );
+    li.append(box);
+  }
+  // A URL with no host (`file:///a`) shows no site, not an empty one.
+  const host = linkHost(item);
+  if (host) {
+    const dom = textEl(doc, "span", "dom", host);
+    dom.title = item.url;
+    li.append(dom);
+  }
   const when = item.saved || item.age;
   if (when) li.append(textEl(doc, "span", "row-meta", when));
   return li;
