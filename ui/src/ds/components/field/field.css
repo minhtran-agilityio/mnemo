@@ -36,3 +36,55 @@
 .field-note:empty {
   margin-top: calc(var(--space-1) * -1);
 }
+
+/* Field with an action: the label across the top, the control and the action on one row (centred on
+   each other), the hint or error under the control's column only. The control keeps the width of a
+   plain field; the action takes what it needs. */
+.field--action {
+  display: grid;
+  grid-template-columns: minmax(0, var(--size-field-max)) auto;
+  justify-content: start;
+  align-items: start;
+  column-gap: var(--space-3);
+  row-gap: 0;
+  max-width: none;
+}
+
+.field--action > label {
+  grid-column: 1 / -1;
+  padding-bottom: var(--space-1);
+}
+
+.field-control,
+.field-action {
+  display: flex;
+  align-self: center;
+  min-width: 0;
+}
+
+.field-control {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.field-action {
+  align-items: center;
+}
+
+/* Under the control: the hint or the error, in the control's column only, so a long hint wraps there
+   and never moves the action. The spacing sits on the lines, so an empty line takes no room. */
+.field-under {
+  display: flex;
+  flex-direction: column;
+  grid-column: 1;
+  min-width: 0;
+}
+
+.field-under > .hint,
+.field-under > .field-note:not(:empty) {
+  margin-top: var(--space-1);
+}
+
+.field-under > .field-note:empty {
+  margin-top: 0;
+}

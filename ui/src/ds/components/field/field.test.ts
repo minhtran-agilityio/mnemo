@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { expect, test } from "vitest";
+import { createButton } from "../button/button";
 import { createTextInput } from "../input/input";
 import { createField, setFieldError } from "./field";
 
@@ -214,4 +215,152 @@ test("a message of only spaces clears the error", () => {
   expect(f.querySelector(".hint")?.textContent).toBe("Hint");
   expect(input.hasAttribute("aria-invalid")).toBe(false);
   f.remove();
+});
+
+// Field with an action beside its control (#198).
+function buildAction(options: { hint?: string; error?: string } = {}) {
+  const input = createTextInput(document, { type: "url" });
+  const save = createButton(document, {
+    label: "Save link",
+    variant: "primary",
+  });
+  save.type = "submit";
+  const f = createField(document, {
+    label: "Link",
+    control: input,
+    action: save,
+    ...options,
+  });
+  const form = document.createElement("form");
+  form.append(f);
+  document.body.append(form);
+  return { input, save, f, form };
+}
+
+test("an action sits beside the control in its own cell, the label above, the note under the control", () => {
+  const { input, save, f, form } = buildAction({ hint: "A web link." });
+  expect(f.classList.contains("field")).toBe(true);
+  expect(f.classList.contains("field--action")).toBe(true);
+  const kids = [...f.children].map((c) => c.className || c.tagName);
+  expect(kids).toEqual([
+    "LABEL",
+    "field-control",
+    "field-action",
+    "field-under",
+  ]);
+  expect(f.querySelector(".field-control")?.contains(input)).toBe(true);
+  expect(f.querySelector(".field-action")?.contains(save)).toBe(true);
+  const under = f.querySelector(".field-under");
+  expect(under?.querySelector(".hint")?.textContent).toBe("A web link.");
+  expect(under?.querySelector("[aria-live=polite]")).not.toBeNull();
+  // The hint is not inside the action or the control cell.
+  expect(f.querySelector(".field-action .hint")).toBeNull();
+  expect(f.querySelector(".field-control .hint")).toBeNull();
+  form.remove();
+});
+
+test("the action is passed through untouched", () => {
+  const { save, form } = buildAction({ hint: "H" });
+  expect(save.className).toBe("btn btn-primary");
+  expect(save.type).toBe("submit");
+  expect(save.getAttribute("style")).toBeNull();
+  expect(save.textContent).toBe("Save link");
+  form.remove();
+});
+
+test("with an action the label still points at the control and the hint describes it", () => {
+  const { input, f, form } = buildAction({ hint: "A web link." });
+  expect(f.querySelector("label")?.htmlFor).toBe(input.id);
+  expect(input.getAttribute("aria-describedby")).toBe(
+    f.querySelector(".hint")?.id,
+  );
+  form.remove();
+});
+
+test("with an action an error replaces the hint under the control, and clearing brings it back", () => {
+  const { input, f, form } = buildAction({ hint: "A web link." });
+  const note = f.querySelector(".field-under > [aria-live]");
+  setFieldError(f, "Paste a link first.");
+  expect(f.querySelector(".hint")).toBeNull();
+  expect(note?.querySelector(".err-text")?.textContent).toBe(
+    "Paste a link first.",
+  );
+  expect(f.querySelector(".field-action .err-text")).toBeNull();
+  expect(input.getAttribute("aria-invalid")).toBe("true");
+  expect(input.getAttribute("aria-describedby")).toBe(
+    note?.querySelector(".err-text")?.id,
+  );
+  // The live region is the same element, so the message is announced.
+  expect(f.querySelector(".field-under > [aria-live]")).toBe(note);
+  setFieldError(f, null);
+  expect(f.querySelector(".field-under > .hint")?.textContent).toBe(
+    "A web link.",
+  );
+  expect(f.querySelector(".field-under")?.firstElementChild?.className).toBe(
+    "hint",
+  );
+  expect(input.hasAttribute("aria-invalid")).toBe(false);
+  form.remove();
+});
+
+test("with an action and an error at the start, the hint can come back", () => {
+  const { f, form } = buildAction({ hint: "H", error: "E" });
+  expect(f.querySelector(".err-text")?.textContent).toBe("E");
+  setFieldError(f, null);
+  expect(f.querySelector(".field-under > .hint")?.textContent).toBe("H");
+  form.remove();
+});
+
+test("with an action, Enter in the box submits the form through the button", () => {
+  const { input, form, save } = buildAction({ hint: "H" });
+  let submitted = 0;
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    submitted += 1;
+  });
+  input.focus();
+  expect(document.activeElement).toBe(input);
+  // The box and the action are both reachable with Tab, in that order.
+  const tabbable = [...form.querySelectorAll<HTMLElement>("input, button")];
+  expect(tabbable).toEqual([input, save]);
+  save.click();
+  expect(submitted).toBe(1);
+  form.remove();
+});
+
+test("a busy or disabled action stays the button's own", () => {
+  const input = createTextInput(document, {});
+  const save = createButton(document, {
+    label: "Save link",
+    variant: "primary",
+    disabled: true,
+  });
+  const f = createField(document, { label: "L", control: input, action: save });
+  expect(save.disabled).toBe(true);
+  expect(f.querySelector(".field-action button")).toBe(save);
+});
+
+test("long content stays text in the hint and error of a field with an action", () => {
+  const long =
+    "Dán một liên kết web bắt đầu bằng http:// hoặc https://, ví dụ một bài viết. ".repeat(
+      4,
+    );
+  const { f, form } = buildAction({ hint: long });
+  expect(f.querySelector(".hint")?.textContent).toBe(long);
+  setFieldError(f, `<b>${long}</b>`);
+  expect(f.querySelector(".err-text b")).toBeNull();
+  expect(f.querySelector(".err-text")?.textContent).toBe(`<b>${long}</b>`);
+  form.remove();
+});
+
+test("a field without an action keeps its plain column", () => {
+  const input = createTextInput(document, {});
+  const f = createField(document, { label: "L", control: input, hint: "H" });
+  expect(f.className).toBe("field");
+  expect([...f.children].map((c) => c.className || c.tagName)).toEqual([
+    "LABEL",
+    "input",
+    "hint",
+    "field-note",
+  ]);
 });
