@@ -1,41 +1,7 @@
 /* The Bookmarks screen (#25): layout only, with token values. Every look comes from ui/src/ds. */
-/* A grid, so the button sits in the row of the box itself: the label is row 1, the box and the
-   button row 2, the hint or error row 3. The field wrapper only groups its children (contents). */
 .bookmarks-linkbox {
-  display: grid;
-  grid-template-columns: minmax(0, var(--size-field-max)) auto;
-  justify-content: start;
-  align-items: start;
-  column-gap: var(--space-3);
-  row-gap: var(--space-1);
   margin-top: var(--space-5);
   max-width: var(--measure-intro);
-}
-
-.bookmarks-linkbox > .field {
-  display: contents;
-}
-
-.bookmarks-linkbox > .field > label {
-  grid-column: 1;
-  grid-row: 1;
-}
-
-.bookmarks-linkbox > .field > :nth-child(2) {
-  grid-column: 1;
-  grid-row: 2;
-  align-self: center;
-}
-
-.bookmarks-linkbox > .field > :nth-child(n + 3) {
-  grid-column: 1;
-  grid-row: 3;
-}
-
-.bookmarks-linkbox > button {
-  grid-column: 2;
-  grid-row: 2;
-  align-self: center;
 }
 
 .bookmarks-notice:empty {
