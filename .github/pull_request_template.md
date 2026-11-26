@@ -11,6 +11,18 @@ Closes #
 - [ ] Mac (Apple Silicon): `npm run check` passes
 - [ ] Ubuntu 22.04: `npm run check` passes
 
+## Screenshots
+
+Every pull request has screenshots, whatever it changes. Attach them before review. Rules and how to attach: `.claude/rules/technical.md` (Change hygiene).
+
+- How to attach: `gh pr comment <n> --attach <file>` only if `gh pr comment --help` lists `--attach` (gh 2.97.0 does not). Otherwise use the `pr-evidence` branch under `pr-<n>/` and post a comment with pinned `raw.githubusercontent.com` URLs. Design-system pull requests keep `pr-assets`. Never commit screenshots to the pull request's own branch.
+
+Tick the one of the first two boxes that applies; the privacy box always applies.
+
+- [ ] Changes a screen: before and after of each changed screen (light theme at least; dark too when colours change).
+- [ ] No screen (Rust, data, scripts, docs): a screenshot of the evidence, such as the test run or the command output that shows the change works.
+- [ ] No personal data, secrets or private text in any screenshot, checked before any push or upload (this repository is public, so a pushed image stays reachable): no home paths, environment values, tokens, or real saved links or notes.
+
 ## Shared rules
 
 - [ ] Honest failure: if something could not be read, only the link is saved, with no summary. A reason the app wrote is marked as a guess.
