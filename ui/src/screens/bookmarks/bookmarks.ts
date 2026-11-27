@@ -165,6 +165,8 @@ export function renderBookmarks(
   let viewReady = false;
   /** True once every page of bookmarks is loaded: only then is the needs-a-look count whole. */
   let loaded = false;
+  /** True when a page failed to load: the busy line stops, and the problem banner explains. */
+  let loadFailed = false;
   /** The bookmark behind each link item drawn, so an open or an action finds its bookmark. */
   const byItem = new Map<LinkItem, SavedBookmark>();
   /** The sidebar as last drawn; it is built again only when this changes. */
@@ -859,7 +861,10 @@ export function renderBookmarks(
     drawContext();
     if (!viewReady) return;
     if (!loaded && items.length === 0) {
-      list.replaceChildren(buildBusyLine("Loading your bookmarks"));
+      // A failed load is explained by the banner above; it is not an empty library.
+      list.replaceChildren(
+        ...(loadFailed ? [] : [buildBusyLine("Loading your bookmarks")]),
+      );
       return;
     }
     const shown = sections();
@@ -877,10 +882,12 @@ export function renderBookmarks(
     const opener =
       doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
     let opening = false;
+    // The dialog is modal, so a toast would sit behind it: a failure shows inside the dialog.
+    const problem = doc.createElement("div");
     const dialog = createDialog({
       doc,
       title: "Bookmark",
-      children: [createLinkCard(doc, toLinkItem(b, false))],
+      children: [createLinkCard(doc, toLinkItem(b, false)), problem],
       actions: (close) => {
         const open = createDialogButton(
           "Open in browser",
@@ -889,13 +896,16 @@ export function renderBookmarks(
             if (opening) return;
             opening = true;
             open.disabled = true;
+            problem.replaceChildren();
             deps
               .openLink(b.id)
               .catch((error: unknown) => {
-                if (!left)
-                  toasts.show(
-                    `Mnemo could not open the link. ${errorMessage(error)}`,
-                  );
+                problem.replaceChildren(
+                  buildBanner({
+                    tone: "bad",
+                    message: `Mnemo could not open the link. ${errorMessage(error)}`,
+                  }),
+                );
               })
               .finally(() => {
                 opening = false;
@@ -985,9 +995,11 @@ export function renderBookmarks(
       } while (after !== null);
     } catch (error) {
       if (left) return;
+      loadFailed = true;
       showProblem(
         `Mnemo could not load the saved links. ${errorMessage(error)}`,
       );
+      draw();
     }
   }
 

@@ -190,9 +190,10 @@ test("search matches title, summary and tags, in any case and any Unicode form, 
   expect(matchesSearch(b, "   ")).toBe(true);
 });
 
-test("a summary that is not shown (the link was not read) is not searched", () => {
-  const b = bm(1, { summary: "hidden words", summaryStatus: "unreadable" });
-  expect(matchesSearch(b, "hidden")).toBe(false);
+test("a stored summary is searched whatever the status of the link", () => {
+  const b = bm(1, { summary: "stored words", summaryStatus: "reading" });
+  expect(matchesSearch(b, "stored")).toBe(true);
+  expect(matchesSearch(bm(1, { summary: null }), "stored")).toBe(false);
 });
 
 test("bookmarks group by folder in the folders' order with the core's counts", () => {
@@ -450,7 +451,7 @@ test("a click or Enter on a link opens its card; Open in browser asks the core t
   expect(document.querySelector("dialog")).toBeNull();
 });
 
-test("a link that cannot be opened says why in a toast and keeps the dialog", async () => {
+test("a link that cannot be opened says why inside the dialog and keeps it open", async () => {
   const { box } = await open(many(6), {
     openLink: vi.fn(async () => {
       throw { code: "open_link_failed", message: "Copy it from the card." };
@@ -460,8 +461,11 @@ test("a link that cannot be opened says why in a toast and keeps the dialog", as
   const dialog = document.querySelector("dialog") as HTMLElement;
   button(dialog, "Open in browser")?.click();
   await wait();
-  expect(document.body.textContent).toContain("Copy it from the card.");
-  expect(document.querySelector("dialog")).not.toBeNull();
+  // The dialog is modal, so the message must be inside it, not in a toast behind it.
+  const dialogNow = document.querySelector("dialog") as HTMLElement;
+  expect(dialogNow.textContent).toContain("Copy it from the card.");
+  expect(dialogNow.querySelector('[role="alert"]')).not.toBeNull();
+  expect(document.querySelector(".toast")).toBeNull();
 });
 
 test("an action button on a card does not open the dialog", async () => {
@@ -501,6 +505,17 @@ test("a failed page says so and keeps what was loaded", async () => {
   expect(box.textContent).toContain("could not load the saved links");
   expect(shown(box).length).toBeGreaterThan(0);
   expect(row(box, "Needs a look")).toBeUndefined();
+});
+
+test("a failed first load shows the problem and no loading line, and no empty library", async () => {
+  const { box } = await open(many(5), {
+    listBookmarkCards: vi.fn(async () => {
+      throw { code: "storage_error", message: "boom" };
+    }),
+  });
+  expect(box.textContent).toContain("could not load the saved links. boom");
+  expect(box.textContent).not.toContain("Loading your bookmarks");
+  expect(box.textContent).not.toContain("No saved links yet");
 });
 
 test("an empty library and an empty folder say what to do next", async () => {

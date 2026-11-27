@@ -185,18 +185,13 @@ export function normalizeSearch(text: string): string {
 /**
  * True when every word of `query` is in the title, the summary or a tag of `b`. Case does not
  * matter and the text is compared in NFC, so a word typed with combined or separate accents finds
- * the same text. Accents are not ignored: "pho" does not find "phở". The summary counts only when
- * the card shows it (status done), so a search never matches text the owner cannot see.
+ * the same text. Accents are not ignored: "pho" does not find "phở".
  */
 export function matchesSearch(b: SavedBookmark, query: string): boolean {
   const words = normalizeSearch(query).split(/\s+/).filter(Boolean);
   if (words.length === 0) return true;
   const text = normalizeSearch(
-    [
-      b.title ?? "",
-      b.summaryStatus === "done" ? (b.summary ?? "") : "",
-      ...b.tags,
-    ].join("\n"),
+    [b.title ?? "", b.summary ?? "", ...b.tags].join("\n"),
   );
   return words.every((w) => text.includes(w));
 }
