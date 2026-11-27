@@ -11,6 +11,7 @@ export * from "./progress/progress";
 export * from "./skeleton/skeleton";
 export * from "./spinner/spinner";
 export * from "./state-box/state-box";
+export * from "./step-indicator/step-indicator";
 export * from "./text/text";
 export * from "./toast/toast";
 export * from "./trust-label/trust-label";
