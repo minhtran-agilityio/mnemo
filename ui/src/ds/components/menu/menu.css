@@ -4,6 +4,21 @@
   flex-direction: column;
 }
 
+/* A long list scrolls inside the panel. */
+.menu {
+  max-height: var(--size-menu-height-max);
+  overflow-y: auto;
+}
+
+.menu .menu-label {
+  min-width: 0;
+  padding-block: var(--space-1);
+  line-height: var(--leading-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .menu [role="menuitem"],
 .menu [role="menuitemcheckbox"] {
   display: flex;

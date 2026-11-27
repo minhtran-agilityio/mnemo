@@ -2,7 +2,7 @@
 // focus to the button. A disabled item stays in the list with aria-disabled and says why.
 import { ChevronDown } from "lucide";
 import { createIcon } from "../../icon";
-import { createButton } from "../button/button";
+import { type ButtonVariant, createButton } from "../button/button";
 import { nextControlId } from "../field/id";
 import { createKbd } from "../kbd/kbd";
 import { createPopover, type Popover } from "../popover/popover";
@@ -57,7 +57,11 @@ export function createMenuPanel(
     if (entry.danger) item.classList.add("danger");
     if (entry.highlighted) item.classList.add("is-hover");
     if (entry.disabled) item.setAttribute("aria-disabled", "true");
-    item.append(doc.createTextNode(entry.label));
+    const text = doc.createElement("span");
+    text.className = "menu-label";
+    text.textContent = entry.label;
+    item.title = entry.label;
+    item.append(text);
     if (entry.shortcut) item.append(createKbd(doc, entry.shortcut));
     item.addEventListener("click", () => {
       if (entry.disabled) return;
@@ -87,13 +91,24 @@ export interface MenuOptions {
   readonly label: string;
   readonly items: readonly MenuEntry[];
   readonly onChoose?: (item: MenuItem) => void;
+  /** The trigger button's size. Default "md". */
+  readonly size?: "md" | "sm";
+  /** The trigger button's variant. Default "default". */
+  readonly variant?: ButtonVariant;
+  /** Disables the trigger (while an action runs). An open menu closes. */
+  readonly disabled?: boolean;
   /** When it aborts, an open menu closes and its document listener goes. */
   readonly signal?: AbortSignal;
 }
 
 /** A button that opens a menu. */
 export function createMenu(doc: Document, options: MenuOptions): Popover {
-  const trigger = createButton(doc, { label: options.label });
+  const trigger = createButton(doc, {
+    label: options.label,
+    size: options.size,
+    variant: options.variant,
+    disabled: options.disabled,
+  });
   trigger.append(createIcon(ChevronDown));
   trigger.id = nextControlId("menu");
   let pop: Popover | undefined;

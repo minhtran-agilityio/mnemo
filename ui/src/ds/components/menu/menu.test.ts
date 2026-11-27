@@ -70,3 +70,55 @@ test("a menu button opens, focuses the first item, runs the choice and closes", 
   expect(menu.isOpen()).toBe(false);
   expect(document.activeElement).toBe(trigger);
 });
+
+test("the trigger takes size and variant, and keeps the default look without them", () => {
+  const plain = createMenu(document, { label: "Plain", items: [] });
+  const quiet = createMenu(document, {
+    label: "Move to folder",
+    items: [],
+    size: "sm",
+    variant: "ghost",
+  });
+  const a = plain.anchor.querySelector("button") as HTMLButtonElement;
+  const b = quiet.anchor.querySelector("button") as HTMLButtonElement;
+  expect(a.className).not.toContain("btn-sm");
+  expect(a.className).not.toContain("btn-ghost");
+  expect(b.classList.contains("btn-sm")).toBe(true);
+  expect(b.classList.contains("btn-ghost")).toBe(true);
+  expect(b.textContent).toContain("Move to folder");
+});
+
+test("a disabled trigger does not open, and it has its name", () => {
+  const menu = createMenu(document, {
+    label: "Move to folder",
+    items: [{ label: "Cooking" }],
+    disabled: true,
+  });
+  document.body.append(menu.anchor);
+  const trigger = menu.anchor.querySelector("button") as HTMLButtonElement;
+  expect(trigger.disabled).toBe(true);
+  trigger.click();
+  expect(menu.isOpen()).toBe(false);
+  expect(trigger.textContent).toContain("Move to folder");
+});
+
+test("a long name keeps its full text in the title and in a cut label", () => {
+  const name = "Đọc sau – bài dài về cơ sở dữ liệu và WAL ".repeat(4).trim();
+  const m = createMenuPanel(document, [{ label: name }]);
+  const item = m.querySelector<HTMLElement>('[role="menuitem"]');
+  expect(item?.title).toBe(name);
+  expect(item?.querySelector(".menu-label")?.textContent).toBe(name);
+});
+
+test("a list of 25 folders keeps every item and keyboard reach", () => {
+  const entries = Array.from({ length: 25 }, (_, i) => ({
+    label: `Folder ${i}`,
+  }));
+  const m = createMenuPanel(document, entries);
+  document.body.append(m);
+  const items = [...m.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  expect(items).toHaveLength(25);
+  items[0]?.focus();
+  key(items[0] as Element, "End");
+  expect(document.activeElement).toBe(items[24]);
+});
