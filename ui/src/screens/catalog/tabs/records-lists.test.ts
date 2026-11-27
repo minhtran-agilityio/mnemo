@@ -56,8 +56,9 @@ test("Records shows the link card states, a guess label and the missing source m
 
 test("Records shows link cards with two actions: pending, narrow, busy, disabled and focus-visible", () => {
   const panel = mount(renderRecords);
+  // The open and actions examples (issue 205) have their own group, `.rec-open`.
   const slots = [...panel.querySelectorAll(".lcard .lcard-action")].filter(
-    (s) => s.children.length === 2,
+    (s) => s.children.length === 2 && !s.closest(".rec-open"),
   );
   const names = slots.map((s) =>
     [...s.children].map((b) => b.textContent).join(" | "),
