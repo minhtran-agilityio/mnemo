@@ -56,7 +56,7 @@ export function createImportSummary(
   root.className = `import-summary import-summary-${state}`;
   root.setAttribute("aria-label", `Import summary: ${options.fileName}`);
 
-  const name = doc.createElement("h3");
+  const name = doc.createElement("p");
   name.className = "import-summary-file";
   name.textContent = options.fileName;
   name.title = options.fileName;

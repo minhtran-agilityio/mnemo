@@ -15,7 +15,9 @@ test("success lists the counts with labels and two actions", () => {
     onImport,
     onChooseAnother,
   });
-  expect(node.querySelector("h3")?.textContent).toBe("bookmarks.html");
+  expect(node.querySelector(".import-summary-file")?.textContent).toBe(
+    "bookmarks.html",
+  );
   expect([...node.querySelectorAll("dt")].map((t) => t.textContent)).toEqual([
     "Links to add",
     "Repeats in the file, skipped",
@@ -119,7 +121,7 @@ test("a long file name is kept whole in the title and set as text", () => {
     fileName: name,
     counts: COUNTS,
   });
-  const h = node.querySelector("h3");
+  const h = node.querySelector(".import-summary-file");
   expect(h?.title).toBe(name);
   expect(h?.textContent).toBe(name);
   expect(node.querySelector("img")).toBeNull();
