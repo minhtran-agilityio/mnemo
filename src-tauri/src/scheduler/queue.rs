@@ -249,8 +249,6 @@ pub struct BackgroundRunner {
     /// Set when the AI control refused or withdrew a run of this runner, so the caller can tell
     /// a run the gate held from one that failed (`held_by_gate`).
     held: AtomicBool,
-    /// Set when the queue could not take or finish a run of this runner (`queue_failed`).
-    queue_failed: AtomicBool,
 }
 
 impl BackgroundRunner {
@@ -259,7 +257,6 @@ impl BackgroundRunner {
             queue,
             stop,
             held: AtomicBool::new(false),
-            queue_failed: AtomicBool::new(false),
         }
     }
 
@@ -267,12 +264,6 @@ impl BackgroundRunner {
     /// because background work was held, not because it failed or was stopped).
     pub fn held_by_gate(&self) -> bool {
         self.held.load(Ordering::SeqCst)
-    }
-
-    /// Whether the queue could not take a run of this runner, or its run stopped without a
-    /// result. Such a run ends `Unavailable` although Claude Code itself may be fine.
-    pub fn queue_failed(&self) -> bool {
-        self.queue_failed.load(Ordering::SeqCst)
     }
 
     fn allowed(&self) -> bool {
@@ -295,8 +286,7 @@ impl AiRunner for BackgroundRunner {
             .submit(Priority::Background, task.clone())
             .map_err(|e| {
                 log::error!("the background {} run could not be queued: {e}", task.name);
-                self.queue_failed.store(true, Ordering::SeqCst);
-                AiError::Unavailable
+                AiError::NotRecorded
             })?;
         let mut asked = false;
         loop {
@@ -334,8 +324,8 @@ impl AiRunner for BackgroundRunner {
                         task.name,
                         ticket.id
                     );
-                    self.queue_failed.store(true, Ordering::SeqCst);
-                    return Err(AiError::Unavailable);
+                    // Not a storage fault, not Claude Code missing, and no one cancelled it.
+                    return Err(AiError::Stopped);
                 }
             }
         }
@@ -351,7 +341,7 @@ impl AiRunner for QueuedRunner {
     fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
         let ticket = self.0.submit(Priority::Owner, task.clone()).map_err(|e| {
             log::error!("the {} run could not be queued: {e}", task.name);
-            AiError::Unavailable
+            AiError::NotRecorded
         })?;
         let mut cancelled = false;
         loop {
@@ -372,7 +362,7 @@ impl AiRunner for QueuedRunner {
                         task.name,
                         ticket.id
                     );
-                    return Err(AiError::Unavailable);
+                    return Err(AiError::Stopped);
                 }
             }
         }
@@ -1067,6 +1057,57 @@ mod tests {
         for t in &next {
             assert!(wait(t).is_ok());
         }
+    }
+
+    #[test]
+    fn a_runner_whose_thread_dies_gives_stopped_not_cancelled_or_unavailable() {
+        let script = Arc::new(ScriptRunner::default());
+        script
+            .plans
+            .lock()
+            .unwrap()
+            .insert("broken".into(), Plan::Panic);
+        let (q, _events) = queue(script, TestLog::new());
+        let background = BackgroundRunner::new(q.clone(), CancelToken::default());
+        assert_eq!(
+            background.run_task(&task("broken"), &CancelToken::default()),
+            Err(AiError::Stopped)
+        );
+        assert_eq!(
+            QueuedRunner(q).run_task(&task("broken"), &CancelToken::default()),
+            Err(AiError::Stopped)
+        );
+    }
+
+    #[test]
+    fn a_run_the_log_cannot_record_gives_not_recorded_from_both_runners() {
+        struct BrokenLog;
+        impl RunLog for BrokenLog {
+            fn enqueue(&self, _: &str) -> Result<String, RunLogError> {
+                Err(RunLogError("disk I/O error".to_string()))
+            }
+            fn start(&self, _: &str) -> Result<(), RunLogError> {
+                Ok(())
+            }
+            fn finish(&self, _: &str, _: &RunEnd, _: Option<i64>) -> Result<(), RunLogError> {
+                Ok(())
+            }
+        }
+        let q = RunQueue::new(
+            Arc::new(ScriptRunner::default()),
+            Arc::new(BrokenLog),
+            Arc::new(|_: &RunEvent| {}),
+            crate::scheduler::ai_control::testing::open_control(),
+        );
+        let background = BackgroundRunner::new(q.clone(), CancelToken::default());
+        assert_eq!(
+            background.run_task(&task("any"), &CancelToken::default()),
+            Err(AiError::NotRecorded)
+        );
+        assert_eq!(
+            QueuedRunner(q).run_task(&task("any"), &CancelToken::default()),
+            Err(AiError::NotRecorded)
+        );
     }
 
     #[test]

@@ -215,9 +215,9 @@ describe("Check step", () => {
       alreadySaved: 0,
       notLinks: 0,
     };
-    expect(foundLine(p)).toBe("1 link found in links.txt");
+    expect(foundLine(p)).toBe("1 entry found in links.txt");
     expect(foundLine({ ...p, found: 1200 })).toBe(
-      "1,200 links found in links.txt",
+      "1,200 entries found in links.txt",
     );
   });
 });

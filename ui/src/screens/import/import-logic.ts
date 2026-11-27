@@ -36,9 +36,13 @@ export function links(n: number): string {
   return `${n.toLocaleString("en-US")} ${n === 1 ? "link" : "links"}`;
 }
 
-/** The Check step's first line, as in the prototype: "55 links found in bookmarks.html". */
+/**
+ * The Check step's first line: "55 entries found in bookmarks.html". "Entries", not "links":
+ * the count includes the "Not links, skipped" row below it.
+ */
 export function foundLine(p: ImportPreview): string {
-  return `${links(p.found)} found in ${p.fileName}`;
+  const n = p.found;
+  return `${n.toLocaleString("en-US")} ${n === 1 ? "entry" : "entries"} found in ${p.fileName}`;
 }
 
 /** One count line of the confirm step. */
