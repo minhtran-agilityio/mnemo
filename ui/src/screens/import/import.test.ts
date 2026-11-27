@@ -350,7 +350,7 @@ describe("Import page helpers", () => {
   it("maps an import to the progress line's state and reason", () => {
     expect(progressOptions(status(), false).state).toBe("running");
     const retrying = progressOptions(
-      status({ retry: { reason: "storage", seconds: 10 } }),
+      status({ retry: { reason: "storage" } }),
       false,
     );
     expect(retrying.state).toBe("waiting");

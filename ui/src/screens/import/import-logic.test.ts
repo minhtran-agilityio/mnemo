@@ -219,9 +219,12 @@ describe("Done counts and the running text", () => {
   });
 
   it("says plainly why it waits after a fault and when it tries again", () => {
-    const s = status({ retry: { reason: "unavailable", seconds: 5 } });
+    const s = status({ retry: { reason: "unavailable" } });
     expect(stateText(s)).toBe(
-      "Claude Code could not be started. Mnemo tries again in about 5 seconds.",
+      "Claude Code could not be started. Mnemo tries again by itself soon.",
+    );
+    expect(stateText(status({ retry: { reason: "storage" } }))).toMatch(
+      /^Mnemo could not save the import just now\./,
     );
     expect(stateText(s)).not.toMatch(/Making summaries/);
   });

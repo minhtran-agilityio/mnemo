@@ -68,12 +68,11 @@ pub enum Fault {
     Other,
 }
 
-/// The fault the import waits on, and in how many seconds it tries again.
+/// The fault the import waits on; it tries again by itself after a short wait.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportRetry {
     pub reason: Fault,
-    pub seconds: u64,
 }
 
 /// The limits of reading an import file, from the config module.
@@ -123,11 +122,16 @@ struct Workers {
     /// Faults in a row (see `wait_after_fault`); an ended link, a new import and Continue set
     /// it back to 0.
     faults: u32,
-    /// While a worker waits after a fault: until when, and why.
-    retry: Option<(Instant, Fault)>,
-    /// Counts the changes that end a fault wait early: an AI control change, a new import,
-    /// Continue.
+    /// One entry per worker that waits after a fault: its key and why. The screen shows the
+    /// newest while any worker still waits.
+    retries: Vec<(u64, Fault)>,
+    /// The key of the next entry in `retries`.
+    next_retry: u64,
+    /// Counts the changes that end a fault wait early: the background gate opening again, a
+    /// new import, Continue on a paused import.
     wake: u64,
+    /// The background gate as the control listener last saw it (open = may run).
+    gate_open: Option<bool>,
 }
 
 struct Inner {
@@ -185,9 +189,9 @@ impl ImportWorker {
         let weak: Weak<Inner> = Arc::downgrade(&inner);
         control.subscribe(Arc::new(move || {
             if let Some(inner) = weak.upgrade() {
-                // AI may run again (or Claude Code works again): a fault wait ends now.
                 let worker = ImportWorker(inner);
-                worker.wake();
+                let open = worker.held_by().is_none();
+                worker.gate_seen(open);
                 worker.kick();
             }
         }));
@@ -228,13 +232,10 @@ impl ImportWorker {
         let open = import.state == ImportState::Running && import.waiting > 0;
         let wait_reason = if open { self.held_by() } else { None };
         let retry = if open && wait_reason.is_none() {
-            self.workers().retry.map(|(until, reason)| ImportRetry {
-                reason,
-                seconds: until
-                    .saturating_duration_since(Instant::now())
-                    .as_secs()
-                    .max(1),
-            })
+            self.workers()
+                .retries
+                .last()
+                .map(|&(_, reason)| ImportRetry { reason })
         } else {
             None
         };
@@ -289,6 +290,17 @@ impl ImportWorker {
         file: &ImportFile,
         with_summaries: bool,
     ) -> Result<ImportStatus, SaveError> {
+        // A worker of an earlier, ended import that still waits after a fault ends its wait and
+        // stops: its token is cancelled before the new import is stored, so no worker of the new
+        // import can get the old token. While an import is unfinished the start is refused, and
+        // its runs are left alone.
+        let latest = on_storage(self.store(), |s| s.latest_import())?;
+        let ended = latest
+            .map(|v| matches!(v.state, ImportState::Finished | ImportState::Stopped))
+            .unwrap_or(true);
+        if ended {
+            self.cancel_runs(true);
+        }
         let status = self.publish(|s| s.start_import(file, with_summaries))?;
         let view = &status.import;
         log::info!(
@@ -299,18 +311,21 @@ impl ImportWorker {
             view.already_saved,
             view.not_links
         );
-        // A worker of an earlier import that still waits after a fault ends its wait and stops
-        // (its token is cancelled), and the new import starts with no faults counted.
-        self.cancel_runs(true);
+        // The new import starts with no faults counted.
         self.fresh_tries();
         self.kick();
         Ok(status)
     }
 
-    /// A fault wait ends now (see `Workers::wake`).
-    fn wake(&self) {
+    /// The control listener saw the background gate `open` or not. A fault wait ends early
+    /// only when the gate opens again (Claude Code or AI may work again), not on every usage
+    /// reading or tick.
+    fn gate_seen(&self, open: bool) {
         let mut w = self.workers();
-        w.wake = w.wake.wrapping_add(1);
+        if open && w.gate_open == Some(false) {
+            w.wake = w.wake.wrapping_add(1);
+        }
+        w.gate_open = Some(open);
     }
 
     /// Counts no faults and ends a fault wait: for a new import and for Continue.
@@ -383,9 +398,14 @@ impl ImportWorker {
     /// The owner's Continue: a paused import runs again. While the AI gate holds background
     /// work it keeps waiting and the status says why; it goes on by itself when AI may run.
     pub fn resume(&self, id: &str) -> Result<ImportStatus, SaveError> {
+        // Only Continue on the newest import, paused, starts the tries afresh.
+        let paused = on_storage(self.store(), |s| s.latest_import())?
+            .is_some_and(|v| v.base.id == id && v.state == ImportState::Paused);
         let status = self.publish(|s| s.continue_import(id))?;
         self.release_owner_holds();
-        self.fresh_tries();
+        if paused {
+            self.fresh_tries();
+        }
         log::info!("import {id} continued by the owner");
         self.kick();
         Ok(status)
@@ -449,7 +469,11 @@ impl ImportWorker {
     /// so a storage that keeps failing never makes workers start again and again.
     fn work(&self, id: &str, stop: &CancelToken) {
         while let Some(item) = self.take(id, stop) {
-            let seen = self.workers().owner_ended;
+            // Noted before the run, so a wake during the run still ends a fault wait after it.
+            let (seen, woken) = {
+                let w = self.workers();
+                (w.owner_ended, w.wake)
+            };
             let outcome = self.make(&item, stop);
             // The end is saved before the item leaves `taken`, so the other worker cannot take
             // a link whose end is not written yet.
@@ -474,7 +498,7 @@ impl ImportWorker {
                 }
             }
             if saved.is_err() {
-                self.wait_after_fault(id, stop, Fault::Storage);
+                self.wait_after_fault(id, stop, Fault::Storage, woken);
                 break;
             }
             match self.publish(|s| s.finish_import_if_done(id)) {
@@ -493,7 +517,7 @@ impl ImportWorker {
             match outcome {
                 Outcome::Stop => break,
                 Outcome::Fault(fault) => {
-                    self.wait_after_fault(id, stop, fault);
+                    self.wait_after_fault(id, stop, fault, woken);
                     break;
                 }
                 _ => {}
@@ -504,20 +528,21 @@ impl ImportWorker {
     }
 
     /// Waits `retry_delay` for this fault in a row. The wait ends early when the import is
-    /// paused or stopped, a new import starts, the owner presses Continue, or the AI control
-    /// changes. The worker still counts as live meanwhile, so no other worker starts in its
-    /// place. The screen says why it waits and when it tries again.
-    fn wait_after_fault(&self, id: &str, stop: &CancelToken, fault: Fault) {
+    /// paused or stopped, a new import starts, the owner presses Continue on it, or the
+    /// background gate opens again since `woken` was noted. The worker still counts as live
+    /// meanwhile, so no other worker starts in its place. The screen says why it waits.
+    fn wait_after_fault(&self, id: &str, stop: &CancelToken, fault: Fault, woken: u64) {
         let delay;
-        let woken;
         let end;
+        let key;
         {
             let mut w = self.workers();
             w.faults = w.faults.saturating_add(1);
             delay = retry_delay(w.faults);
             end = Instant::now() + delay;
-            w.retry = Some((end, fault));
-            woken = w.wake;
+            key = w.next_retry;
+            w.next_retry = w.next_retry.wrapping_add(1);
+            w.retries.push((key, fault));
         }
         log::warn!("import {id}: a link stopped with a fault ({fault:?}), waiting {delay:?}");
         self.show(id);
@@ -528,7 +553,7 @@ impl ImportWorker {
             }
             std::thread::sleep(left.min(limits::QUEUED_CANCEL_POLL));
         }
-        self.workers().retry = None;
+        self.workers().retries.retain(|&(k, _)| k != key);
         self.show(id);
     }
 
@@ -621,10 +646,16 @@ impl ImportWorker {
             emit: &emit,
         };
         let result = bookmark_save::summarize_import(&ctx, &item.bookmark_id);
-        // Held or stopped, from the run's own runner: not a fault.
+        // Held or stopped, from the run's own runner: not a fault. A run the queue could not
+        // take is a storage fault, not "Claude Code could not be started".
         let stopped = stop.is_cancelled() || runner.held_by_gate();
         match result {
-            Ok(result) => outcome_of(&result, stopped),
+            Ok(result) => match outcome_of(&result, stopped) {
+                Outcome::Fault(Fault::Unavailable) if runner.queue_failed() => {
+                    Outcome::Fault(Fault::Storage)
+                }
+                outcome => outcome,
+            },
             Err(SaveError::NotFound) => Outcome::End(ItemState::Removed),
             // Claimed in between by the owner's own run, or summarized by it.
             Err(SaveError::Invalid(_)) => match self.known_end(item) {
@@ -697,10 +728,15 @@ mod tests {
     #[derive(Default)]
     struct Pages {
         reads: AtomicUsize,
+        /// Runs during each read (for example: the gate closes while the page is read).
+        during_read: Mutex<Option<Box<dyn Fn() + Send>>>,
     }
     impl PageReader for Pages {
         fn read(&self, url: &str) -> Result<PageText, FetchError> {
             self.reads.fetch_add(1, Ordering::SeqCst);
+            if let Some(hook) = self.during_read.lock().unwrap().as_ref() {
+                hook();
+            }
             if url.contains("bad") {
                 return Err(FetchError::NotText);
             }
@@ -719,9 +755,14 @@ mod tests {
         ends: Mutex<Vec<RunEnd>>,
         /// The task name of each run, in the order the queue started them.
         started: Mutex<Vec<String>>,
+        /// When set, the queue cannot record a new run (a storage problem).
+        fail: std::sync::atomic::AtomicBool,
     }
     impl RunLog for Log {
         fn enqueue(&self, task_type: &str) -> Result<String, RunLogError> {
+            if self.fail.load(Ordering::SeqCst) {
+                return Err(RunLogError("disk I/O error".to_string()));
+            }
             Ok(format!(
                 "{task_type}:{}",
                 self.next.fetch_add(1, Ordering::SeqCst)
@@ -1320,11 +1361,14 @@ mod tests {
         w.worker.start(&w.links(1), true).unwrap();
         // Honest failure: the status names the fault and when it tries again, never "making".
         let s = w.until("the retry", |s| s.retry.is_some());
-        let retry = s.retry.unwrap();
-        assert_eq!(retry.reason, Fault::Unavailable);
-        assert!(retry.seconds >= 1 && retry.seconds <= limits::IMPORT_RETRY_FIRST.as_secs());
+        assert_eq!(
+            s.retry,
+            Some(ImportRetry {
+                reason: Fault::Unavailable
+            })
+        );
         assert_eq!(s.wait_reason, None);
-        // Claude Code works again; any AI control change ends the wait at once.
+        // Claude Code works again; the background gate opening again ends the wait at once.
         *w.gauge.fail.lock().unwrap() = None;
         let at = Instant::now();
         w.control.pause().unwrap();
@@ -1441,6 +1485,199 @@ mod tests {
         assert_eq!(done.bookmark.summary_status, SummaryStatus::Done);
         assert_eq!(done.bookmark.title.as_deref(), Some("File title"));
         assert!(w.store.lock().unwrap().is_imported_bookmark(&id).unwrap());
+    }
+
+    #[test]
+    fn only_the_background_gate_opening_again_ends_a_fault_wait() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        let wake = || w.worker.workers().wake;
+        let before = wake();
+        // Usage readings and ticks with the gate open change nothing.
+        w.worker.gate_seen(true);
+        w.worker.gate_seen(true);
+        assert_eq!(wake(), before);
+        // Closed, then open again: the wait ends.
+        w.worker.gate_seen(false);
+        assert_eq!(wake(), before);
+        w.worker.gate_seen(true);
+        assert_eq!(wake(), before + 1);
+    }
+
+    #[test]
+    fn a_wake_during_the_run_still_ends_the_wait_after_it() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        w.control.pause().unwrap();
+        let id = w.worker.start(&w.links(1), true).unwrap().import.base.id;
+        // Noted before the run; the gate opened again during the run.
+        let woken = w.worker.workers().wake;
+        w.worker.gate_seen(false);
+        w.worker.gate_seen(true);
+        let at = Instant::now();
+        w.worker
+            .wait_after_fault(&id, &CancelToken::default(), Fault::Other, woken);
+        assert!(
+            at.elapsed() < limits::IMPORT_RETRY_FIRST,
+            "the wake was lost"
+        );
+        assert!(w.worker.workers().retries.is_empty());
+    }
+
+    #[test]
+    fn continue_with_the_id_of_an_import_that_is_not_paused_keeps_the_fault_count() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        w.control.pause().unwrap();
+        let old = w
+            .worker
+            .start(
+                &w.file("old.txt", &["https://example.org/old".to_string()]),
+                false,
+            )
+            .unwrap()
+            .import
+            .base
+            .id;
+        let id = w.worker.start(&w.links(1), true).unwrap().import.base.id;
+        w.worker.workers().faults = 3;
+        w.worker.resume(&old).unwrap();
+        // Continue on a running import is no new start either.
+        w.worker.resume(&id).unwrap();
+        assert_eq!(w.worker.workers().faults, 3);
+    }
+
+    #[test]
+    fn the_retry_line_stays_while_any_worker_still_waits() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        *w.gauge.hold.lock().unwrap() = true;
+        w.worker.start(&w.links(3), true).unwrap();
+        w.worker.workers().retries = vec![(1, Fault::Storage), (2, Fault::Unavailable)];
+        assert_eq!(
+            w.now().retry,
+            Some(ImportRetry {
+                reason: Fault::Unavailable
+            })
+        );
+        // One worker's wait ends: the other still waits, and the line stays.
+        w.worker.workers().retries.retain(|&(k, _)| k != 2);
+        assert_eq!(
+            w.now().retry,
+            Some(ImportRetry {
+                reason: Fault::Storage
+            })
+        );
+        w.worker.workers().retries.clear();
+        assert_eq!(w.now().retry, None);
+        *w.gauge.hold.lock().unwrap() = false;
+        w.until("the end", |s| s.import.state == ImportState::Finished);
+    }
+
+    #[test]
+    fn a_run_the_queue_cannot_record_is_a_storage_fault_not_claude_code_missing() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        w.log.fail.store(true, Ordering::SeqCst);
+        let id = w.worker.start(&w.links(1), true).unwrap().import.base.id;
+        let s = w.until("the retry", |s| s.retry.is_some());
+        assert_eq!(
+            s.retry,
+            Some(ImportRetry {
+                reason: Fault::Storage
+            })
+        );
+        w.worker.pause(&id).unwrap();
+        w.settled();
+    }
+
+    #[test]
+    fn ai_turned_off_while_an_import_run_is_queued_is_not_a_fault() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        // Two owner runs fill the queue, so the import's run waits in it.
+        *w.gauge.hold.lock().unwrap() = true;
+        let owner: Vec<_> = (0..2)
+            .map(|i| {
+                w.queue
+                    .submit(
+                        Priority::Owner,
+                        crate::ai::bookmark_save::task_for(None, &format!("{PAGE} {i}"), &[]),
+                    )
+                    .unwrap()
+            })
+            .collect();
+        let end = Instant::now() + WAIT;
+        while w.gauge.now.load(Ordering::SeqCst) < 2 {
+            assert!(Instant::now() < end, "the owner runs did not start");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let runner = BackgroundRunner::new(w.queue.clone(), CancelToken::default());
+        let control = w.control.clone();
+        let off = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            control.set_enabled(false).unwrap();
+        });
+        let r = runner.run_task(
+            &crate::ai::bookmark_save::task_for(None, PAGE, &[]),
+            &CancelToken::default(),
+        );
+        off.join().unwrap();
+        assert_eq!(r, Err(AiError::Cancelled));
+        assert!(runner.held_by_gate(), "AI off was taken for a fault");
+        *w.gauge.hold.lock().unwrap() = false;
+        for t in owner {
+            let _ = t.done.recv_timeout(WAIT);
+        }
+    }
+
+    #[test]
+    fn the_gate_closing_during_the_page_read_is_a_stop_not_a_fault() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        w.control.pause().unwrap();
+        let id = w.worker.start(&w.links(1), true).unwrap().import.base.id;
+        let item = w
+            .store
+            .lock()
+            .unwrap()
+            .waiting_import_items(&id, 1)
+            .unwrap()
+            .remove(0);
+        // Paused by the owner first, so no worker takes the link when the gate opens.
+        w.worker.pause(&id).unwrap();
+        w.control.resume().unwrap();
+        w.settled();
+        assert_eq!(w.pages.reads.load(Ordering::SeqCst), 0);
+        // The gate is open when the link is taken and closes while its page is read.
+        let control = w.control.clone();
+        *w.pages.during_read.lock().unwrap() = Some(Box::new(move || {
+            let _ = control.pause();
+        }));
+        assert!(matches!(
+            w.worker.make(&item, &CancelToken::default()),
+            Outcome::Stop
+        ));
+        assert_eq!(w.pages.reads.load(Ordering::SeqCst), 1);
+        assert_eq!(w.worker.workers().faults, 0);
+        assert_eq!(w.statuses("/import/"), vec![SummaryStatus::Pending]);
+        let waiting = w.store.lock().unwrap().get_import(&id).unwrap().waiting;
+        assert_eq!(waiting, 1);
+    }
+
+    #[test]
+    fn a_refused_start_never_cancels_the_running_imports_runs() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        *w.gauge.hold.lock().unwrap() = true;
+        w.worker.start(&w.links(2), true).unwrap();
+        let end = Instant::now() + WAIT;
+        while w.gauge.now.load(Ordering::SeqCst) < 2 {
+            assert!(Instant::now() < end, "the runs did not start");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let other = w.file("other.txt", &["https://example.org/other".to_string()]);
+        assert!(w.worker.start(&other, true).is_err());
+        // Longer than the queue's cancel poll, so a cancel would have reached the runs.
+        std::thread::sleep(limits::QUEUED_CANCEL_POLL * 6);
+        assert_eq!(w.gauge.now.load(Ordering::SeqCst), 2, "a run was cancelled");
+        *w.gauge.hold.lock().unwrap() = false;
+        let done = w.until("the end", |s| s.import.state == ImportState::Finished);
+        assert_eq!(World::counts(&done), (2, 0, 0));
+        // No run was cancelled and started again.
+        assert_eq!(w.gauge.runs.load(Ordering::SeqCst), 2);
     }
 
     #[test]

@@ -68,15 +68,14 @@ export function confirmAction(p: ImportPreview): {
   return { label: "Import", disabledWhy: why };
 }
 
-/** Why the import waits after a fault, and when it tries again (honest failure). */
+/** Why the import waits after a fault, and that it tries again by itself (honest failure). */
 export function retryText(retry: ImportRetry): string {
   const why: Record<ImportFault, string> = {
     unavailable: "Claude Code could not be started.",
     storage: "Mnemo could not save the import just now.",
     other: "The last summary did not finish.",
   };
-  const n = retry.seconds;
-  return `${why[retry.reason]} Mnemo tries again in about ${n} ${n === 1 ? "second" : "seconds"}.`;
+  return `${why[retry.reason]} Mnemo tries again by itself soon.`;
 }
 
 /** Why AI may not run now, and that the import goes on by itself. */

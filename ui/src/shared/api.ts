@@ -920,7 +920,7 @@ export interface ImportStatus {
   maxRuns: number;
   /** Set while the import runs with links waiting and AI may not run now. */
   waitReason: AiWaitReason | null;
-  /** Set while AI may run but the last run ended with a fault: why, and when it tries again. */
+  /** Set while AI may run but a run ended with a fault and a worker waits: why. */
   retry: ImportRetry | null;
 }
 
@@ -929,7 +929,6 @@ export type ImportFault = "unavailable" | "storage" | "other";
 
 export interface ImportRetry {
   reason: ImportFault;
-  seconds: number;
 }
 
 /** Asks the owner for a file of links (a browser bookmarks export or a text file). */
