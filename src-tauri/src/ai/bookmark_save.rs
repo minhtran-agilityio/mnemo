@@ -207,8 +207,10 @@ pub struct SaveContext<'a> {
 
 /// Where the text for the summary comes from.
 enum Source {
-    /// Read the page of the link.
-    Page,
+    /// Read the page of the link. With `keep_title`, a title the bookmark has already stays
+    /// (an imported link keeps the title of the file, or one the owner gave it); the page's
+    /// title is used only when it has none.
+    Page { keep_title: bool },
     /// The text the owner pasted.
     Pasted(String),
 }
@@ -267,6 +269,21 @@ impl SaveContext<'_> {
             }
             _ => Err(SaveError::NotFound),
         }
+    }
+
+    /// Whether the bookmark came from a file import. A storage failure keeps the title (the
+    /// safe side: the owner's data is not replaced) and is logged.
+    fn is_imported(&self, id: &str) -> bool {
+        let mut imported = true;
+        let read = self.store.with_storage(&mut |s| {
+            imported = s.is_imported_bookmark(id)?;
+            Ok(Held::Lost(None))
+        });
+        if let Err(e) = read {
+            log::error!("could not read whether bookmark {id} was imported: {e:?}");
+            imported = true;
+        }
+        imported
     }
 
     /// The names of the owner's live folders for the prompt. A storage failure gives none (the
@@ -329,7 +346,7 @@ pub fn save_link(ctx: &SaveContext<'_>, url: &str) -> Result<SaveResult, SaveErr
     match ctx.start_save(url)? {
         LinkSave::New(b, claim) => {
             log::info!("bookmark {} saved, reading the page", b.base.id);
-            summarize_from(ctx, b, &claim, Source::Page, true)
+            summarize_from(ctx, b, &claim, Source::Page { keep_title: false }, true)
         }
         LinkSave::Duplicate(b) => {
             log::info!("bookmark {} is already saved, nothing was added", b.base.id);
@@ -357,13 +374,29 @@ pub fn summarize(
             ))
         }
         Some(text) => Source::Pasted(text.trim().to_string()),
-        None => Source::Page,
+        // An imported link keeps the title of the file (owner decision 1), also on "Summarize
+        // later"; a link saved by pasting takes the page title as before.
+        None => Source::Page {
+            keep_title: ctx.is_imported(id),
+        },
     };
     // Refused when the bookmark is done or already being read: a done summary is never lost to
     // a failed second run, and two runs never race on one bookmark.
     let (b, claim) = ctx.start(&mut |s| s.claim_bookmark_for_summary(id))?;
     // Only the first run of a save files the link: a later summary never moves a bookmark.
     summarize_from(ctx, b, &claim, source, false)
+}
+
+/// The first summary of a link a file import stored link only (#29): it reads the page again, as
+/// "Summarize later" does, and it also files the link, as the run of a new save does. The import
+/// is how these links are saved, so this run is their first, and a link only goes from Unsorted
+/// into a folder (`storage::folders::apply_pick`): one the owner moved first stays where it is.
+/// It adds only the summary: a title the link has (from the file, or the owner's) is kept, and
+/// the page's title is used only when it has none (owner decision 1, 2026-11-27).
+/// Refused, like `summarize`, when the bookmark is done or being read.
+pub fn summarize_import(ctx: &SaveContext<'_>, id: &str) -> Result<SaveResult, SaveError> {
+    let (b, claim) = ctx.start(&mut |s| s.claim_bookmark_for_summary(id))?;
+    summarize_from(ctx, b, &claim, Source::Page { keep_title: true }, true)
 }
 
 /// Makes the summary of `b` for the run that holds `claim`. Every write names the claim
@@ -445,9 +478,9 @@ fn summarize_claimed(
     }
     let text = match source {
         Source::Pasted(text) => cut_chars(&text, MAX_TEXT_CHARS).0,
-        Source::Page => match ctx.reader.read(&b.url) {
+        Source::Page { keep_title } => match ctx.reader.read(&b.url) {
             Ok(page) => {
-                if page.title.is_some() {
+                if page.title.is_some() && !(keep_title && b.title.is_some()) {
                     b = ctx
                         .write(&mut |s| s.set_bookmark_title(&id, claim, page.title.as_deref()))?;
                 }

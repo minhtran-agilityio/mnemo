@@ -57,6 +57,10 @@ pub const MIGRATIONS: &[Migration] = &[
         number: 11,
         sql: include_str!("../../migrations/0011_folders.sql"),
     },
+    Migration {
+        number: 12,
+        sql: include_str!("../../migrations/0012_imports.sql"),
+    },
 ];
 
 /// Reads the schema version stored in the database (0 for a new file).
@@ -115,7 +119,7 @@ mod tests {
     fn real_migrations_set_the_version() {
         let mut c = mem();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 11);
+        assert_eq!(current_version(&c).unwrap(), 12);
     }
 
     /// `run` skips every number at or below the stored version, so a gap that is filled
@@ -195,7 +199,7 @@ mod tests {
             err,
             StorageError::SchemaTooNew {
                 found: 99,
-                supported: 11
+                supported: 12
             }
         );
     }
@@ -389,7 +393,7 @@ mod tests {
         )
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 11);
+        assert_eq!(current_version(&c).unwrap(), 12);
         for t in KINDS.iter().chain(["item_link", "settings"].iter()) {
             assert!(table_exists(&c, t), "table {t} missing");
         }
@@ -411,7 +415,7 @@ mod tests {
         ))
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 11);
+        assert_eq!(current_version(&c).unwrap(), 12);
         let cols = columns(&c, "idea");
         for col in [
             "body",
@@ -690,7 +694,7 @@ mod tests {
         )
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 11);
+        assert_eq!(current_version(&c).unwrap(), 12);
         // The old row is kept, with no key until the step at open fills it.
         let key: Option<String> = c
             .query_row(
@@ -728,7 +732,7 @@ mod tests {
         ))
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 11);
+        assert_eq!(current_version(&c).unwrap(), 12);
         let (id, name, default): (String, String, i64) = c
             .query_row("SELECT id, name, is_default FROM folder", [], |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?))
@@ -768,6 +772,64 @@ mod tests {
         assert!(c
             .execute(
                 "INSERT INTO folder (id, created_at, updated_at, name, is_default) VALUES ('f3', ?1, ?1, 'Other', 1)",
+                [T],
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn migration_12_adds_the_import_tables_and_keeps_bookmarks_on_a_database_built_by_the_earlier_migrations(
+    ) {
+        let mut c = mem();
+        let at = MIGRATIONS.iter().position(|m| m.number == 12).unwrap();
+        run(&mut c, &MIGRATIONS[..at]).unwrap();
+        c.execute(
+            "INSERT INTO bookmark (id, created_at, updated_at, url) VALUES ('b-old', ?1, ?1, 'https://a.example/')",
+            [T],
+        )
+        .unwrap();
+        run(&mut c, &MIGRATIONS[..=at]).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 12);
+        let url: String = c
+            .query_row("SELECT url FROM bookmark WHERE id = 'b-old'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(url, "https://a.example/");
+        assert!(table_exists(&c, "import_run"));
+        assert!(table_exists(&c, "import_item"));
+        assert!(index_exists(&c, "idx_import_item_state"));
+        assert!(index_exists(&c, "idx_import_item_bookmark"));
+        assert!(index_exists(&c, "idx_import_run_latest"));
+        let run_row = |state: &str, paused_by: Option<&str>| {
+            c.execute(
+                "INSERT INTO import_run (id, created_at, updated_at, file_name, state, paused_by,
+                     with_summaries, found, added, repeats_in_file, already_saved, not_links)
+                 VALUES (?1, ?2, ?2, 'links.txt', ?3, ?4, 1, 1, 1, 0, 0, 0)",
+                rusqlite::params![format!("r-{state}-{paused_by:?}"), T, state, paused_by],
+            )
+        };
+        assert!(run_row("running", None).is_ok());
+        assert!(run_row("paused", Some("closed")).is_ok());
+        // A state outside the list, or paused without a reason, is refused.
+        assert!(run_row("stopped", None).is_ok());
+        assert!(run_row("cancelled", None).is_err());
+        assert!(run_row("paused", None).is_err());
+        assert!(run_row("running", Some("owner")).is_err());
+        let item = |state: &str, position: i64| {
+            c.execute(
+                "INSERT INTO import_item (id, created_at, updated_at, import_id, bookmark_id, position, state)
+                 VALUES (?1, ?2, ?2, 'r-running-None', 'b-old', ?3, ?4)",
+                rusqlite::params![format!("i-{position}"), T, position, state],
+            )
+        };
+        assert!(item("waiting", 0).is_ok());
+        assert!(item("lost", 1).is_err());
+        // One position per import.
+        assert!(c
+            .execute(
+                "INSERT INTO import_item (id, created_at, updated_at, import_id, bookmark_id, position, state)
+                 VALUES ('i-again', ?1, ?1, 'r-running-None', 'b-old', 0, 'done')",
                 [T],
             )
             .is_err());

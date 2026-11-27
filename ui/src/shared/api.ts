@@ -874,3 +874,115 @@ export function onBookmarkChanged(
     handler(event.payload),
   );
 }
+
+// ---- Import old links from a file (#29) ----
+
+/** What an import of the picked file would do. Nothing is stored yet. */
+export interface ImportPreview {
+  /** The base name of the file, never its path. */
+  fileName: string;
+  /** Every entry read: links, repeats and entries that are not links. */
+  found: number;
+  /** Links that would be added. */
+  toAdd: number;
+  repeatsInFile: number;
+  alreadySaved: number;
+  notLinks: number;
+}
+
+/** Where an import stands. */
+export type ImportState = "running" | "paused" | "finished" | "stopped";
+/** Why an import is paused: the owner pressed Pause, or Mnemo closed during it. */
+export type ImportPausedBy = "owner" | "closed";
+/** Why AI work may not start now (the AI control's reasons). */
+export type AiWaitReason = "off" | "limit" | "threshold" | "owner_pause";
+
+/** One import with its counts, as the Import screen shows it. */
+export interface ImportStatus {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  fileName: string;
+  state: ImportState;
+  pausedBy: ImportPausedBy | null;
+  withSummaries: boolean;
+  found: number;
+  added: number;
+  repeatsInFile: number;
+  alreadySaved: number;
+  notLinks: number;
+  done: number;
+  waiting: number;
+  failed: number;
+  /** Links the owner deleted during the import: not kept as link only. */
+  removed: number;
+  /** The most summaries the core makes at one time. */
+  maxRuns: number;
+  /** Set while the import runs with links waiting and AI may not run now. */
+  waitReason: AiWaitReason | null;
+  /** Set while AI may run but a run ended with a fault and a worker waits: why. */
+  retry: ImportRetry | null;
+}
+
+/** Why an import waits although AI may run. */
+export type ImportFault = "unavailable" | "storage" | "other";
+
+export interface ImportRetry {
+  reason: ImportFault;
+}
+
+/** Asks the owner for a file of links (a browser bookmarks export or a text file). */
+export async function pickImportFile(): Promise<string | null> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const picked = await open({
+    directory: false,
+    multiple: false,
+    filters: [
+      { name: "Bookmarks or links", extensions: ["html", "htm", "txt"] },
+    ],
+  });
+  return typeof picked === "string" ? picked : null;
+}
+
+/** Reads the picked file in the core and counts what an import would do. Stores nothing. */
+export function previewImport(path: string): Promise<ImportPreview> {
+  return invoke<ImportPreview>("preview_import", { path });
+}
+
+/** Imports the picked file: new links are stored at once; summaries follow as background work. */
+export function startImport(
+  path: string,
+  withSummaries: boolean,
+): Promise<ImportStatus> {
+  return invoke<ImportStatus>("start_import", { path, withSummaries });
+}
+
+/** The newest import, or null when there was none. */
+export function getImport(): Promise<ImportStatus | null> {
+  return invoke<ImportStatus | null>("get_import");
+}
+
+/** Pauses this import only. */
+export function pauseImport(id: string): Promise<ImportStatus> {
+  return invoke<ImportStatus>("pause_import", { id });
+}
+
+/** "Stop here": ends the import now; its links with no summary yet stay link only. */
+export function stopImport(id: string): Promise<ImportStatus> {
+  return invoke<ImportStatus>("stop_import", { id });
+}
+
+/** Continues a paused import. While AI may not run, it keeps waiting and says why. */
+export function continueImport(id: string): Promise<ImportStatus> {
+  return invoke<ImportStatus>("continue_import", { id });
+}
+
+/** The event the core sends with the import after each change. */
+export const IMPORT_EVENT = "import-changed";
+
+/** Calls `handler` with the import after each change. Resolves to the unsubscribe call. */
+export function onImportChanged(
+  handler: (status: ImportStatus) => void,
+): Promise<() => void> {
+  return listen<ImportStatus>(IMPORT_EVENT, (event) => handler(event.payload));
+}

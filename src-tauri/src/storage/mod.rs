@@ -8,6 +8,7 @@ pub mod export;
 pub mod files;
 pub mod folders;
 pub mod ideas;
+pub mod imports;
 pub mod items;
 pub mod labels;
 mod link_key;
@@ -113,6 +114,12 @@ impl Storage {
             Ok(n) => log::info!("{n} bookmarks left reading were set back to pending"),
             Err(e) => log::error!("could not reset bookmarks left reading: {e}"),
         }
+        // An import a closed app left running opens as paused, with its counts (#29).
+        match storage.pause_running_imports_at(&record::now_iso()) {
+            Ok(0) => {}
+            Ok(n) => log::info!("{n} imports left running were paused (app closed)"),
+            Err(e) => log::error!("could not pause the imports left running: {e}"),
+        }
         Ok(storage)
     }
 
@@ -213,7 +220,7 @@ mod tests {
         assert_eq!(s.journal_mode().unwrap(), "wal");
         assert_eq!(s.busy_timeout_ms().unwrap(), 5000);
         assert_eq!(s.synchronous_level().unwrap(), 1, "NORMAL");
-        assert_eq!(s.schema_version().unwrap(), 11);
+        assert_eq!(s.schema_version().unwrap(), 12);
     }
 
     #[test]
@@ -221,7 +228,7 @@ mod tests {
         let (_d, p) = temp_db();
         drop(Storage::open(&p).unwrap());
         let s = Storage::open(&p).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 11);
+        assert_eq!(s.schema_version().unwrap(), 12);
     }
 
     #[test]

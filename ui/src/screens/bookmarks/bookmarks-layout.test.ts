@@ -88,6 +88,7 @@ async function measure(width: number, withError: boolean) {
     getSetting: vi.fn(async () => null),
     setSetting: vi.fn(),
     openLink: vi.fn(),
+    openImport: vi.fn(),
   });
   if (withError) {
     box.querySelector<HTMLButtonElement>("form button")?.click();
