@@ -164,7 +164,16 @@ mod tests {
         let (names, counts) = shape(&s);
         let (fresh_names, _) = shape(&fresh);
         assert_eq!(names, fresh_names);
-        assert!(counts.iter().all(|(_, c)| *c == 0), "{counts:?}");
+        // The fixed Unsorted folder is the one row a new database holds (migration 11).
+        assert!(
+            counts.iter().all(|(n, c)| *c == i64::from(n == "folder")),
+            "{counts:?}"
+        );
+        assert_eq!(
+            s.list_folders().unwrap().len(),
+            1,
+            "only Unsorted is left after a reset"
+        );
         assert_eq!(s.get_setting("theme").unwrap(), None);
         assert_eq!(files_in(&d.path().join("files")), 0);
         assert!(!d.path().join("files").exists() || files_in(&d.path().join("files")) == 0);

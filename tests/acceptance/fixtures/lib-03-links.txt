@@ -1,0 +1,7 @@
+https://example.net/notes/alpha
+https://example.net/notes/beta
+this line is not a link
+https://example.net/notes/gamma
+https://example.net/notes/alpha
+just some words, no address
+https://example.net/notes/delta

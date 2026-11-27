@@ -1,6 +1,13 @@
 // @vitest-environment happy-dom
 import { expect, test } from "vitest";
-import { ALL_ITEMS, EVERYTHING_ID, UI_CATALOG_ID } from "./nav";
+import {
+  ALL_ITEMS,
+  EVERYTHING_ID,
+  IMPORT_ID,
+  PAGE_ITEMS,
+  sidebarIdFor,
+  UI_CATALOG_ID,
+} from "./nav";
 import { createRouter, hashFor, parseHash, splitHash } from "./router";
 
 test("every item has an address that opens it", () => {
@@ -62,4 +69,14 @@ test("splitHash strips the hash, leading and trailing slashes and the search par
     search: "q=a b",
   });
   expect(splitHash("").path).toBe("");
+});
+
+test("a page outside the sidebar has its own address and marks its parent in the sidebar", () => {
+  expect(parseHash("#/import").item.id).toBe(IMPORT_ID);
+  expect(parseHash(hashFor(IMPORT_ID)).item.label).toBe("Import bookmarks");
+  expect(sidebarIdFor(IMPORT_ID)).toBe("bookmarks");
+  expect(sidebarIdFor("notes")).toBe("notes");
+  // A page is not a sidebar item.
+  for (const page of PAGE_ITEMS)
+    expect(ALL_ITEMS.some((i) => i.id === page.id)).toBe(false);
 });

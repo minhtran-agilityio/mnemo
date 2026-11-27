@@ -17,6 +17,7 @@ use crate::scheduler::ai_control::{
     AiControl, ControlError, ControlStore, ControlStoreError, Decision, DenyReason, WindowNow,
     THRESHOLDS_MESSAGE,
 };
+use crate::scheduler::import::{ImportStatus, ImportWorker};
 use crate::scheduler::queue::{
     CancelOutcome, Priority, QueuedRunner, RunLog, RunLogError, RunQueue,
 };
@@ -24,7 +25,9 @@ use crate::storage::ai_control::{StoredAiControl, StoredPause, StoredReading};
 use crate::storage::bookmarks::{Held, SavedBookmark};
 use crate::storage::export::{ExportError, ExportSummary, FolderState};
 use crate::storage::files::OrphanReport;
+use crate::storage::folders::Folder;
 use crate::storage::ideas::{Idea, IdeaInput, IdeaProject};
+use crate::storage::imports::ImportPreview;
 use crate::storage::items::{
     Bookmark, BookmarkInput, Event, EventInput, Memory, MemoryInput, Note, NoteInput, Project,
     ProjectInput, Run, Task, TaskInput,
@@ -190,6 +193,8 @@ fn ai_failed(error: &AiError) -> AppError {
         AiError::ExitError { .. } => "Claude Code stopped with an error.",
         AiError::Unavailable => "Claude Code could not be started.",
         AiError::Cancelled => "The run was cancelled.",
+        AiError::NotRecorded => "Mnemo could not record the run.",
+        AiError::Stopped => "The run stopped without an answer.",
     };
     AppError {
         code: error_kind(error),
@@ -2805,9 +2810,14 @@ pub async fn summarize_bookmark(
     check_bookmark_id(&id)?;
     task_result(
         tauri::async_runtime::spawn_blocking(move || {
-            with_save_context(&app, |ctx| {
+            let done = with_save_context(&app, |ctx| {
                 bookmark_save::summarize(ctx, &id, pasted_text.as_deref())
-            })
+            });
+            // A link of a file import this summary held may go on (#29).
+            if let Some(worker) = app.try_state::<ImportWorker>() {
+                worker.owner_summary_ended();
+            }
+            done
         })
         .await,
     )
@@ -2826,6 +2836,328 @@ pub async fn list_bookmark_cards(
             .map_err(item_failed)
     })
     .await
+}
+
+// ---- Folders, Move and Undo (#26, BM-02) ----
+// Each command runs one storage function. Only the owner calls them: a save never makes a folder.
+
+/// The ids the folder commands take are UUIDs (36 characters); anything empty or long is refused
+/// before storage is asked.
+fn check_folder_id(id: &str) -> Result<(), AppError> {
+    if id.trim().is_empty() || id.len() > MAX_BOOKMARK_ID_LEN {
+        return Err(AppError {
+            code: "invalid_input",
+            message: "That is not a folder id.".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn folder_list(storage: &AppStorage) -> Result<Vec<Folder>, AppError> {
+    storage.get()?.list_folders().map_err(item_failed)
+}
+
+fn folder_create(storage: &AppStorage, name: &str) -> Result<Folder, AppError> {
+    storage.get()?.create_folder(name).map_err(item_failed)
+}
+
+fn folder_rename(storage: &AppStorage, id: &str, name: &str) -> Result<Folder, AppError> {
+    check_folder_id(id)?;
+    storage.get()?.rename_folder(id, name).map_err(item_failed)
+}
+
+fn folder_delete(storage: &AppStorage, id: &str) -> Result<u32, AppError> {
+    check_folder_id(id)?;
+    storage.get()?.delete_folder(id).map_err(item_failed)
+}
+
+fn bookmark_move(
+    storage: &AppStorage,
+    id: &str,
+    folder_id: &str,
+) -> Result<SavedBookmark, AppError> {
+    check_bookmark_id(id)?;
+    check_folder_id(folder_id)?;
+    storage
+        .get()?
+        .move_bookmark(id, folder_id)
+        .map_err(item_failed)
+}
+
+fn bookmark_delete(storage: &AppStorage, id: &str) -> Result<(), AppError> {
+    check_bookmark_id(id)?;
+    storage
+        .get()?
+        .delete_saved_bookmark(id)
+        .map(|_| ())
+        .map_err(item_failed)
+}
+
+fn undo_step(storage: &AppStorage) -> Result<SavedBookmark, AppError> {
+    storage.get()?.undo_last().map_err(item_failed)
+}
+
+/// Opens the stored link of the live bookmark `id` through `open`, and only when that link is an
+/// http or https address. The UI sends an id, never a link, so it cannot open anything else.
+fn open_stored_link(
+    storage: &AppStorage,
+    id: &str,
+    open: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<(), AppError> {
+    check_bookmark_id(id)?;
+    let bookmark = storage.get()?.get_saved_bookmark(id).map_err(item_failed)?;
+    let web = url::Url::parse(&bookmark.url)
+        .ok()
+        .filter(|u| matches!(u.scheme(), "http" | "https") && u.host_str().is_some());
+    let Some(web) = web else {
+        return Err(AppError {
+            code: "invalid_input",
+            message: "Mnemo opens only web addresses that start with http:// or https://."
+                .to_string(),
+        });
+    };
+    open(web.as_str()).map_err(|e| {
+        log::error!("could not open a saved link: {e}");
+        AppError {
+            code: "open_link_failed",
+            message: "Mnemo could not open the link in your browser. Copy it from the link card."
+                .to_string(),
+        }
+    })
+}
+
+/// The live folders with their bookmark counts, by name, Unsorted last.
+#[tauri::command]
+pub async fn list_folders(app: tauri::AppHandle) -> Result<Vec<Folder>, AppError> {
+    off_main_thread(app, folder_list).await
+}
+
+/// Creates a folder with this name.
+#[tauri::command]
+pub async fn create_folder(app: tauri::AppHandle, name: String) -> Result<Folder, AppError> {
+    off_main_thread(app, move |storage| folder_create(storage, &name)).await
+}
+
+/// Renames a folder. Unsorted is refused.
+#[tauri::command]
+pub async fn rename_folder(
+    app: tauri::AppHandle,
+    id: String,
+    name: String,
+) -> Result<Folder, AppError> {
+    off_main_thread(app, move |storage| folder_rename(storage, &id, &name)).await
+}
+
+/// Deletes a folder; its bookmarks move to Unsorted. Gives how many live bookmarks moved.
+/// Unsorted is refused.
+#[tauri::command]
+pub async fn delete_folder(app: tauri::AppHandle, id: String) -> Result<u32, AppError> {
+    off_main_thread(app, move |storage| folder_delete(storage, &id)).await
+}
+
+/// Moves a bookmark to a folder. The last move or delete can be taken back with `undo_last`.
+#[tauri::command]
+pub async fn move_bookmark(
+    app: tauri::AppHandle,
+    id: String,
+    folder_id: String,
+) -> Result<SavedBookmark, AppError> {
+    off_main_thread(app, move |storage| bookmark_move(storage, &id, &folder_id)).await
+}
+
+/// Deletes a bookmark (it is kept, marked deleted). The last move or delete can be taken back
+/// with `undo_last`.
+#[tauri::command]
+pub async fn delete_saved_bookmark(app: tauri::AppHandle, id: String) -> Result<(), AppError> {
+    off_main_thread(app, move |storage| bookmark_delete(storage, &id)).await
+}
+
+/// Takes back the last bookmark move or delete (one step, held in memory until the app closes).
+/// Gives the bookmark as it is now.
+#[tauri::command]
+pub async fn undo_last(app: tauri::AppHandle) -> Result<SavedBookmark, AppError> {
+    off_main_thread(app, undo_step).await
+}
+
+/// Opens the stored link of a saved bookmark in the system browser. The link is read from the
+/// bookmark here, so the UI never passes one and has no opener permission.
+#[tauri::command]
+pub async fn open_link(app: tauri::AppHandle, id: String) -> Result<(), AppError> {
+    let opener = app.clone();
+    off_main_thread(app, move |storage| {
+        open_stored_link(storage, &id, &|url| {
+            use tauri_plugin_opener::OpenerExt;
+            opener
+                .opener()
+                .open_url(url, None::<&str>)
+                .map_err(|e| e.to_string())
+        })
+    })
+    .await
+}
+
+// ---- Import old links from a file (#29, LIB-03) ----
+
+/// The event sent with the import after each change.
+pub const IMPORT_EVENT: &str = "import-changed";
+
+/// The longest file path the import commands take.
+const MAX_IMPORT_PATH_LEN: usize = 4096;
+/// The longest import id the commands take. Ids are UUIDs (36 characters).
+const MAX_IMPORT_ID_LEN: usize = 100;
+
+/// The app's storage for the import worker's own threads.
+pub struct AppBookmarkStore(pub tauri::AppHandle);
+
+impl BookmarkStore for AppBookmarkStore {
+    fn with_storage(
+        &self,
+        call: &mut dyn FnMut(&mut Storage) -> Result<Held, StorageError>,
+    ) -> Result<Held, SaveError> {
+        self.0.state::<AppStorage>().inner().with_storage(call)
+    }
+}
+
+/// The error the UI sees for an import. The text never holds the file's path.
+fn import_failed(e: SaveError) -> AppError {
+    match e {
+        SaveError::NotFound => AppError {
+            code: "not_found",
+            message: "There is no such import.".to_string(),
+        },
+        SaveError::Storage(detail) => {
+            log::error!("import storage call failed: {detail}");
+            AppError {
+                code: "storage_error",
+                message: "Mnemo could not save the import. Nothing was deleted.".to_string(),
+            }
+        }
+        other => save_failed(other),
+    }
+}
+
+/// The picked file: an absolute path, not too long. The path is never logged or sent back.
+fn check_import_path(path: &str) -> Result<std::path::PathBuf, AppError> {
+    let p = std::path::Path::new(path);
+    if path.trim().is_empty() || path.len() > MAX_IMPORT_PATH_LEN || !p.is_absolute() {
+        return Err(AppError {
+            code: "invalid_input",
+            message: "Pick a file to import.".to_string(),
+        });
+    }
+    Ok(p.to_path_buf())
+}
+
+fn check_import_id(id: &str) -> Result<(), AppError> {
+    if id.trim().is_empty() || id.len() > MAX_IMPORT_ID_LEN {
+        return Err(AppError {
+            code: "invalid_input",
+            message: "That is not an import id.".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Runs one import call on a blocking thread with the app's import worker.
+async fn with_import<T, F>(app: tauri::AppHandle, work: F) -> Result<T, AppError>
+where
+    T: Send + 'static,
+    F: FnOnce(&ImportWorker) -> Result<T, SaveError> + Send + 'static,
+{
+    task_result(
+        tauri::async_runtime::spawn_blocking(move || {
+            let worker = app.state::<ImportWorker>();
+            work(&worker).map_err(import_failed)
+        })
+        .await,
+    )
+}
+
+/// Reads the picked file and says what an import would do: links to add, repeats inside the
+/// file, links already saved and entries that are not links. Stores nothing.
+#[tauri::command]
+pub async fn preview_import(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<ImportPreview, AppError> {
+    let path = check_import_path(&path)?;
+    with_import(app, move |w| w.preview_file(&path)).await
+}
+
+/// Imports the picked file: its new links are stored at once as link only; with summaries,
+/// they are then made as background work. Progress goes out as `import-changed` events.
+#[tauri::command]
+pub async fn start_import(
+    app: tauri::AppHandle,
+    path: String,
+    with_summaries: bool,
+) -> Result<ImportStatus, AppError> {
+    let path = check_import_path(&path)?;
+    with_import(app, move |w| w.start_file(&path, with_summaries)).await
+}
+
+/// The newest import with its counts, or null when there was none.
+#[tauri::command]
+pub async fn get_import(app: tauri::AppHandle) -> Result<Option<ImportStatus>, AppError> {
+    with_import(app, |w| w.status()).await
+}
+
+/// Pauses this import only.
+#[tauri::command]
+pub async fn pause_import(app: tauri::AppHandle, id: String) -> Result<ImportStatus, AppError> {
+    check_import_id(&id)?;
+    with_import(app, move |w| w.pause(&id)).await
+}
+
+/// "Stop here": ends the import now. Its links with no summary yet stay link only.
+#[tauri::command]
+pub async fn stop_import(app: tauri::AppHandle, id: String) -> Result<ImportStatus, AppError> {
+    check_import_id(&id)?;
+    with_import(app, move |w| w.stop(&id)).await
+}
+
+/// Continues a paused import. While AI may not run it keeps waiting and says why.
+#[tauri::command]
+pub async fn continue_import(app: tauri::AppHandle, id: String) -> Result<ImportStatus, AppError> {
+    check_import_id(&id)?;
+    with_import(app, move |w| w.resume(&id)).await
+}
+
+#[cfg(test)]
+mod import_command_tests {
+    use super::*;
+
+    #[test]
+    fn import_commands_take_only_an_absolute_path_and_never_echo_it() {
+        for bad in ["", "   ", "links.txt", "./a/b.html"] {
+            let e = check_import_path(bad).unwrap_err();
+            assert_eq!(e.code, "invalid_input");
+            assert!(!e.message.contains("links.txt"));
+        }
+        let long = format!("/{}", "a".repeat(MAX_IMPORT_PATH_LEN));
+        assert!(check_import_path(&long).is_err());
+        assert!(check_import_path("/tmp/bookmarks.html").is_ok());
+        assert!(check_import_id("").is_err());
+        assert!(check_import_id(&"x".repeat(MAX_IMPORT_ID_LEN + 1)).is_err());
+        assert!(check_import_id("3f1c").is_ok());
+    }
+
+    #[test]
+    fn import_errors_have_stable_codes_and_hide_storage_detail() {
+        let e = import_failed(SaveError::NotFound);
+        assert_eq!(
+            (e.code, e.message.as_str()),
+            ("not_found", "There is no such import.")
+        );
+        let e = import_failed(SaveError::Storage("disk I/O error at /home/x".into()));
+        assert_eq!(e.code, "storage_error");
+        assert!(!e.message.contains("/home"));
+        let e = import_failed(SaveError::Invalid("Pick a file, not a folder.".into()));
+        assert_eq!(
+            (e.code, e.message.as_str()),
+            ("invalid_input", "Pick a file, not a folder.")
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2913,5 +3245,198 @@ mod bookmark_command_tests {
         assert!(check_bookmark_id("4b1f").is_ok());
         assert!(check_bookmark_id(" ").is_err());
         assert!(check_bookmark_id(&"a".repeat(101)).is_err());
+    }
+
+    // ---- folders, move, delete and undo (#26) ----
+
+    fn saved_in(state: &AppStorage, url: &str) -> SavedBookmark {
+        match state.get().unwrap().save_link_to_read(url).unwrap() {
+            crate::storage::bookmarks::LinkSave::New(b, _) => b,
+            other => panic!("expected a new bookmark, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn folder_commands_create_rename_list_and_delete_through_the_app_storage() {
+        let (state, dir) = app_storage();
+        let dev = folder_create(&state, "  Dev tools ").unwrap();
+        assert_eq!(dev.name, "Dev tools");
+        let b = saved_in(&state, "https://example.org/x");
+        let moved = bookmark_move(&state, &b.base.id, &dev.id).unwrap();
+        assert_eq!(moved.folder, "Dev tools");
+        assert_eq!(
+            folder_rename(&state, &dev.id, "Tools").unwrap().name,
+            "Tools"
+        );
+        let names: Vec<(String, u32)> = folder_list(&state)
+            .unwrap()
+            .into_iter()
+            .map(|f| (f.name, f.count))
+            .collect();
+        assert_eq!(names, vec![("Tools".into(), 1), ("Unsorted".into(), 0)]);
+        assert_eq!(folder_delete(&state, &dev.id).unwrap(), 1);
+        let after = state.get().unwrap().get_saved_bookmark(&b.base.id).unwrap();
+        assert_eq!(
+            after.folder, "Unsorted",
+            "no bookmark is lost with its folder"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn folder_commands_refuse_unsorted_a_bad_name_and_a_missing_folder_with_coded_errors() {
+        let (state, dir) = app_storage();
+        let unsorted = crate::storage::folders::UNSORTED_ID;
+        for err in [
+            folder_rename(&state, unsorted, "Inbox").unwrap_err(),
+            folder_delete(&state, unsorted).map(|_| ()).unwrap_err(),
+            folder_create(&state, "  ").unwrap_err(),
+            folder_create(&state, "unsorted").unwrap_err(),
+        ] {
+            assert_eq!(err.code, "invalid_input", "{}", err.message);
+        }
+        assert!(folder_rename(&state, unsorted, "Inbox")
+            .unwrap_err()
+            .message
+            .contains("cannot be renamed"));
+        let missing = folder_delete(&state, "no-such-folder").unwrap_err();
+        assert_eq!(missing.code, "not_found");
+        assert!(missing.message.contains("folder"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn folder_commands_check_the_ids_and_name_a_folder_id_a_folder_id() {
+        let (state, dir) = app_storage();
+        let long = "x".repeat(MAX_BOOKMARK_ID_LEN + 1);
+        let b = saved_in(&state, "https://example.org/x");
+        for err in [
+            folder_rename(&state, " ", "A").unwrap_err(),
+            folder_delete(&state, &long).map(|_| ()).unwrap_err(),
+            bookmark_move(&state, &b.base.id, "").unwrap_err(),
+        ] {
+            assert_eq!(err.code, "invalid_input");
+            assert_eq!(err.message, "That is not a folder id.");
+        }
+        for err in [
+            bookmark_move(&state, "", "f").unwrap_err(),
+            bookmark_delete(&state, &long).unwrap_err(),
+        ] {
+            assert_eq!(err.message, "That is not a bookmark id.");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn folder_commands_move_and_delete_a_bookmark_and_undo_takes_each_back_once() {
+        let (state, dir) = app_storage();
+        let dev = folder_create(&state, "Dev tools").unwrap();
+        let b = saved_in(&state, "https://example.org/x");
+        bookmark_move(&state, &b.base.id, &dev.id).unwrap();
+        assert_eq!(undo_step(&state).unwrap().folder, "Unsorted");
+        bookmark_delete(&state, &b.base.id).unwrap();
+        assert_eq!(
+            bookmark_delete(&state, &b.base.id).unwrap_err().code,
+            "not_found"
+        );
+        assert_eq!(undo_step(&state).unwrap().base.deleted_at, None);
+        let again = undo_step(&state).unwrap_err();
+        assert_eq!(
+            (again.code, again.message.as_str()),
+            ("invalid_input", "There is nothing to undo.")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn open_link_opens_only_the_stored_http_link_of_its_bookmark() {
+        let (state, dir) = app_storage();
+        let b = saved_in(&state, "https://example.org/a?x=1");
+        let opened = std::cell::RefCell::new(Vec::new());
+        open_stored_link(&state, &b.base.id, &|url| {
+            opened.borrow_mut().push(url.to_string());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(*opened.borrow(), vec!["https://example.org/a?x=1"]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn open_link_refuses_a_stored_link_that_is_not_http_and_opens_nothing() {
+        let (state, dir) = app_storage();
+        for (n, url) in [
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "ftp://example.org/x",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            // Storage never accepts such a link; a damaged file or an old build could hold one.
+            let b = saved_in(&state, &format!("https://example.org/{n}"));
+            state
+                .get()
+                .unwrap()
+                .set_stored_link_unchecked(&b.base.id, url)
+                .unwrap();
+            let opened = std::cell::Cell::new(false);
+            let err = open_stored_link(&state, &b.base.id, &|_| {
+                opened.set(true);
+                Ok(())
+            })
+            .unwrap_err();
+            assert_eq!(err.code, "invalid_input", "{url}");
+            assert!(!opened.get(), "{url} was opened");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn open_link_gives_not_found_for_an_unknown_or_deleted_bookmark_and_a_plain_error_when_the_opener_fails(
+    ) {
+        let (state, dir) = app_storage();
+        let never = |_: &str| -> Result<(), String> { panic!("opened") };
+        assert_eq!(
+            open_stored_link(&state, "no-such", &never)
+                .unwrap_err()
+                .code,
+            "not_found"
+        );
+        assert_eq!(
+            open_stored_link(&state, " ", &never).unwrap_err().code,
+            "invalid_input"
+        );
+        let b = saved_in(&state, "https://example.org/b");
+        let fails = |_: &str| -> Result<(), String> { Err("/home/someone/xdg-open: boom".into()) };
+        let err = open_stored_link(&state, &b.base.id, &fails).unwrap_err();
+        assert_eq!(err.code, "open_link_failed");
+        assert!(!err.message.contains('/') || err.message.contains("link card"));
+        assert!(!err.message.contains("someone"));
+        bookmark_delete(&state, &b.base.id).unwrap();
+        assert_eq!(
+            open_stored_link(&state, &b.base.id, &never)
+                .unwrap_err()
+                .code,
+            "not_found"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn folder_commands_with_no_storage_say_storage_unavailable_without_a_path() {
+        let state = AppStorage::new(Err(StartupError {
+            code: "open",
+            detail: "unable to open /home/someone/mnemo.db".into(),
+        }));
+        for err in [
+            folder_list(&state).map(|_| ()).unwrap_err(),
+            folder_create(&state, "A").map(|_| ()).unwrap_err(),
+            bookmark_delete(&state, "b").unwrap_err(),
+            undo_step(&state).map(|_| ()).unwrap_err(),
+        ] {
+            assert_eq!(err.code, "storage_unavailable");
+            assert!(!err.message.contains('/'));
+        }
     }
 }

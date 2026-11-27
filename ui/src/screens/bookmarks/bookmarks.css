@@ -12,16 +12,59 @@
   margin-top: var(--space-4);
 }
 
-.bookmarks-list {
+.bookmarks-bar:empty {
+  display: none;
+}
+
+.bookmarks-bar {
+  margin-top: var(--space-4);
+}
+
+/* The folder list beside the links. The list is a column of the basis width; below the medium
+   window the two stack. */
+.bookmarks-body {
+  display: grid;
+  grid-template-columns: minmax(var(--size-basis-column), 1fr) minmax(0, 4fr);
+  gap: var(--space-5);
+  align-items: start;
   margin-top: var(--space-5);
 }
 
-/* Columns of at least the column basis; the smallest window holds one column. */
-.bookmarks-cards {
-  display: grid;
-  grid-template-columns: repeat(
-      auto-fill,
-      minmax(var(--size-basis-column), 1fr)
-    );
+/* The two views ("All bookmarks", "Needs a look") above the folder tree. */
+.bookmarks-folders {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-4);
+  min-width: 0;
+}
+
+.bookmarks-main {
+  min-width: 0;
+}
+
+/* The view control and the search box above the links. */
+.bookmarks-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.bookmarks-tools .search {
+  flex: 1 1 var(--size-basis-column);
+  max-width: var(--measure-intro);
+}
+
+.bookmarks-list {
+  margin-top: var(--space-4);
+}
+
+/* One section per folder: its heading, then its links. */
+.bookmarks-section + .bookmarks-section {
+  margin-top: var(--space-6);
+}
+
+.bookmarks-section-body {
+  margin-top: var(--space-3);
 }

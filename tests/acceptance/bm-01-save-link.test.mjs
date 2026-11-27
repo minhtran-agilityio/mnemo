@@ -455,6 +455,9 @@ test('AC1: 5 links saved in the link box give 5 cards, each with its summary and
     const calls = await app.calls('save_link');
     assert.deepEqual(calls.map((c) => JSON.stringify(c.args)).map((s) => [1, 2, 3, 4, 5].find((n) => s.includes(URL(n)))), [1, 2, 3, 4, 5],
       `save_link was not called once per link with its url: ${JSON.stringify(calls)}`);
+    // #27 decision 3: "All bookmarks" shows a folder's first 4 items and a "Show all N" button; reveal all 5.
+    assert.ok(await app.click('Show all'), 'no button named "Show all ..." for the 5 bookmarks in Unsorted');
+    await app.until(`${JSON.stringify([1, 2, 3, 4, 5].map(SUMMARY))}.every((s) => __h.text().includes(s))`, 'all 5 cards after Show all');
     const seen = await app.h(`(() => { const t = __h.text(); return ${JSON.stringify([1, 2, 3, 4, 5].map((n) => [SUMMARY(n), ...TAGS(n)]))}.map((xs) => xs.filter((x) => !t.includes(x))); })()`);
     assert.deepEqual(seen, [[], [], [], [], []], `missing summary or tags per card: ${JSON.stringify(seen)}`);
     const once = await app.h(`(() => { const t = __h.text(); return ${JSON.stringify([1, 2, 3, 4, 5].map(SUMMARY))}.map((s) => t.split(s).length - 1); })()`);

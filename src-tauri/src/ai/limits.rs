@@ -34,3 +34,18 @@ pub const QUEUED_CANCEL_POLL: Duration = Duration::from_millis(50);
 /// The least time the HTML walk must have when the body is in. With less left, the body came in
 /// too late: the site was too slow (not reached), not the page too big (decision 34).
 pub const PARSE_BUDGET: Duration = Duration::from_secs(2);
+
+// ---- Import old links from a file (#29) ----
+
+/// The largest file an import reads. A browser export of 10 000 bookmarks is about 2 MB.
+pub const IMPORT_MAX_FILE_BYTES: u64 = 20 * 1024 * 1024;
+/// The most entries one import file may hold.
+pub const IMPORT_MAX_ENTRIES: usize = 20_000;
+/// The longest link title kept while reading the file, in characters (the insert keeps at most
+/// 500; a longer one is dropped).
+pub const IMPORT_MAX_TITLE_CHARS: usize = 600;
+/// How long an import worker waits after a fault (a storage error, or a run that ended with no
+/// reason while AI may run) before the import goes on. It doubles after each fault in a row.
+pub const IMPORT_RETRY_FIRST: Duration = Duration::from_secs(5);
+/// The longest wait after faults in a row.
+pub const IMPORT_RETRY_MOST: Duration = Duration::from_secs(300);

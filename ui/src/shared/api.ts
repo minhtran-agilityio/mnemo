@@ -759,11 +759,32 @@ export interface SavedBookmark extends Bookmark {
   summaryStatus: SummaryStatus;
   tags: string[];
   labels: BookmarkTag[];
+  /** The folder the link is in (#26): its id and name. Unsorted when no other folder fits. */
+  folderId: string;
+  folder: string;
+  /** Why the app chose the folder. Null when the app did not choose it. */
+  folderReason: string | null;
+  /** True when the app chose the folder: it is shown as a guess. */
+  folderIsGuess: boolean;
 }
 
-/** A save or summary result: the bookmark, and why there is no summary when an AI run failed. */
+/** A folder of saved links and how many live links it holds. Unsorted is the default folder. */
+export interface Folder {
+  id: string;
+  name: string;
+  /** True for Unsorted: it cannot be renamed or deleted. */
+  isDefault: boolean;
+  count: number;
+}
+
+/**
+ * A save or summary result: the bookmark, and why there is no summary when an AI run failed.
+ * `alreadySaved` is true when `saveLink` found the link already saved (#28): the bookmark is the
+ * old one, unchanged, and no page read or AI run started.
+ */
 export interface SaveResult extends SavedBookmark {
   aiError?: AppError;
+  alreadySaved: boolean;
 }
 
 /** Saves a link: the core stores it at once, then reads the page and asks for a summary. */
@@ -795,6 +816,53 @@ export function listBookmarkCards(args: {
   });
 }
 
+/** The folders with their link counts, by name, Unsorted last. */
+export function listFolders(): Promise<Folder[]> {
+  return invoke<Folder[]>("list_folders");
+}
+
+/** Creates a folder. Only the owner does this: a save never makes a folder. */
+export function createFolder(name: string): Promise<Folder> {
+  return invoke<Folder>("create_folder", { name });
+}
+
+/** Renames a folder. The core refuses Unsorted. */
+export function renameFolder(id: string, name: string): Promise<Folder> {
+  return invoke<Folder>("rename_folder", { id, name });
+}
+
+/** Deletes a folder; its links move to Unsorted. Gives how many live links moved. */
+export function deleteFolder(id: string): Promise<number> {
+  return invoke<number>("delete_folder", { id });
+}
+
+/** Moves a link to a folder. The core keeps the move as the one step of Undo. */
+export function moveBookmark(
+  id: string,
+  folderId: string,
+): Promise<SavedBookmark> {
+  return invoke<SavedBookmark>("move_bookmark", { id, folderId });
+}
+
+/** Deletes a link (the core keeps it, marked deleted). The delete is the one step of Undo. */
+export function deleteSavedBookmark(id: string): Promise<void> {
+  return invoke<void>("delete_saved_bookmark", { id });
+}
+
+/** Takes back the last move or delete (one step, kept in memory until the app closes). */
+export function undoLast(): Promise<SavedBookmark> {
+  return invoke<SavedBookmark>("undo_last");
+}
+
+/**
+ * Opens the stored link of a saved bookmark in the system browser (#27). The core reads the link
+ * from the bookmark and opens it only when it is an http or https address; the UI sends an id and
+ * has no opener permission.
+ */
+export function openLink(id: string): Promise<void> {
+  return invoke<void>("open_link", { id });
+}
+
 /** The event the core sends with the bookmark after each step of a save or a summary. */
 export const BOOKMARK_EVENT = "bookmark-changed";
 
@@ -805,4 +873,116 @@ export function onBookmarkChanged(
   return listen<SavedBookmark>(BOOKMARK_EVENT, (event) =>
     handler(event.payload),
   );
+}
+
+// ---- Import old links from a file (#29) ----
+
+/** What an import of the picked file would do. Nothing is stored yet. */
+export interface ImportPreview {
+  /** The base name of the file, never its path. */
+  fileName: string;
+  /** Every entry read: links, repeats and entries that are not links. */
+  found: number;
+  /** Links that would be added. */
+  toAdd: number;
+  repeatsInFile: number;
+  alreadySaved: number;
+  notLinks: number;
+}
+
+/** Where an import stands. */
+export type ImportState = "running" | "paused" | "finished" | "stopped";
+/** Why an import is paused: the owner pressed Pause, or Mnemo closed during it. */
+export type ImportPausedBy = "owner" | "closed";
+/** Why AI work may not start now (the AI control's reasons). */
+export type AiWaitReason = "off" | "limit" | "threshold" | "owner_pause";
+
+/** One import with its counts, as the Import screen shows it. */
+export interface ImportStatus {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  fileName: string;
+  state: ImportState;
+  pausedBy: ImportPausedBy | null;
+  withSummaries: boolean;
+  found: number;
+  added: number;
+  repeatsInFile: number;
+  alreadySaved: number;
+  notLinks: number;
+  done: number;
+  waiting: number;
+  failed: number;
+  /** Links the owner deleted during the import: not kept as link only. */
+  removed: number;
+  /** The most summaries the core makes at one time. */
+  maxRuns: number;
+  /** Set while the import runs with links waiting and AI may not run now. */
+  waitReason: AiWaitReason | null;
+  /** Set while AI may run but a run ended with a fault and a worker waits: why. */
+  retry: ImportRetry | null;
+}
+
+/** Why an import waits although AI may run. */
+export type ImportFault = "unavailable" | "storage" | "other";
+
+export interface ImportRetry {
+  reason: ImportFault;
+}
+
+/** Asks the owner for a file of links (a browser bookmarks export or a text file). */
+export async function pickImportFile(): Promise<string | null> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const picked = await open({
+    directory: false,
+    multiple: false,
+    filters: [
+      { name: "Bookmarks or links", extensions: ["html", "htm", "txt"] },
+    ],
+  });
+  return typeof picked === "string" ? picked : null;
+}
+
+/** Reads the picked file in the core and counts what an import would do. Stores nothing. */
+export function previewImport(path: string): Promise<ImportPreview> {
+  return invoke<ImportPreview>("preview_import", { path });
+}
+
+/** Imports the picked file: new links are stored at once; summaries follow as background work. */
+export function startImport(
+  path: string,
+  withSummaries: boolean,
+): Promise<ImportStatus> {
+  return invoke<ImportStatus>("start_import", { path, withSummaries });
+}
+
+/** The newest import, or null when there was none. */
+export function getImport(): Promise<ImportStatus | null> {
+  return invoke<ImportStatus | null>("get_import");
+}
+
+/** Pauses this import only. */
+export function pauseImport(id: string): Promise<ImportStatus> {
+  return invoke<ImportStatus>("pause_import", { id });
+}
+
+/** "Stop here": ends the import now; its links with no summary yet stay link only. */
+export function stopImport(id: string): Promise<ImportStatus> {
+  return invoke<ImportStatus>("stop_import", { id });
+}
+
+/** Continues a paused import. While AI may not run, it keeps waiting and says why. */
+export function continueImport(id: string): Promise<ImportStatus> {
+  return invoke<ImportStatus>("continue_import", { id });
+}
+
+/** The event the core sends with the import after each change. */
+export const IMPORT_EVENT = "import-changed";
+
+/** Calls `handler` with the import after each change. Resolves to the unsubscribe call. */
+export function onImportChanged(
+  handler: (status: ImportStatus) => void,
+): Promise<() => void> {
+  return listen<ImportStatus>(IMPORT_EVENT, (event) => handler(event.payload));
 }

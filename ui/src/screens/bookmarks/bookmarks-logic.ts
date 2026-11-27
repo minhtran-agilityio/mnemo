@@ -1,7 +1,7 @@
 // The plain rules of the Bookmarks screen (#25): how a saved link becomes a link card, which
 // actions its card offers, the saved date, and how a changed bookmark joins the list.
-import type { LinkItem, LinkStatus } from "../../ds";
-import type { SavedBookmark, SummaryStatus } from "../../shared/api";
+import type { LinkItem, LinkStatus, LinkView } from "../../ds";
+import type { Folder, SavedBookmark, SummaryStatus } from "../../shared/api";
 
 /** An action a card offers. */
 export type CardAction = "paste" | "later";
@@ -47,8 +47,9 @@ export function savedDate(iso: string): string {
 /**
  * A saved link as the link card shows it. The title falls back to the site, then the link. A
  * summary is passed only when the status is done, so a link that was not read never shows one.
+ * `alreadySaved` adds the "Already saved" note (#28): the owner saved this link again.
  */
-export function toLinkItem(b: SavedBookmark): LinkItem {
+export function toLinkItem(b: SavedBookmark, alreadySaved = false): LinkItem {
   const done = b.summaryStatus === "done";
   return {
     title: b.title ?? b.site ?? b.url,
@@ -61,6 +62,12 @@ export function toLinkItem(b: SavedBookmark): LinkItem {
     tagsKind: "ai",
     reason: done ? (b.reason ?? undefined) : undefined,
     reasonKind: b.reasonIsGuess ? "guess" : "owner",
+    alreadySaved: alreadySaved ? true : undefined,
+    // The core's folder flag is passed as it is, in every status (a link filed with AI off is
+    // in Unsorted with no guess).
+    folder: b.folder,
+    folderIsGuess: b.folderIsGuess,
+    folderReason: b.folderReason ?? undefined,
   };
 }
 
@@ -98,4 +105,139 @@ export function upsert<T extends SavedBookmark>(
   const next = items.slice();
   next[at] = b;
   return next;
+}
+
+/**
+ * The list with the bookmark `b` first, taken out of its old place when it is in the list (a link
+ * the owner saved again, #28): the list gets no second row for it. A deleted bookmark leaves the
+ * list, as in `upsert`.
+ */
+export function moveToTop<T extends SavedBookmark>(
+  items: readonly T[],
+  b: T,
+): T[] {
+  const rest = items.filter((x) => x.id !== b.id);
+  return b.deletedAt ? rest : [b, ...rest];
+}
+
+/**
+ * The list with `b` back in it after an Undo: a bookmark already in the list is replaced in place;
+ * one that is not (a delete taken back) goes where its saved date puts it, newest first.
+ */
+export function restore<T extends SavedBookmark>(
+  items: readonly T[],
+  b: T,
+): T[] {
+  if (b.deletedAt) return items.filter((x) => x.id !== b.id);
+  if (items.some((x) => x.id === b.id)) return upsert(items, b);
+  const at = items.findIndex((x) => x.createdAt < b.createdAt);
+  const next = items.slice();
+  next.splice(at < 0 ? next.length : at, 0, b);
+  return next;
+}
+
+/** "1 bookmark" or "3 bookmarks". */
+export function bookmarkCount(n: number): string {
+  return `${n} ${n === 1 ? "bookmark" : "bookmarks"}`;
+}
+
+/** The reason Unsorted gives for a refused rename or delete (the menu shows it, disabled). */
+export const UNSORTED_REFUSED = {
+  rename: "Unsorted is the default folder. It cannot be renamed.",
+  delete: "Unsorted is the default folder. It cannot be deleted.",
+} as const;
+
+// ---- the page of #27 (BM-03): views, the needs-a-look filter, search and sections ----
+
+/** The setting that keeps the chosen view across restarts. */
+export const VIEW_SETTING = "bookmarks.view";
+
+/** The visible name of each view, as the view control shows it. */
+export const VIEW_LABELS: Record<LinkView, string> = {
+  list: "List",
+  cards: "Cards",
+  compact: "Compact",
+};
+
+/** The view when none is saved, or the saved value is not one of the three. */
+export const DEFAULT_VIEW: LinkView = "cards";
+
+/** The view a saved setting names; anything else gives the default. */
+export function parseView(value: string | null | undefined): LinkView {
+  return value === "list" || value === "cards" || value === "compact"
+    ? value
+    : DEFAULT_VIEW;
+}
+
+/** How many bookmarks a folder section shows before "Show all N" (the prototype shows 4). */
+export const SECTION_FIRST = 4;
+
+/** True when the bookmark has no summary: it needs a look. */
+export function needsLook(b: SavedBookmark): boolean {
+  return b.summary === null && !b.deletedAt;
+}
+
+/** The text a search is made of: NFC-normalized, lower case, white space trimmed. */
+export function normalizeSearch(text: string): string {
+  return text.normalize("NFC").toLowerCase().trim();
+}
+
+/**
+ * True when every word of `query` is in the title, the summary or a tag of `b`. Case does not
+ * matter and the text is compared in NFC, so a word typed with combined or separate accents finds
+ * the same text. Accents are not ignored: "pho" does not find "phở".
+ */
+export function matchesSearch(b: SavedBookmark, query: string): boolean {
+  const words = normalizeSearch(query).split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const text = normalizeSearch(
+    [b.title ?? "", b.summary ?? "", ...b.tags].join("\n"),
+  );
+  return words.every((w) => text.includes(w));
+}
+
+/** The bookmarks of one folder, with the folder's full count. */
+export interface FolderGroup {
+  id: string;
+  name: string;
+  /** The folder's count from the core (every live link), not the number loaded or matched. */
+  count: number;
+  items: SavedBookmark[];
+}
+
+/**
+ * The bookmarks grouped by folder, in the folders' order (the core puts Unsorted last). A folder
+ * with no bookmark loaded is kept, so its count still shows. A bookmark whose folder is not in
+ * `folders` (the folders are not read yet) goes in a group of its own, after them.
+ */
+export function groupByFolder(
+  items: readonly SavedBookmark[],
+  folders: readonly Folder[],
+): FolderGroup[] {
+  const groups = new Map<string, FolderGroup>(
+    folders.map((f) => [
+      f.id,
+      { id: f.id, name: f.name, count: f.count, items: [] },
+    ]),
+  );
+  for (const b of items) {
+    let g = groups.get(b.folderId);
+    if (!g) {
+      g = { id: b.folderId, name: b.folder, count: 0, items: [] };
+      groups.set(b.folderId, g);
+    }
+    g.items.push(b);
+    if (!folders.some((f) => f.id === b.folderId)) g.count += 1;
+  }
+  return [...groups.values()];
+}
+
+/** Newest first, then by id, so the order is the same for every view and every load. */
+export function newestFirst(a: SavedBookmark, z: SavedBookmark): number {
+  return z.createdAt.localeCompare(a.createdAt) || z.id.localeCompare(a.id);
+}
+
+/** "1 link has no summary" or "20 links have no summary": the needs-a-look bar. */
+export function needsLookLine(n: number): string {
+  return n === 1 ? "1 link has no summary" : `${n} links have no summary`;
 }

@@ -4,11 +4,18 @@ import "./style.css";
 import "./screens/settings/settings.css";
 import "./screens/ideas/ideas.css";
 import "./screens/bookmarks/bookmarks.css";
+import "./screens/import/import.css";
 import { getVersion } from "@tauri-apps/api/app";
 import { createToastRegion, type ToastRegion } from "./ds";
 import { renderEmptyState } from "./frame/empty-state";
 import { keepPlace } from "./frame/keep-place";
-import { EVERYTHING_ID, isRoadmapItem, UI_CATALOG_ID } from "./frame/nav";
+import {
+  EVERYTHING_ID,
+  IMPORT_ID,
+  isRoadmapItem,
+  sidebarIdFor,
+  UI_CATALOG_ID,
+} from "./frame/nav";
 import { createRouter, type Route } from "./frame/router";
 import {
   createSidebarFromSaved,
@@ -28,32 +35,46 @@ import {
 import { pingErrorText } from "./ping-text";
 import { renderBookmarks } from "./screens/bookmarks/bookmarks";
 import { renderIdeas } from "./screens/ideas/ideas";
+import { renderImport } from "./screens/import/import";
 import { renderNotes } from "./screens/notes/notes";
 import { renderSettings } from "./screens/settings/settings";
 import {
   addIdea,
   checkAiHealth,
+  continueImport,
   countLabelDeleteMoves,
+  createFolder,
   createLabel,
   dataFolderInfo,
+  deleteFolder,
   deleteLabel,
+  deleteSavedBookmark,
   errorMessage,
   exportData,
   getAiHealth,
   getAiMode,
+  getImport,
   getSetting,
   listAiModels,
   listBookmarkCards,
   listBookmarks,
+  listFolders,
   listIdeas,
   listLabelledNotes,
   listLabels,
   listNotes,
+  moveBookmark,
   moveLabel,
   onBookmarkChanged,
+  onImportChanged,
   openDataFolder,
+  openLink,
+  pauseImport,
   pickFolder,
+  pickImportFile,
   ping,
+  previewImport,
+  renameFolder,
   renameLabel,
   resetAiModels,
   resetData,
@@ -62,8 +83,11 @@ import {
   saveLink,
   setAiModel,
   setSetting,
+  startImport,
+  stopImport,
   summarizeBookmark,
   turnIdeaIntoProject,
+  undoLast,
   updateIdea,
 } from "./shared/api";
 import { versionErrorText, versionText } from "./version-text";
@@ -225,7 +249,7 @@ async function start(): Promise<void> {
     canLeaveScreen = null;
     shownHash = window.location.hash;
     const { item } = route;
-    sidebar.setCurrent(item.id);
+    sidebar.setCurrent(sidebarIdFor(item.id));
     // The UI Catalog is dev only: a release build drops this branch and the catalog code with it,
     // and its router never returns the catalog item.
     if (import.meta.env.DEV && item.id === UI_CATALOG_ID) {
@@ -310,6 +334,29 @@ async function start(): Promise<void> {
         summarizeBookmark,
         listBookmarkCards,
         onBookmarkChanged,
+        listFolders,
+        createFolder,
+        renameFolder,
+        deleteFolder,
+        moveBookmark,
+        deleteSavedBookmark,
+        undoLast,
+        getSetting,
+        setSetting,
+        openLink,
+        openImport: () => router.go(IMPORT_ID),
+      });
+    } else if (item.id === IMPORT_ID) {
+      leaveScreen = renderImport(screen, {
+        pickImportFile,
+        previewImport,
+        startImport,
+        getImport,
+        pauseImport,
+        continueImport,
+        stopImport,
+        onImportChanged,
+        backToBookmarks: () => router.go(BOOKMARKS_ID),
       });
     } else if (isRoadmapItem(item)) {
       renderEmptyState(screen, { item, query: route.query });

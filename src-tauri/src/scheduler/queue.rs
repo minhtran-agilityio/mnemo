@@ -17,6 +17,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
@@ -41,8 +42,7 @@ pub const STOPPED_UNEXPECTEDLY: &str = "the run stopped unexpectedly";
 pub enum Priority {
     /// Something the owner asked for and waits on.
     Owner,
-    /// A job the app runs on its own. Phase 5 (AGT-01) adds the first caller.
-    #[allow(dead_code)]
+    /// A job the app runs on its own. The file import (#29) is the first caller.
     Background,
 }
 
@@ -211,6 +211,127 @@ impl RunQueue {
     }
 }
 
+impl RunQueue {
+    /// Takes a run out of the queue only while it is still waiting: it ends as cancelled with
+    /// no process. A running run is left alone (the gate never stops a running run). True when
+    /// the run was waiting and left the queue.
+    ///
+    /// The run log locks the app's storage, so never call this while holding the storage lock.
+    pub fn withdraw(&self, id: &str) -> bool {
+        let inner = &self.0;
+        let removed = {
+            let mut state = inner.lock();
+            let at_owner = state.owner.iter().position(|j| j.id == id);
+            let at_background = state.background.iter().position(|j| j.id == id);
+            match (at_owner, at_background) {
+                (Some(i), _) => state.owner.remove(i),
+                (None, Some(i)) => state.background.remove(i),
+                (None, None) => None,
+            }
+        };
+        let Some(job) = removed else {
+            return false;
+        };
+        inner.record_end(&job.id, &job.task.name, &RunEnd::Cancelled, None);
+        let _ = job.reply.send(Err(AiError::Cancelled));
+        true
+    }
+}
+
+/// An `AiRunner` that sends each task through the queue as a background task (the file import,
+/// #29) and waits for its result. It does not queue a task the AI control would hold, and a run
+/// that waits while the control stops allowing background work leaves the queue (cancelled), so
+/// the caller does not hold a bookmark's claim for as long as AI is held. `stop` (the import's
+/// Pause) or the given token cancels the run, a running one too.
+pub struct BackgroundRunner {
+    pub queue: RunQueue,
+    pub stop: CancelToken,
+    /// Set when the AI control refused or withdrew a run of this runner, so the caller can tell
+    /// a run the gate held from one that failed (`held_by_gate`).
+    held: AtomicBool,
+}
+
+impl BackgroundRunner {
+    pub fn new(queue: RunQueue, stop: CancelToken) -> Self {
+        BackgroundRunner {
+            queue,
+            stop,
+            held: AtomicBool::new(false),
+        }
+    }
+
+    /// Whether the AI control refused or withdrew a run of this runner (it ended `Cancelled`
+    /// because background work was held, not because it failed or was stopped).
+    pub fn held_by_gate(&self) -> bool {
+        self.held.load(Ordering::SeqCst)
+    }
+
+    fn allowed(&self) -> bool {
+        let control = self.queue.control();
+        control.may_run(Priority::Background, control.now()) == Decision::Allow
+    }
+}
+
+impl AiRunner for BackgroundRunner {
+    fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
+        if self.stop.is_cancelled() || cancel.is_cancelled() {
+            return Err(AiError::Cancelled);
+        }
+        if !self.allowed() {
+            self.held.store(true, Ordering::SeqCst);
+            return Err(AiError::Cancelled);
+        }
+        let ticket = self
+            .queue
+            .submit(Priority::Background, task.clone())
+            .map_err(|e| {
+                log::error!("the background {} run could not be queued: {e}", task.name);
+                AiError::NotRecorded
+            })?;
+        let mut asked = false;
+        loop {
+            match ticket
+                .done
+                .recv_timeout(crate::ai::limits::QUEUED_CANCEL_POLL)
+            {
+                Ok(result) => {
+                    // The queue drops waiting background runs when AI goes off or the gate
+                    // closes: that is the gate holding the run, not a failure.
+                    if result == Err(AiError::Cancelled)
+                        && !self.stop.is_cancelled()
+                        && !cancel.is_cancelled()
+                        && !self.allowed()
+                    {
+                        self.held.store(true, Ordering::SeqCst);
+                    }
+                    return result;
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) if !asked => {
+                    if self.stop.is_cancelled() || cancel.is_cancelled() {
+                        asked = true;
+                        self.queue.cancel(&ticket.id);
+                    } else if !self.allowed() {
+                        asked = self.queue.withdraw(&ticket.id);
+                        if asked {
+                            self.held.store(true, Ordering::SeqCst);
+                        }
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    log::error!(
+                        "the background {} run {} stopped without a result",
+                        task.name,
+                        ticket.id
+                    );
+                    // Not a storage fault, not Claude Code missing, and no one cancelled it.
+                    return Err(AiError::Stopped);
+                }
+            }
+        }
+    }
+}
+
 /// An `AiRunner` that sends each task through the queue as an owner task and waits for its
 /// result, so a feature written against `AiRunner` (such as save a link) gets the run row, the
 /// two-run limit and the AI control of the queue. A set cancel token cancels the queued run.
@@ -220,7 +341,7 @@ impl AiRunner for QueuedRunner {
     fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
         let ticket = self.0.submit(Priority::Owner, task.clone()).map_err(|e| {
             log::error!("the {} run could not be queued: {e}", task.name);
-            AiError::Unavailable
+            AiError::NotRecorded
         })?;
         let mut cancelled = false;
         loop {
@@ -241,7 +362,7 @@ impl AiRunner for QueuedRunner {
                         task.name,
                         ticket.id
                     );
-                    return Err(AiError::Unavailable);
+                    return Err(AiError::Stopped);
                 }
             }
         }
@@ -465,7 +586,7 @@ impl Drop for Slot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicUsize;
     use std::time::Duration;
 
     use crate::ai::fake::{FakeResult, FakeRunner};
@@ -939,6 +1060,57 @@ mod tests {
     }
 
     #[test]
+    fn a_runner_whose_thread_dies_gives_stopped_not_cancelled_or_unavailable() {
+        let script = Arc::new(ScriptRunner::default());
+        script
+            .plans
+            .lock()
+            .unwrap()
+            .insert("broken".into(), Plan::Panic);
+        let (q, _events) = queue(script, TestLog::new());
+        let background = BackgroundRunner::new(q.clone(), CancelToken::default());
+        assert_eq!(
+            background.run_task(&task("broken"), &CancelToken::default()),
+            Err(AiError::Stopped)
+        );
+        assert_eq!(
+            QueuedRunner(q).run_task(&task("broken"), &CancelToken::default()),
+            Err(AiError::Stopped)
+        );
+    }
+
+    #[test]
+    fn a_run_the_log_cannot_record_gives_not_recorded_from_both_runners() {
+        struct BrokenLog;
+        impl RunLog for BrokenLog {
+            fn enqueue(&self, _: &str) -> Result<String, RunLogError> {
+                Err(RunLogError("disk I/O error".to_string()))
+            }
+            fn start(&self, _: &str) -> Result<(), RunLogError> {
+                Ok(())
+            }
+            fn finish(&self, _: &str, _: &RunEnd, _: Option<i64>) -> Result<(), RunLogError> {
+                Ok(())
+            }
+        }
+        let q = RunQueue::new(
+            Arc::new(ScriptRunner::default()),
+            Arc::new(BrokenLog),
+            Arc::new(|_: &RunEvent| {}),
+            crate::scheduler::ai_control::testing::open_control(),
+        );
+        let background = BackgroundRunner::new(q.clone(), CancelToken::default());
+        assert_eq!(
+            background.run_task(&task("any"), &CancelToken::default()),
+            Err(AiError::NotRecorded)
+        );
+        assert_eq!(
+            QueuedRunner(q).run_task(&task("any"), &CancelToken::default()),
+            Err(AiError::NotRecorded)
+        );
+    }
+
+    #[test]
     fn queue_submit_fails_and_starts_nothing_when_the_row_cannot_be_written() {
         struct BrokenLog;
         impl RunLog for BrokenLog {
@@ -1016,5 +1188,92 @@ mod tests {
             Err(AiError::Cancelled)
         );
         assert_eq!(log.rows()[0].state, RunState::Cancelled);
+    }
+
+    #[test]
+    fn withdraw_takes_a_waiting_run_out_with_no_process_and_leaves_a_running_run_alone() {
+        let runner = Arc::new(ScriptRunner::default());
+        let hold_1 = runner.hold("hold-1");
+        let hold_2 = runner.hold("hold-2");
+        let log = TestLog::new();
+        let (q, events) = queue(runner.clone(), log.clone());
+        let a = q.submit(Priority::Background, task("hold-1")).unwrap();
+        let b = q.submit(Priority::Background, task("hold-2")).unwrap();
+        assert_eq!(next_in(&events, RunState::Running), "hold-1");
+        assert_eq!(next_in(&events, RunState::Running), "hold-2");
+        let c = q.submit(Priority::Background, task("bg-c")).unwrap();
+        assert!(!q.withdraw(&a.id), "a running run was withdrawn");
+        assert!(q.withdraw(&c.id));
+        assert!(!q.withdraw(&c.id));
+        assert_eq!(wait(&c), Err(AiError::Cancelled));
+        assert_eq!(log.row(&c.id).state, RunState::Cancelled);
+        hold_1.store(true, Ordering::SeqCst);
+        hold_2.store(true, Ordering::SeqCst);
+        assert!(wait(&a).is_ok() && wait(&b).is_ok());
+        assert!(!runner.called().contains(&"bg-c".to_string()));
+    }
+
+    #[test]
+    fn a_background_runner_queues_as_background_and_is_not_queued_while_background_is_held() {
+        let fake = Arc::new(FakeRunner::new(FakeResult::Valid("{}".into())));
+        let log = TestLog::new();
+        let (q, _events) = queue(fake.clone(), log.clone());
+        let runner = BackgroundRunner::new(q.clone(), CancelToken::default());
+        assert!(runner
+            .run_task(&save_task(), &CancelToken::default())
+            .is_ok());
+        assert!(!runner.held_by_gate());
+        q.control().pause().unwrap();
+        assert_eq!(
+            runner.run_task(&save_task(), &CancelToken::default()),
+            Err(AiError::Cancelled)
+        );
+        // The gate held it: the caller can tell this from a failed or stopped run.
+        assert!(runner.held_by_gate());
+        assert_eq!(log.rows().len(), 1, "a held background task was queued");
+        q.control().resume().unwrap();
+        runner.stop.cancel();
+        assert_eq!(
+            runner.run_task(&save_task(), &CancelToken::default()),
+            Err(AiError::Cancelled)
+        );
+        assert_eq!(fake.starts(), 1);
+        // A run stopped by its own token is not held by the gate.
+        let stopped = BackgroundRunner::new(q.clone(), CancelToken::default());
+        stopped.stop.cancel();
+        assert_eq!(
+            stopped.run_task(&save_task(), &CancelToken::default()),
+            Err(AiError::Cancelled)
+        );
+        assert!(!stopped.held_by_gate());
+    }
+
+    #[test]
+    fn a_waiting_background_run_leaves_the_queue_when_background_work_is_held() {
+        let runner = Arc::new(ScriptRunner::default());
+        let hold_1 = runner.hold("hold-1");
+        let hold_2 = runner.hold("hold-2");
+        let log = TestLog::new();
+        let (q, events) = queue(runner.clone(), log.clone());
+        let a = q.submit(Priority::Owner, task("hold-1")).unwrap();
+        let b = q.submit(Priority::Owner, task("hold-2")).unwrap();
+        assert_eq!(next_in(&events, RunState::Running), "hold-1");
+        assert_eq!(next_in(&events, RunState::Running), "hold-2");
+        let bg = BackgroundRunner::new(q.clone(), CancelToken::default());
+        let control = q.control();
+        let pauser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            control.pause().unwrap();
+        });
+        assert_eq!(
+            bg.run_task(&task("bg-1"), &CancelToken::default()),
+            Err(AiError::Cancelled)
+        );
+        pauser.join().unwrap();
+        assert!(bg.held_by_gate(), "a withdrawn run is held by the gate");
+        hold_1.store(true, Ordering::SeqCst);
+        hold_2.store(true, Ordering::SeqCst);
+        assert!(wait(&a).is_ok() && wait(&b).is_ok());
+        assert!(!runner.called().contains(&"bg-1".to_string()));
     }
 }
