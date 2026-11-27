@@ -72,22 +72,24 @@ export function createImportProgress(
   head.className = "ip-head";
   const title = span(doc, "ip-title");
   title.append(span(doc, "ip-lead"), span(doc, "ip-file"));
-  // The state word and the reason are live regions (a change is announced). The counts are not:
-  // they change on every tick and would be read out each time.
-  const word = span(doc, "ip-state");
-  word.setAttribute("role", "status");
-  head.append(title, word);
+  head.append(title);
+  // One stable live region holds the state word and the reason, so a change of either is announced.
+  // It is always rendered (an empty reason is hidden by CSS, not by the hidden attribute). The counts
+  // are not live: they change on every tick and would be read out each time.
+  const status = doc.createElement("div");
+  status.className = "ip-status";
+  status.setAttribute("role", "status");
+  const reason = doc.createElement("p");
+  reason.className = "ip-reason";
+  status.append(span(doc, "ip-state"), reason);
   const counts = doc.createElement("p");
   counts.className = "ip-counts";
   // buildProgress takes no document and uses the global one; this part is built for the window's document.
   const bar = buildProgress({ label: "Import", value: 0 });
   bar.classList.add("ip-bar");
-  const reason = doc.createElement("p");
-  reason.className = "ip-reason";
-  reason.setAttribute("role", "status");
   const actions = doc.createElement("div");
   actions.className = "ip-actions";
-  root.append(head, counts, bar, reason, actions);
+  root.append(head, status, counts, bar, actions);
   setImportProgress(root, options);
   return root;
 }
@@ -116,22 +118,29 @@ export function setImportProgress(
     options.total > 0
       ? ((options.done + options.failed) / options.total) * 100
       : 0;
-  // Rounding must not show 100% before the import is finished.
+  // Rounding must not show 100% while links are still waiting.
   const shown =
-    options.state === "finished" ? 100 : Math.min(99, Math.floor(share));
+    options.state === "finished"
+      ? 100
+      : options.waiting > 0
+        ? Math.min(99, Math.floor(share))
+        : Math.floor(share);
   setProgress(part(root, "ip-bar"), shown);
-  const reason = part(root, "ip-reason");
-  const line =
+  part(root, "ip-reason").textContent =
     options.reason ?? (options.state === "stopped" ? STOPPED_REASON : "");
-  reason.textContent = line;
-  reason.hidden = !line;
 
   const actions = part(root, "ip-actions");
   const ended = options.state === "finished" || options.state === "stopped";
-  const wanted: ActionKind[] = ended
-    ? []
-    : [options.state === "paused" ? "continue" : "pause", "stop"];
-  for (const old of actions.querySelectorAll<HTMLButtonElement>("button")) {
+  const main: ActionKind = options.state === "paused" ? "continue" : "pause";
+  const wanted: ActionKind[] = ended ? [] : [main, "stop"];
+  const buttons = () => [
+    ...actions.querySelectorAll<HTMLButtonElement>("button"),
+  ];
+  // Swapping Pause for Continue (or back) keeps the focus on the main action.
+  const mainHadFocus = buttons().some(
+    (b) => b.dataset.action !== "stop" && doc.activeElement === b,
+  );
+  for (const old of buttons()) {
     if (!wanted.includes(old.dataset.action as ActionKind)) old.remove();
   }
   for (const kind of wanted) {
@@ -155,10 +164,11 @@ export function setImportProgress(
       },
     });
     button.dataset.action = kind;
-    actions.append(button);
+    // Pause and Continue go before Stop here. A button already in place is never moved.
+    const stop = actions.querySelector('button[data-action="stop"]');
+    if (kind !== "stop" && stop) actions.insertBefore(button, stop);
+    else actions.append(button);
+    if (kind !== "stop" && mainHadFocus && !options.pending) button.focus();
   }
-  // Pause and Continue come first, Stop here last, whatever order they were made in.
-  const stop = actions.querySelector('button[data-action="stop"]');
-  if (stop) actions.append(stop);
   actions.hidden = wanted.length === 0;
 }

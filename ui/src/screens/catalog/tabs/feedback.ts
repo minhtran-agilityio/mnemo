@@ -248,16 +248,22 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
         const forcedButton = (
           caption: string,
           cls: "is-hover" | "is-focus" | "is-pressed",
+          action: "pause" | "stop" = "pause",
         ) => {
           const block = mk({});
-          block.querySelector("button")?.classList.add(cls);
+          block
+            .querySelector(`button[data-action="${action}"]`)
+            ?.classList.add(cls);
           return state(doc, caption, block, grow);
         };
         return [
           state(doc, "default: running", mk({}), grow),
-          forcedButton("hover (Pause)", "is-hover"),
-          forcedButton("focus-visible (Pause)", "is-focus"),
-          forcedButton("active (Pause)", "is-pressed"),
+          forcedButton("hover: Pause", "is-hover"),
+          forcedButton("focus-visible: Pause", "is-focus"),
+          forcedButton("active: Pause", "is-pressed"),
+          forcedButton("hover: Stop here", "is-hover", "stop"),
+          forcedButton("focus-visible: Stop here", "is-focus", "stop"),
+          forcedButton("active: Stop here", "is-pressed", "stop"),
           state(
             doc,
             "partial: waiting, usage limit",

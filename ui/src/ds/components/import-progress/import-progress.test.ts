@@ -27,7 +27,7 @@ test("running shows counts, the state word, the bar and Pause", () => {
   expect(q(r, ".ip-state")?.textContent).toBe("Running");
   expect(q(r, ".ip-bar")?.getAttribute("aria-valuenow")).toBe("28");
   expect(q(r, "button")?.textContent).toBe("Pause");
-  expect(q(r, ".ip-reason")?.hidden).toBe(true);
+  expect(q(r, ".ip-reason")?.textContent).toBe("");
 });
 
 test("waiting shows the reason and keeps Pause", () => {
@@ -87,8 +87,12 @@ test("the button is keyboard reachable and has an accessible name", () => {
   expect(b.tabIndex).toBe(0);
   expect(b.textContent).toBe("Pause");
   expect(q(r, ".ip-counts")?.hasAttribute("role")).toBe(false);
-  expect(q(r, ".ip-state")?.getAttribute("role")).toBe("status");
-  expect(q(r, ".ip-reason")?.getAttribute("role")).toBe("status");
+  // One stable live region holds the state word and the reason.
+  const status = q(r, ".ip-status");
+  expect(status?.getAttribute("role")).toBe("status");
+  expect(status?.contains(q(r, ".ip-state"))).toBe(true);
+  expect(status?.contains(q(r, ".ip-reason"))).toBe(true);
+  expect(q(r, ".ip-reason")?.hasAttribute("hidden")).toBe(false);
 });
 
 test("counts of 1000 and more get separators; a long name keeps its full title", () => {
@@ -156,4 +160,64 @@ test("the bar never shows 100% before the import is finished", () => {
     total: 1000,
   });
   expect(q(r, ".ip-bar")?.getAttribute("aria-valuenow")).toBe("100");
+});
+
+test("the live region stays the same node when the state and reason change", () => {
+  const r = make();
+  const status = q(r, ".ip-status");
+  setImportProgress(r, {
+    ...base,
+    state: "waiting",
+    reason: "Waiting: AI is off.",
+  });
+  expect(q(r, ".ip-status")).toBe(status);
+  expect(status?.textContent).toContain("Waiting: AI is off.");
+});
+
+test("a button in place is not moved: Stop here keeps focus across updates", () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const r = make();
+  host.append(r);
+  const stop = q(r, 'button[data-action="stop"]') as HTMLButtonElement;
+  stop.focus();
+  expect(document.activeElement).toBe(stop);
+  setImportProgress(r, { ...base, done: 20, waiting: 28 });
+  expect(document.activeElement).toBe(stop);
+  expect(q(r, 'button[data-action="stop"]')).toBe(stop);
+  host.remove();
+});
+
+test("swapping Pause for Continue (and back) moves the focus to the new button", () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const r = make();
+  host.append(r);
+  (q(r, 'button[data-action="pause"]') as HTMLButtonElement).focus();
+  setImportProgress(r, { ...base, state: "paused", reason: "Paused by you" });
+  expect(document.activeElement).toBe(q(r, 'button[data-action="continue"]'));
+  expect(names(r)).toEqual(["Continue", "Stop here"]);
+  setImportProgress(r, { ...base });
+  expect(document.activeElement).toBe(q(r, 'button[data-action="pause"]'));
+  expect(names(r)).toEqual(["Pause", "Stop here"]);
+  host.remove();
+});
+
+test("the bar reaches 100% when every link is processed and stays under it while links wait", () => {
+  const r = make({
+    state: "stopped",
+    done: 48,
+    waiting: 0,
+    failed: 2,
+    total: 50,
+  });
+  expect(q(r, ".ip-bar")?.getAttribute("aria-valuenow")).toBe("100");
+  setImportProgress(r, {
+    ...base,
+    state: "stopped",
+    done: 20,
+    waiting: 28,
+    failed: 2,
+  });
+  expect(q(r, ".ip-bar")?.getAttribute("aria-valuenow")).toBe("44");
 });
