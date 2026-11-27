@@ -193,6 +193,7 @@ fn ai_failed(error: &AiError) -> AppError {
         AiError::ExitError { .. } => "Claude Code stopped with an error.",
         AiError::Unavailable => "Claude Code could not be started.",
         AiError::Cancelled => "The run was cancelled.",
+        AiError::NotRecorded => "Mnemo could not record the run.",
     };
     AppError {
         code: error_kind(error),

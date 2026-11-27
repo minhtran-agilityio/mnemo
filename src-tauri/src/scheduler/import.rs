@@ -122,16 +122,30 @@ struct Workers {
     /// Faults in a row (see `wait_after_fault`); an ended link, a new import and Continue set
     /// it back to 0.
     faults: u32,
-    /// One entry per worker that waits after a fault: its key and why. The screen shows the
-    /// newest while any worker still waits.
-    retries: Vec<(u64, Fault)>,
+    /// One entry per worker that waits after a fault. The screen shows the newest of the
+    /// import it shows while any worker still waits.
+    retries: Vec<Retry>,
     /// The key of the next entry in `retries`.
     next_retry: u64,
-    /// Counts the changes that end a fault wait early: the background gate opening again, a
-    /// new import, Continue on a paused import.
+    /// Counts the changes that end a fault wait early: a new import and Continue on a paused
+    /// import. (The background gate opening again is counted by the AI control.)
     wake: u64,
-    /// The background gate as the control listener last saw it (open = may run).
-    gate_open: Option<bool>,
+}
+
+/// What ends a fault wait early, noted before the work it follows: the import's own changes
+/// (`Workers::wake`) and the background gate opening again (`AiControl::gate_reopened`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Wakes {
+    wake: u64,
+    reopened: u64,
+}
+
+/// One worker's fault wait.
+struct Retry {
+    key: u64,
+    /// The import the worker belongs to: another import never shows this wait.
+    import: String,
+    fault: Fault,
 }
 
 struct Inner {
@@ -189,10 +203,7 @@ impl ImportWorker {
         let weak: Weak<Inner> = Arc::downgrade(&inner);
         control.subscribe(Arc::new(move || {
             if let Some(inner) = weak.upgrade() {
-                let worker = ImportWorker(inner);
-                let open = worker.held_by().is_none();
-                worker.gate_seen(open);
-                worker.kick();
+                ImportWorker(inner).kick();
             }
         }));
         ImportWorker(inner)
@@ -234,8 +245,9 @@ impl ImportWorker {
         let retry = if open && wait_reason.is_none() {
             self.workers()
                 .retries
-                .last()
-                .map(|&(_, reason)| ImportRetry { reason })
+                .iter()
+                .rfind(|r| r.import == import.base.id)
+                .map(|r| ImportRetry { reason: r.fault })
         } else {
             None
         };
@@ -255,6 +267,14 @@ impl ImportWorker {
         change: impl FnOnce(&mut Storage) -> Result<ImportView, StorageError>,
     ) -> Result<ImportStatus, SaveError> {
         let _order = self.0.report.lock().unwrap_or_else(|e| e.into_inner());
+        self.publish_ordered(change)
+    }
+
+    /// `publish` for a caller that already holds `report`.
+    fn publish_ordered(
+        &self,
+        change: impl FnOnce(&mut Storage) -> Result<ImportView, StorageError>,
+    ) -> Result<ImportStatus, SaveError> {
         let view = on_storage(self.store(), change)?;
         let status = self.status_of(view);
         (self.0.deps.notify)(&status);
@@ -293,15 +313,19 @@ impl ImportWorker {
         // A worker of an earlier, ended import that still waits after a fault ends its wait and
         // stops: its token is cancelled before the new import is stored, so no worker of the new
         // import can get the old token. While an import is unfinished the start is refused, and
-        // its runs are left alone.
-        let latest = on_storage(self.store(), |s| s.latest_import())?;
-        let ended = latest
-            .map(|v| matches!(v.state, ImportState::Finished | ImportState::Stopped))
-            .unwrap_or(true);
-        if ended {
-            self.cancel_runs(true);
-        }
-        let status = self.publish(|s| s.start_import(file, with_summaries))?;
+        // its runs are left alone. `report` is held from the read to the write, so a worker
+        // cannot finish the import in between (its finish is sent under `report` too).
+        let status = {
+            let _order = self.0.report.lock().unwrap_or_else(|e| e.into_inner());
+            let latest = on_storage(self.store(), |s| s.latest_import())?;
+            let ended = latest
+                .map(|v| matches!(v.state, ImportState::Finished | ImportState::Stopped))
+                .unwrap_or(true);
+            if ended {
+                self.cancel_runs(true);
+            }
+            self.publish_ordered(|s| s.start_import(file, with_summaries))?
+        };
         let view = &status.import;
         log::info!(
             "import {} stored {} links ({} repeats in the file, {} already saved, {} not links)",
@@ -315,17 +339,6 @@ impl ImportWorker {
         self.fresh_tries();
         self.kick();
         Ok(status)
-    }
-
-    /// The control listener saw the background gate `open` or not. A fault wait ends early
-    /// only when the gate opens again (Claude Code or AI may work again), not on every usage
-    /// reading or tick.
-    fn gate_seen(&self, open: bool) {
-        let mut w = self.workers();
-        if open && w.gate_open == Some(false) {
-            w.wake = w.wake.wrapping_add(1);
-        }
-        w.gate_open = Some(open);
     }
 
     /// Counts no faults and ends a fault wait: for a new import and for Continue.
@@ -468,12 +481,20 @@ impl ImportWorker {
     /// does not leave the import without workers. After a fault it first waits (`retry_delay`),
     /// so a storage that keeps failing never makes workers start again and again.
     fn work(&self, id: &str, stop: &CancelToken) {
-        while let Some(item) = self.take(id, stop) {
-            // Noted before the run, so a wake during the run still ends a fault wait after it.
-            let (seen, woken) = {
-                let w = self.workers();
-                (w.owner_ended, w.wake)
+        loop {
+            // Noted before the links are read and the run, so a wake during either still ends
+            // a fault wait after it.
+            let woken = self.wakes();
+            let item = match self.take(id, stop) {
+                Ok(Some(item)) => item,
+                Ok(None) => break,
+                // The links could not be read: wait before the next try, as after any fault.
+                Err(()) => {
+                    self.wait_after_fault(id, stop, Fault::Storage, woken);
+                    break;
+                }
             };
+            let seen = self.workers().owner_ended;
             let outcome = self.make(&item, stop);
             // The end is saved before the item leaves `taken`, so the other worker cannot take
             // a link whose end is not written yet.
@@ -527,11 +548,21 @@ impl ImportWorker {
         self.kick();
     }
 
+    /// What ends a fault wait early, as it is now. The worker's own lock is let go before the
+    /// control is asked.
+    fn wakes(&self) -> Wakes {
+        let wake = self.workers().wake;
+        Wakes {
+            wake,
+            reopened: self.0.deps.queue.control().gate_reopened(),
+        }
+    }
+
     /// Waits `retry_delay` for this fault in a row. The wait ends early when the import is
     /// paused or stopped, a new import starts, the owner presses Continue on it, or the
     /// background gate opens again since `woken` was noted. The worker still counts as live
     /// meanwhile, so no other worker starts in its place. The screen says why it waits.
-    fn wait_after_fault(&self, id: &str, stop: &CancelToken, fault: Fault, woken: u64) {
+    fn wait_after_fault(&self, id: &str, stop: &CancelToken, fault: Fault, woken: Wakes) {
         let delay;
         let end;
         let key;
@@ -542,18 +573,22 @@ impl ImportWorker {
             end = Instant::now() + delay;
             key = w.next_retry;
             w.next_retry = w.next_retry.wrapping_add(1);
-            w.retries.push((key, fault));
+            w.retries.push(Retry {
+                key,
+                import: id.to_string(),
+                fault,
+            });
         }
         log::warn!("import {id}: a link stopped with a fault ({fault:?}), waiting {delay:?}");
         self.show(id);
         loop {
             let left = end.saturating_duration_since(Instant::now());
-            if left.is_zero() || stop.is_cancelled() || self.workers().wake != woken {
+            if left.is_zero() || stop.is_cancelled() || self.wakes() != woken {
                 break;
             }
             std::thread::sleep(left.min(limits::QUEUED_CANCEL_POLL));
         }
-        self.workers().retries.retain(|&(k, _)| k != key);
+        self.workers().retries.retain(|r| r.key != key);
         self.show(id);
     }
 
@@ -564,10 +599,11 @@ impl ImportWorker {
         }
     }
 
-    /// The next waiting link no one holds, in file order, while the import runs and AI may run.
-    fn take(&self, id: &str, stop: &CancelToken) -> Option<ImportItem> {
+    /// The next waiting link no one holds, in file order, while the import runs and AI may run;
+    /// `Ok(None)` when there is none. `Err` when the links could not be read (logged).
+    fn take(&self, id: &str, stop: &CancelToken) -> Result<Option<ImportItem>, ()> {
         if stop.is_cancelled() || self.held_by().is_some() {
-            return None;
+            return Ok(None);
         }
         let held = {
             let w = self.workers();
@@ -584,15 +620,17 @@ impl ImportWorker {
             Ok(items) => items,
             Err(e) => {
                 log::error!("import {id}: the waiting links could not be read: {e:?}");
-                return None;
+                return Err(());
             }
         };
         let mut w = self.workers();
         let next = items
             .into_iter()
-            .find(|i| !w.taken.contains(&i.id) && !w.owner_reading.contains(&i.id))?;
-        w.taken.insert(next.id.clone());
-        Some(next)
+            .find(|i| !w.taken.contains(&i.id) && !w.owner_reading.contains(&i.id));
+        if let Some(next) = &next {
+            w.taken.insert(next.id.clone());
+        }
+        Ok(next)
     }
 
     /// The end a link has already, from its bookmark as it is now; `None` when its summary is
@@ -646,16 +684,10 @@ impl ImportWorker {
             emit: &emit,
         };
         let result = bookmark_save::summarize_import(&ctx, &item.bookmark_id);
-        // Held or stopped, from the run's own runner: not a fault. A run the queue could not
-        // take is a storage fault, not "Claude Code could not be started".
+        // Held or stopped, from the run's own runner: not a fault.
         let stopped = stop.is_cancelled() || runner.held_by_gate();
         match result {
-            Ok(result) => match outcome_of(&result, stopped) {
-                Outcome::Fault(Fault::Unavailable) if runner.queue_failed() => {
-                    Outcome::Fault(Fault::Storage)
-                }
-                outcome => outcome,
-            },
+            Ok(result) => outcome_of(&result, stopped),
             Err(SaveError::NotFound) => Outcome::End(ItemState::Removed),
             // Claimed in between by the owner's own run, or summarized by it.
             Err(SaveError::Invalid(_)) => match self.known_end(item) {
@@ -684,8 +716,10 @@ fn outcome_of(result: &SaveResult, stopped: bool) -> Outcome {
             // AI may not run now: the link stays waiting, the gate starts it again.
             "usage_limit" | "ai_off" => Outcome::Stop,
             "cancelled" if stopped => Outcome::Stop,
-            // Cancelled by no one: a fault.
+            // Cancelled by no one (or a run thread that died): a fault.
             "cancelled" => Outcome::Fault(Fault::Other),
+            // The run queue or run log could not take the run: Mnemo's storage, not Claude Code.
+            "not_recorded" => Outcome::Fault(Fault::Storage),
             // Claude Code could not be started (the card says AI off): the link stays waiting
             // and the import tries again after a wait.
             "unavailable" => Outcome::Fault(Fault::Unavailable),
@@ -790,10 +824,15 @@ mod tests {
         fail: Mutex<Option<AiError>>,
         /// Every run that started.
         runs: AtomicUsize,
+        /// When set, every run's thread dies (the runner panics) before it gives a result.
+        die: std::sync::atomic::AtomicBool,
     }
     impl AiRunner for Gauge {
         fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
             self.runs.fetch_add(1, Ordering::SeqCst);
+            if self.die.load(Ordering::SeqCst) {
+                panic!("the runner died (a test)");
+            }
             if let Some(e) = self.fail.lock().unwrap().clone() {
                 return Err(e);
             }
@@ -824,6 +863,7 @@ mod tests {
         dir: TempDir,
         events: Mutex<mpsc::Receiver<ImportStatus>>,
         pages: Arc<Pages>,
+        flaky: Arc<Flaky>,
     }
 
     struct Shared(Arc<Mutex<Storage>>);
@@ -836,7 +876,40 @@ mod tests {
         }
     }
 
+    /// The app's storage with faults on demand: skips `skip` calls, then fails the next `fail`
+    /// calls; and runs a hook once before the next call.
+    struct Flaky {
+        inner: Arc<Mutex<Storage>>,
+        skip: AtomicUsize,
+        fail: AtomicUsize,
+        before_next: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    }
+    impl BookmarkStore for Flaky {
+        fn with_storage(
+            &self,
+            call: &mut dyn FnMut(&mut Storage) -> Result<Held, StorageError>,
+        ) -> Result<Held, SaveError> {
+            let hook = self.before_next.lock().unwrap().take();
+            if let Some(hook) = hook {
+                hook();
+            }
+            if self.skip.load(Ordering::SeqCst) > 0 {
+                self.skip.fetch_sub(1, Ordering::SeqCst);
+            } else if self.fail.load(Ordering::SeqCst) > 0 {
+                self.fail.fetch_sub(1, Ordering::SeqCst);
+                return Err(SaveError::Storage("disk I/O error (a test)".to_string()));
+            }
+            self.inner.with_storage(call)
+        }
+    }
+
     fn world(default: FakeResult) -> World {
+        world_with(default, |_| {})
+    }
+
+    /// `setup` gets the control before the import worker subscribes to it, so its listeners
+    /// are called first.
+    fn world_with(default: FakeResult, setup: impl FnOnce(&Arc<AiControl>)) -> World {
         let dir = TempDir::new();
         let storage = Storage::open(&dir.path().join("mnemo.db")).unwrap();
         let store = Arc::new(Mutex::new(storage));
@@ -848,16 +921,24 @@ mod tests {
             hold: Mutex::new(false),
             fail: Mutex::new(None),
             runs: AtomicUsize::new(0),
+            die: std::sync::atomic::AtomicBool::new(false),
         });
         let control = open_control();
+        setup(&control);
         let pages = Arc::new(Pages::default());
         let log = Arc::new(Log::default());
+        let flaky = Arc::new(Flaky {
+            inner: store.clone(),
+            skip: AtomicUsize::new(0),
+            fail: AtomicUsize::new(0),
+            before_next: Mutex::new(None),
+        });
         let notify: Notifier = Arc::new(|_: &RunEvent| {});
         let queue = RunQueue::new(gauge.clone(), log.clone(), notify, control.clone());
         let (tx, rx) = mpsc::channel();
         let tx = Mutex::new(tx);
         let worker = ImportWorker::new(ImportDeps {
-            store: Arc::new(Shared(store.clone())),
+            store: flaky.clone(),
             reader: pages.clone(),
             queue: queue.clone(),
             notify: Arc::new(move |s: &ImportStatus| {
@@ -876,6 +957,7 @@ mod tests {
             dir,
             events: Mutex::new(rx),
             pages,
+            flaky,
         }
     }
 
@@ -1488,41 +1570,6 @@ mod tests {
     }
 
     #[test]
-    fn only_the_background_gate_opening_again_ends_a_fault_wait() {
-        let w = world(FakeResult::Valid(GOOD.into()));
-        let wake = || w.worker.workers().wake;
-        let before = wake();
-        // Usage readings and ticks with the gate open change nothing.
-        w.worker.gate_seen(true);
-        w.worker.gate_seen(true);
-        assert_eq!(wake(), before);
-        // Closed, then open again: the wait ends.
-        w.worker.gate_seen(false);
-        assert_eq!(wake(), before);
-        w.worker.gate_seen(true);
-        assert_eq!(wake(), before + 1);
-    }
-
-    #[test]
-    fn a_wake_during_the_run_still_ends_the_wait_after_it() {
-        let w = world(FakeResult::Valid(GOOD.into()));
-        w.control.pause().unwrap();
-        let id = w.worker.start(&w.links(1), true).unwrap().import.base.id;
-        // Noted before the run; the gate opened again during the run.
-        let woken = w.worker.workers().wake;
-        w.worker.gate_seen(false);
-        w.worker.gate_seen(true);
-        let at = Instant::now();
-        w.worker
-            .wait_after_fault(&id, &CancelToken::default(), Fault::Other, woken);
-        assert!(
-            at.elapsed() < limits::IMPORT_RETRY_FIRST,
-            "the wake was lost"
-        );
-        assert!(w.worker.workers().retries.is_empty());
-    }
-
-    #[test]
     fn continue_with_the_id_of_an_import_that_is_not_paused_keeps_the_fault_count() {
         let w = world(FakeResult::Valid(GOOD.into()));
         w.control.pause().unwrap();
@@ -1545,32 +1592,6 @@ mod tests {
     }
 
     #[test]
-    fn the_retry_line_stays_while_any_worker_still_waits() {
-        let w = world(FakeResult::Valid(GOOD.into()));
-        *w.gauge.hold.lock().unwrap() = true;
-        w.worker.start(&w.links(3), true).unwrap();
-        w.worker.workers().retries = vec![(1, Fault::Storage), (2, Fault::Unavailable)];
-        assert_eq!(
-            w.now().retry,
-            Some(ImportRetry {
-                reason: Fault::Unavailable
-            })
-        );
-        // One worker's wait ends: the other still waits, and the line stays.
-        w.worker.workers().retries.retain(|&(k, _)| k != 2);
-        assert_eq!(
-            w.now().retry,
-            Some(ImportRetry {
-                reason: Fault::Storage
-            })
-        );
-        w.worker.workers().retries.clear();
-        assert_eq!(w.now().retry, None);
-        *w.gauge.hold.lock().unwrap() = false;
-        w.until("the end", |s| s.import.state == ImportState::Finished);
-    }
-
-    #[test]
     fn a_run_the_queue_cannot_record_is_a_storage_fault_not_claude_code_missing() {
         let w = world(FakeResult::Valid(GOOD.into()));
         w.log.fail.store(true, Ordering::SeqCst);
@@ -1582,6 +1603,8 @@ mod tests {
                 reason: Fault::Storage
             })
         );
+        // The card agrees with the import line: no summary yet, never "AI off".
+        assert_eq!(w.statuses("/import/"), vec![SummaryStatus::Pending]);
         w.worker.pause(&id).unwrap();
         w.settled();
     }
@@ -1678,6 +1701,203 @@ mod tests {
         assert_eq!(World::counts(&done), (2, 0, 0));
         // No run was cancelled and started again.
         assert_eq!(w.gauge.runs.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_run_thread_that_dies_is_a_fault_with_no_reason_not_a_storage_fault() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        w.gauge.die.store(true, Ordering::SeqCst);
+        let id = w.worker.start(&w.links(1), true).unwrap().import.base.id;
+        let s = w.until("the retry", |s| s.retry.is_some());
+        // The queue took the run and the log is fine: this is not a storage fault.
+        assert_eq!(
+            s.retry,
+            Some(ImportRetry {
+                reason: Fault::Other
+            })
+        );
+        assert_eq!(w.statuses("/import/"), vec![SummaryStatus::Pending]);
+        w.worker.pause(&id).unwrap();
+        w.settled();
+    }
+
+    #[test]
+    fn a_new_import_does_not_show_the_retry_line_of_the_import_before_it() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        *w.gauge.fail.lock().unwrap() = Some(AiError::Unavailable);
+        let old = w.worker.start(&w.links(1), true).unwrap().import.base.id;
+        w.until("the retry", |s| s.retry.is_some());
+        // The owner summarized the link meanwhile, so the import ends with its worker still
+        // in its wait.
+        {
+            let s = w.store.lock().unwrap();
+            let item = s.waiting_import_items(&old, 1).unwrap().remove(0);
+            s.end_import_item(&item.id, ItemState::Done).unwrap();
+            s.finish_import_if_done(&old).unwrap();
+        }
+        *w.gauge.fail.lock().unwrap() = None;
+        *w.gauge.hold.lock().unwrap() = true;
+        let next = w.file("next.txt", &["https://example.org/next/1".to_string()]);
+        // The status the start gives is the new import's: it has had no fault.
+        let started = w.worker.start(&next, true).unwrap();
+        assert_ne!(started.import.base.id, old);
+        assert_eq!(started.retry, None);
+        *w.gauge.hold.lock().unwrap() = false;
+        w.until("the end", |s| s.import.state == ImportState::Finished);
+    }
+
+    #[test]
+    fn links_that_cannot_be_read_make_the_worker_wait_with_a_storage_fault() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        w.control.pause().unwrap();
+        w.worker.start(&w.links(1), true).unwrap();
+        let events = w.events.lock().unwrap();
+        events.try_iter().for_each(drop);
+        // The gate opens: the listener's kick reads the import (call 1), and the worker's read
+        // of the waiting links (call 2) fails once. The test thread uses no storage meanwhile.
+        w.flaky.skip.store(1, Ordering::SeqCst);
+        w.flaky.fail.store(1, Ordering::SeqCst);
+        w.control.resume().unwrap();
+        let shown = loop {
+            let s = events
+                .recv_timeout(WAIT)
+                .expect("neither a retry line nor the end");
+            if s.retry.is_some() || s.import.state == ImportState::Finished {
+                break s;
+            }
+        };
+        drop(events);
+        assert_eq!(
+            shown.retry,
+            Some(ImportRetry {
+                reason: Fault::Storage
+            })
+        );
+        let id = shown.import.base.id;
+        w.worker.pause(&id).unwrap();
+        w.settled();
+    }
+
+    #[test]
+    fn a_start_holds_the_report_lock_from_the_read_of_the_latest_import_to_the_write() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        w.control.pause().unwrap();
+        w.worker.start(&w.links(1), true).unwrap();
+        let held = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (seen, worker) = (held.clone(), w.worker.clone());
+        *w.flaky.before_next.lock().unwrap() = Some(Box::new(move || {
+            // A worker that finishes the import sends it under this lock.
+            let busy = matches!(
+                worker.0.report.try_lock(),
+                Err(std::sync::TryLockError::WouldBlock)
+            );
+            seen.store(busy, Ordering::SeqCst);
+        }));
+        // Refused: the import before it is unfinished. The first storage call of a start is
+        // its read of the latest import.
+        let other = w.file("other.txt", &["https://example.org/other".to_string()]);
+        assert!(w.worker.start(&other, true).is_err());
+        assert!(
+            held.load(Ordering::SeqCst),
+            "a worker could finish the import between the read and the write"
+        );
+    }
+
+    #[test]
+    fn a_gate_that_closes_and_opens_again_between_two_looks_still_ends_a_fault_wait() {
+        // A listener called before the import's own closes the gate's change at once: when the
+        // import's listener looks, the gate is open again and was never seen closed.
+        let again = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let w = world_with(FakeResult::Valid(GOOD.into()), |control| {
+            let (control, again) = (control.clone(), again.clone());
+            control.clone().subscribe(Arc::new(move || {
+                if again.swap(false, Ordering::SeqCst) {
+                    let _ = control.resume();
+                }
+            }));
+        });
+        *w.gauge.fail.lock().unwrap() = Some(AiError::Unavailable);
+        let id = w.worker.start(&w.links(1), true).unwrap().import.base.id;
+        w.until("the retry", |s| s.retry.is_some());
+        again.store(true, Ordering::SeqCst);
+        w.control.pause().unwrap();
+        let end = Instant::now() + limits::IMPORT_RETRY_FIRST / 2;
+        while w.gauge.runs.load(Ordering::SeqCst) < 2 {
+            assert!(Instant::now() < end, "the gate opening again was missed");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        w.worker.pause(&id).unwrap();
+        w.settled();
+    }
+
+    #[test]
+    fn a_gate_that_opens_again_during_the_run_ends_the_wait_after_it() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        *w.gauge.fail.lock().unwrap() = Some(AiError::Unavailable);
+        // During the first page read the gate closes and opens again; the run then ends with
+        // a fault, and the wait after it must end at once.
+        let control = w.control.clone();
+        let once = std::sync::atomic::AtomicBool::new(true);
+        *w.pages.during_read.lock().unwrap() = Some(Box::new(move || {
+            if once.swap(false, Ordering::SeqCst) {
+                let _ = control.pause();
+                let _ = control.resume();
+            }
+        }));
+        let id = w.worker.start(&w.links(1), true).unwrap().import.base.id;
+        let end = Instant::now() + limits::IMPORT_RETRY_FIRST / 2;
+        while w.gauge.runs.load(Ordering::SeqCst) < 2 {
+            assert!(Instant::now() < end, "the wake was lost");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        w.worker.pause(&id).unwrap();
+        w.settled();
+    }
+
+    #[test]
+    fn a_control_change_that_leaves_the_gate_open_does_not_end_a_fault_wait() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        *w.gauge.fail.lock().unwrap() = Some(AiError::Unavailable);
+        let id = w.worker.start(&w.links(1), true).unwrap().import.base.id;
+        w.until("the retry", |s| s.retry.is_some());
+        let runs = w.gauge.runs.load(Ordering::SeqCst);
+        // Changes and ticks of the control that leave background work allowed.
+        w.control.set_thresholds(50, 90).unwrap();
+        w.control.tick();
+        w.control.set_enabled(true).unwrap();
+        std::thread::sleep(limits::QUEUED_CANCEL_POLL * 6);
+        assert_eq!(w.gauge.runs.load(Ordering::SeqCst), runs, "the wait ended");
+        assert!(w.now().retry.is_some());
+        w.worker.pause(&id).unwrap();
+        w.settled();
+    }
+
+    #[test]
+    fn the_retry_line_stays_while_any_worker_still_waits() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        *w.gauge.fail.lock().unwrap() = Some(AiError::Unavailable);
+        let id = w.worker.start(&w.links(2), true).unwrap().import.base.id;
+        // Both workers fault: the first waits `IMPORT_RETRY_FIRST`, the second twice as long.
+        let end = Instant::now() + WAIT;
+        while w.worker.workers().retries.len() < 2 {
+            assert!(Instant::now() < end, "both workers did not wait");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // From now on a run takes a place and stays in it.
+        *w.gauge.fail.lock().unwrap() = None;
+        *w.gauge.hold.lock().unwrap() = true;
+        assert!(w.now().retry.is_some());
+        // The first wait ends and its worker makes a link; the second still waits.
+        let end = Instant::now() + limits::IMPORT_RETRY_FIRST * 3;
+        while w.worker.workers().retries.len() > 1 {
+            assert!(Instant::now() < end, "no wait ended");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(w.now().retry.is_some(), "the line went with the first wait");
+        w.worker.pause(&id).unwrap();
+        *w.gauge.hold.lock().unwrap() = false;
+        w.settled();
+        assert_eq!(w.now().retry, None);
     }
 
     #[test]

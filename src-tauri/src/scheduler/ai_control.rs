@@ -185,6 +185,10 @@ struct State {
     usage_gen: u64,
     /// The time the usage-window timer waits for (the held background work may start then).
     usage_armed: Option<i64>,
+    /// Whether background work could run when the gate was last looked at (`observe_gate`).
+    gate_open: bool,
+    /// How many times the background gate went from closed to open (`AiControl::gate_reopened`).
+    reopened: u64,
 }
 
 /// The gate. Shared as `Arc<AiControl>` by the queue, the commands and the usage sink.
@@ -259,6 +263,17 @@ impl State {
             .into_iter()
             .chain(end(&reading.seven_day, SEVEN_DAY_SECS))
             .max()
+    }
+
+    /// Looks at the background gate and counts a change from closed to open. Called under the
+    /// lock after every change, lift and look at the gate, so a close and an open that follow
+    /// each other fast still count.
+    fn observe_gate(&mut self, now: i64) {
+        let open = self.decide(Priority::Background, now) == Decision::Allow;
+        if open && !self.gate_open {
+            self.reopened = self.reopened.wrapping_add(1);
+        }
+        self.gate_open = open;
     }
 
     fn decide(&self, priority: Priority, now: i64) -> Decision {
@@ -343,6 +358,8 @@ fn load_state(store: &dyn ControlStore) -> State {
                 owner_held: false,
                 usage_gen: 0,
                 usage_armed: None,
+                gate_open: false,
+                reopened: 0,
             }
         }
         Err(e) => {
@@ -363,6 +380,8 @@ fn load_state(store: &dyn ControlStore) -> State {
                 owner_held: false,
                 usage_gen: 0,
                 usage_armed: None,
+                gate_open: false,
+                reopened: 0,
             }
         }
     }
@@ -432,6 +451,8 @@ impl AiControl {
                 reading_seq,
                 timer_gen,
                 usage_gen,
+                gate_open,
+                reopened,
                 ..
             } = *st;
             *st = State {
@@ -439,8 +460,12 @@ impl AiControl {
                 reading_seq,
                 timer_gen: timer_gen + 1,
                 usage_gen: usage_gen + 1,
+                gate_open,
+                reopened,
                 ..fresh
             };
+            let now = self.now();
+            st.observe_gate(now);
         }
         self.arm_after_load();
         self.notify();
@@ -460,7 +485,19 @@ impl AiControl {
     /// listener. It waits for the control's lock, which a change holds across its storage write,
     /// so a caller must not hold a lock of its own that others need.
     pub fn may_run(&self, priority: Priority, now: i64) -> Decision {
-        self.lock().decide(priority, now)
+        let mut st = self.lock();
+        st.observe_gate(now);
+        st.decide(priority, now)
+    }
+
+    /// How many times the background gate went from closed to open. A caller that waits for the
+    /// gate to open again notes it, and goes on when it has changed, even if the gate closed and
+    /// opened again between two looks.
+    pub fn gate_reopened(&self) -> u64 {
+        let mut st = self.lock();
+        let now = self.now();
+        st.observe_gate(now);
+        st.reopened
     }
 
     /// True when usage is at or above the warn line (the screen reads it from `snapshot`).
@@ -530,6 +567,7 @@ impl AiControl {
             }
             self.settle(&mut st, now);
             let timer = change(&mut st, self.store.as_ref())?.map(|until| (st.timer_gen, until));
+            st.observe_gate(now);
             (timer, self.rearm_usage(&mut st, now))
         };
         let (timer, usage) = timer;
@@ -707,6 +745,7 @@ impl AiControl {
             if st.available {
                 let now = self.now();
                 self.settle(&mut st, now);
+                st.observe_gate(now);
             }
         }
         self.notify();

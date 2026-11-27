@@ -249,8 +249,6 @@ pub struct BackgroundRunner {
     /// Set when the AI control refused or withdrew a run of this runner, so the caller can tell
     /// a run the gate held from one that failed (`held_by_gate`).
     held: AtomicBool,
-    /// Set when the queue could not take or finish a run of this runner (`queue_failed`).
-    queue_failed: AtomicBool,
 }
 
 impl BackgroundRunner {
@@ -259,7 +257,6 @@ impl BackgroundRunner {
             queue,
             stop,
             held: AtomicBool::new(false),
-            queue_failed: AtomicBool::new(false),
         }
     }
 
@@ -267,12 +264,6 @@ impl BackgroundRunner {
     /// because background work was held, not because it failed or was stopped).
     pub fn held_by_gate(&self) -> bool {
         self.held.load(Ordering::SeqCst)
-    }
-
-    /// Whether the queue could not take a run of this runner, or its run stopped without a
-    /// result. Such a run ends `Unavailable` although Claude Code itself may be fine.
-    pub fn queue_failed(&self) -> bool {
-        self.queue_failed.load(Ordering::SeqCst)
     }
 
     fn allowed(&self) -> bool {
@@ -295,8 +286,7 @@ impl AiRunner for BackgroundRunner {
             .submit(Priority::Background, task.clone())
             .map_err(|e| {
                 log::error!("the background {} run could not be queued: {e}", task.name);
-                self.queue_failed.store(true, Ordering::SeqCst);
-                AiError::Unavailable
+                AiError::NotRecorded
             })?;
         let mut asked = false;
         loop {
@@ -334,8 +324,9 @@ impl AiRunner for BackgroundRunner {
                         task.name,
                         ticket.id
                     );
-                    self.queue_failed.store(true, Ordering::SeqCst);
-                    return Err(AiError::Unavailable);
+                    // No result and no one stopped it: not a storage fault, not Claude Code
+                    // missing (the caller says "no one stopped it" from its own flags).
+                    return Err(AiError::Cancelled);
                 }
             }
         }
@@ -351,7 +342,7 @@ impl AiRunner for QueuedRunner {
     fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
         let ticket = self.0.submit(Priority::Owner, task.clone()).map_err(|e| {
             log::error!("the {} run could not be queued: {e}", task.name);
-            AiError::Unavailable
+            AiError::NotRecorded
         })?;
         let mut cancelled = false;
         loop {

@@ -80,6 +80,9 @@ pub enum AiError {
     Unavailable,
     /// The run was cancelled (by the owner or the queue) before it gave an answer.
     Cancelled,
+    /// Mnemo's own run queue or run log could not take the run, so it never started. Claude
+    /// Code itself may be fine.
+    NotRecorded,
 }
 
 impl fmt::Display for AiError {
@@ -92,6 +95,7 @@ impl fmt::Display for AiError {
             AiError::UsageLimit => write!(f, "the AI usage limit was reached"),
             AiError::Unavailable => write!(f, "AI is not available"),
             AiError::Cancelled => write!(f, "the AI run was cancelled"),
+            AiError::NotRecorded => write!(f, "the AI run could not be recorded"),
         }
     }
 }

@@ -356,6 +356,7 @@ pub fn error_kind(error: &AiError) -> &'static str {
         AiError::UsageLimit => "usage_limit",
         AiError::Unavailable => "unavailable",
         AiError::Cancelled => "cancelled",
+        AiError::NotRecorded => "not_recorded",
     }
 }
 
