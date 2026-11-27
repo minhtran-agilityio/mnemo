@@ -24,6 +24,7 @@ use crate::storage::ai_control::{StoredAiControl, StoredPause, StoredReading};
 use crate::storage::bookmarks::{Held, SavedBookmark};
 use crate::storage::export::{ExportError, ExportSummary, FolderState};
 use crate::storage::files::OrphanReport;
+use crate::storage::folders::Folder;
 use crate::storage::ideas::{Idea, IdeaInput, IdeaProject};
 use crate::storage::items::{
     Bookmark, BookmarkInput, Event, EventInput, Memory, MemoryInput, Note, NoteInput, Project,
@@ -2828,6 +2829,118 @@ pub async fn list_bookmark_cards(
     .await
 }
 
+// ---- Folders, Move and Undo (#26, BM-02) ----
+// Each command runs one storage function. Only the owner calls them: a save never makes a folder.
+
+/// The ids the folder commands take are UUIDs (36 characters); anything empty or long is refused
+/// before storage is asked.
+fn check_folder_id(id: &str) -> Result<(), AppError> {
+    if id.trim().is_empty() || id.len() > MAX_BOOKMARK_ID_LEN {
+        return Err(AppError {
+            code: "invalid_input",
+            message: "That is not a folder id.".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn folder_list(storage: &AppStorage) -> Result<Vec<Folder>, AppError> {
+    storage.get()?.list_folders().map_err(item_failed)
+}
+
+fn folder_create(storage: &AppStorage, name: &str) -> Result<Folder, AppError> {
+    storage.get()?.create_folder(name).map_err(item_failed)
+}
+
+fn folder_rename(storage: &AppStorage, id: &str, name: &str) -> Result<Folder, AppError> {
+    check_folder_id(id)?;
+    storage.get()?.rename_folder(id, name).map_err(item_failed)
+}
+
+fn folder_delete(storage: &AppStorage, id: &str) -> Result<u32, AppError> {
+    check_folder_id(id)?;
+    storage.get()?.delete_folder(id).map_err(item_failed)
+}
+
+fn bookmark_move(
+    storage: &AppStorage,
+    id: &str,
+    folder_id: &str,
+) -> Result<SavedBookmark, AppError> {
+    check_bookmark_id(id)?;
+    check_folder_id(folder_id)?;
+    storage
+        .get()?
+        .move_bookmark(id, folder_id)
+        .map_err(item_failed)
+}
+
+fn bookmark_delete(storage: &AppStorage, id: &str) -> Result<(), AppError> {
+    check_bookmark_id(id)?;
+    storage
+        .get()?
+        .delete_saved_bookmark(id)
+        .map(|_| ())
+        .map_err(item_failed)
+}
+
+fn undo_step(storage: &AppStorage) -> Result<SavedBookmark, AppError> {
+    storage.get()?.undo_last().map_err(item_failed)
+}
+
+/// The live folders with their bookmark counts, by name, Unsorted last.
+#[tauri::command]
+pub async fn list_folders(app: tauri::AppHandle) -> Result<Vec<Folder>, AppError> {
+    off_main_thread(app, folder_list).await
+}
+
+/// Creates a folder with this name.
+#[tauri::command]
+pub async fn create_folder(app: tauri::AppHandle, name: String) -> Result<Folder, AppError> {
+    off_main_thread(app, move |storage| folder_create(storage, &name)).await
+}
+
+/// Renames a folder. Unsorted is refused.
+#[tauri::command]
+pub async fn rename_folder(
+    app: tauri::AppHandle,
+    id: String,
+    name: String,
+) -> Result<Folder, AppError> {
+    off_main_thread(app, move |storage| folder_rename(storage, &id, &name)).await
+}
+
+/// Deletes a folder; its bookmarks move to Unsorted. Gives how many live bookmarks moved.
+/// Unsorted is refused.
+#[tauri::command]
+pub async fn delete_folder(app: tauri::AppHandle, id: String) -> Result<u32, AppError> {
+    off_main_thread(app, move |storage| folder_delete(storage, &id)).await
+}
+
+/// Moves a bookmark to a folder. The last move or delete can be taken back with `undo_last`.
+#[tauri::command]
+pub async fn move_bookmark(
+    app: tauri::AppHandle,
+    id: String,
+    folder_id: String,
+) -> Result<SavedBookmark, AppError> {
+    off_main_thread(app, move |storage| bookmark_move(storage, &id, &folder_id)).await
+}
+
+/// Deletes a bookmark (it is kept, marked deleted). The last move or delete can be taken back
+/// with `undo_last`.
+#[tauri::command]
+pub async fn delete_saved_bookmark(app: tauri::AppHandle, id: String) -> Result<(), AppError> {
+    off_main_thread(app, move |storage| bookmark_delete(storage, &id)).await
+}
+
+/// Takes back the last bookmark move or delete (one step, held in memory until the app closes).
+/// Gives the bookmark as it is now.
+#[tauri::command]
+pub async fn undo_last(app: tauri::AppHandle) -> Result<SavedBookmark, AppError> {
+    off_main_thread(app, undo_step).await
+}
+
 #[cfg(test)]
 mod bookmark_command_tests {
     use super::*;
@@ -2913,5 +3026,123 @@ mod bookmark_command_tests {
         assert!(check_bookmark_id("4b1f").is_ok());
         assert!(check_bookmark_id(" ").is_err());
         assert!(check_bookmark_id(&"a".repeat(101)).is_err());
+    }
+
+    // ---- folders, move, delete and undo (#26) ----
+
+    fn saved_in(state: &AppStorage, url: &str) -> SavedBookmark {
+        match state.get().unwrap().save_link_to_read(url).unwrap() {
+            crate::storage::bookmarks::LinkSave::New(b, _) => b,
+            other => panic!("expected a new bookmark, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn folder_commands_create_rename_list_and_delete_through_the_app_storage() {
+        let (state, dir) = app_storage();
+        let dev = folder_create(&state, "  Dev tools ").unwrap();
+        assert_eq!(dev.name, "Dev tools");
+        let b = saved_in(&state, "https://example.org/x");
+        let moved = bookmark_move(&state, &b.base.id, &dev.id).unwrap();
+        assert_eq!(moved.folder, "Dev tools");
+        assert_eq!(
+            folder_rename(&state, &dev.id, "Tools").unwrap().name,
+            "Tools"
+        );
+        let names: Vec<(String, u32)> = folder_list(&state)
+            .unwrap()
+            .into_iter()
+            .map(|f| (f.name, f.count))
+            .collect();
+        assert_eq!(names, vec![("Tools".into(), 1), ("Unsorted".into(), 0)]);
+        assert_eq!(folder_delete(&state, &dev.id).unwrap(), 1);
+        let after = state.get().unwrap().get_saved_bookmark(&b.base.id).unwrap();
+        assert_eq!(
+            after.folder, "Unsorted",
+            "no bookmark is lost with its folder"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn folder_commands_refuse_unsorted_a_bad_name_and_a_missing_folder_with_coded_errors() {
+        let (state, dir) = app_storage();
+        let unsorted = crate::storage::folders::UNSORTED_ID;
+        for err in [
+            folder_rename(&state, unsorted, "Inbox").unwrap_err(),
+            folder_delete(&state, unsorted).map(|_| ()).unwrap_err(),
+            folder_create(&state, "  ").unwrap_err(),
+            folder_create(&state, "unsorted").unwrap_err(),
+        ] {
+            assert_eq!(err.code, "invalid_input", "{}", err.message);
+        }
+        assert!(folder_rename(&state, unsorted, "Inbox")
+            .unwrap_err()
+            .message
+            .contains("cannot be renamed"));
+        let missing = folder_delete(&state, "no-such-folder").unwrap_err();
+        assert_eq!(missing.code, "not_found");
+        assert!(missing.message.contains("folder"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn folder_commands_check_the_ids_and_name_a_folder_id_a_folder_id() {
+        let (state, dir) = app_storage();
+        let long = "x".repeat(MAX_BOOKMARK_ID_LEN + 1);
+        let b = saved_in(&state, "https://example.org/x");
+        for err in [
+            folder_rename(&state, " ", "A").unwrap_err(),
+            folder_delete(&state, &long).map(|_| ()).unwrap_err(),
+            bookmark_move(&state, &b.base.id, "").unwrap_err(),
+        ] {
+            assert_eq!(err.code, "invalid_input");
+            assert_eq!(err.message, "That is not a folder id.");
+        }
+        for err in [
+            bookmark_move(&state, "", "f").unwrap_err(),
+            bookmark_delete(&state, &long).unwrap_err(),
+        ] {
+            assert_eq!(err.message, "That is not a bookmark id.");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn folder_commands_move_and_delete_a_bookmark_and_undo_takes_each_back_once() {
+        let (state, dir) = app_storage();
+        let dev = folder_create(&state, "Dev tools").unwrap();
+        let b = saved_in(&state, "https://example.org/x");
+        bookmark_move(&state, &b.base.id, &dev.id).unwrap();
+        assert_eq!(undo_step(&state).unwrap().folder, "Unsorted");
+        bookmark_delete(&state, &b.base.id).unwrap();
+        assert_eq!(
+            bookmark_delete(&state, &b.base.id).unwrap_err().code,
+            "not_found"
+        );
+        assert_eq!(undo_step(&state).unwrap().base.deleted_at, None);
+        let again = undo_step(&state).unwrap_err();
+        assert_eq!(
+            (again.code, again.message.as_str()),
+            ("invalid_input", "There is nothing to undo.")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn folder_commands_with_no_storage_say_storage_unavailable_without_a_path() {
+        let state = AppStorage::new(Err(StartupError {
+            code: "open",
+            detail: "unable to open /home/someone/mnemo.db".into(),
+        }));
+        for err in [
+            folder_list(&state).map(|_| ()).unwrap_err(),
+            folder_create(&state, "A").map(|_| ()).unwrap_err(),
+            bookmark_delete(&state, "b").unwrap_err(),
+            undo_step(&state).map(|_| ()).unwrap_err(),
+        ] {
+            assert_eq!(err.code, "storage_unavailable");
+            assert!(!err.message.contains('/'));
+        }
     }
 }

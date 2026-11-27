@@ -53,6 +53,10 @@ pub const MIGRATIONS: &[Migration] = &[
         number: 10,
         sql: include_str!("../../migrations/0010_bookmark_compare_key.sql"),
     },
+    Migration {
+        number: 11,
+        sql: include_str!("../../migrations/0011_folders.sql"),
+    },
 ];
 
 /// Reads the schema version stored in the database (0 for a new file).
@@ -111,7 +115,7 @@ mod tests {
     fn real_migrations_set_the_version() {
         let mut c = mem();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 10);
+        assert_eq!(current_version(&c).unwrap(), 11);
     }
 
     /// `run` skips every number at or below the stored version, so a gap that is filled
@@ -191,7 +195,7 @@ mod tests {
             err,
             StorageError::SchemaTooNew {
                 found: 99,
-                supported: 10
+                supported: 11
             }
         );
     }
@@ -385,7 +389,7 @@ mod tests {
         )
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 10);
+        assert_eq!(current_version(&c).unwrap(), 11);
         for t in KINDS.iter().chain(["item_link", "settings"].iter()) {
             assert!(table_exists(&c, t), "table {t} missing");
         }
@@ -407,7 +411,7 @@ mod tests {
         ))
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 10);
+        assert_eq!(current_version(&c).unwrap(), 11);
         let cols = columns(&c, "idea");
         for col in [
             "body",
@@ -686,7 +690,7 @@ mod tests {
         )
         .unwrap();
         run(&mut c, MIGRATIONS).unwrap();
-        assert_eq!(current_version(&c).unwrap(), 10);
+        assert_eq!(current_version(&c).unwrap(), 11);
         // The old row is kept, with no key until the step at open fills it.
         let key: Option<String> = c
             .query_row(
@@ -712,5 +716,60 @@ mod tests {
             )
             .unwrap();
         }
+    }
+
+    #[test]
+    fn migration_11_adds_folders_with_unsorted_and_puts_every_old_bookmark_in_it() {
+        let mut c = mem();
+        run(&mut c, &MIGRATIONS[..10]).unwrap();
+        c.execute_batch(&format!(
+            "INSERT INTO bookmark (id, created_at, updated_at, url) VALUES ('b-live', '{T}', '{T}', 'https://a.example/');
+             INSERT INTO bookmark (id, created_at, updated_at, deleted_at, url) VALUES ('b-gone', '{T}', '{T}', '{T}', 'https://b.example/');"
+        ))
+        .unwrap();
+        run(&mut c, MIGRATIONS).unwrap();
+        assert_eq!(current_version(&c).unwrap(), 11);
+        let (id, name, default): (String, String, i64) = c
+            .query_row("SELECT id, name, is_default FROM folder", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!((name.as_str(), default), ("Unsorted", 1));
+        assert!(uuid::Uuid::parse_str(&id).is_ok());
+        let mut st = c
+            .prepare(
+                "SELECT id, folder_id, folder_reason, folder_is_guess FROM bookmark ORDER BY id",
+            )
+            .unwrap();
+        let rows: Vec<(String, String, Option<String>, i64)> = st
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("b-gone".to_string(), id.clone(), None, 0),
+                ("b-live".to_string(), id.clone(), None, 0)
+            ]
+        );
+        // Two live folders cannot share a name, ignoring case; a second default is refused.
+        c.execute(
+            "INSERT INTO folder (id, created_at, updated_at, name) VALUES ('f1', ?1, ?1, 'Dev tools')",
+            [T],
+        )
+        .unwrap();
+        assert!(c
+            .execute(
+                "INSERT INTO folder (id, created_at, updated_at, name) VALUES ('f2', ?1, ?1, 'dev TOOLS')",
+                [T],
+            )
+            .is_err());
+        assert!(c
+            .execute(
+                "INSERT INTO folder (id, created_at, updated_at, name, is_default) VALUES ('f3', ?1, ?1, 'Other', 1)",
+                [T],
+            )
+            .is_err());
     }
 }

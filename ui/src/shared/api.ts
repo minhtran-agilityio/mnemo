@@ -759,6 +759,22 @@ export interface SavedBookmark extends Bookmark {
   summaryStatus: SummaryStatus;
   tags: string[];
   labels: BookmarkTag[];
+  /** The folder the link is in (#26): its id and name. Unsorted when no other folder fits. */
+  folderId: string;
+  folder: string;
+  /** Why the app chose the folder. Null when the app did not choose it. */
+  folderReason: string | null;
+  /** True when the app chose the folder: it is shown as a guess. */
+  folderIsGuess: boolean;
+}
+
+/** A folder of saved links and how many live links it holds. Unsorted is the default folder. */
+export interface Folder {
+  id: string;
+  name: string;
+  /** True for Unsorted: it cannot be renamed or deleted. */
+  isDefault: boolean;
+  count: number;
 }
 
 /**
@@ -798,6 +814,44 @@ export function listBookmarkCards(args: {
   return invoke<Page<SavedBookmark>>("list_bookmark_cards", {
     page: { limit: args.limit, after: args.after ?? null },
   });
+}
+
+/** The folders with their link counts, by name, Unsorted last. */
+export function listFolders(): Promise<Folder[]> {
+  return invoke<Folder[]>("list_folders");
+}
+
+/** Creates a folder. Only the owner does this: a save never makes a folder. */
+export function createFolder(name: string): Promise<Folder> {
+  return invoke<Folder>("create_folder", { name });
+}
+
+/** Renames a folder. The core refuses Unsorted. */
+export function renameFolder(id: string, name: string): Promise<Folder> {
+  return invoke<Folder>("rename_folder", { id, name });
+}
+
+/** Deletes a folder; its links move to Unsorted. Gives how many live links moved. */
+export function deleteFolder(id: string): Promise<number> {
+  return invoke<number>("delete_folder", { id });
+}
+
+/** Moves a link to a folder. The core keeps the move as the one step of Undo. */
+export function moveBookmark(
+  id: string,
+  folderId: string,
+): Promise<SavedBookmark> {
+  return invoke<SavedBookmark>("move_bookmark", { id, folderId });
+}
+
+/** Deletes a link (the core keeps it, marked deleted). The delete is the one step of Undo. */
+export function deleteSavedBookmark(id: string): Promise<void> {
+  return invoke<void>("delete_saved_bookmark", { id });
+}
+
+/** Takes back the last move or delete (one step, kept in memory until the app closes). */
+export function undoLast(): Promise<SavedBookmark> {
+  return invoke<SavedBookmark>("undo_last");
 }
 
 /** The event the core sends with the bookmark after each step of a save or a summary. */

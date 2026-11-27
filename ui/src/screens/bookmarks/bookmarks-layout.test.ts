@@ -78,6 +78,13 @@ async function measure(width: number, withError: boolean) {
       async () => ({ items: [], next: null }) as Page<SavedBookmark>,
     ),
     onBookmarkChanged: vi.fn(async () => () => {}),
+    listFolders: vi.fn(async () => []),
+    createFolder: vi.fn(),
+    renameFolder: vi.fn(),
+    deleteFolder: vi.fn(),
+    moveBookmark: vi.fn(),
+    deleteSavedBookmark: vi.fn(),
+    undoLast: vi.fn(),
   });
   if (withError) {
     box.querySelector<HTMLButtonElement>("form button")?.click();

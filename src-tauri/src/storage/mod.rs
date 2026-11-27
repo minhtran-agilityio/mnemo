@@ -6,6 +6,7 @@ mod concurrency;
 mod error;
 pub mod export;
 pub mod files;
+pub mod folders;
 pub mod ideas;
 pub mod items;
 pub mod labels;
@@ -42,6 +43,9 @@ pub struct Storage {
     /// Set when a Reset deleted the data but could not open a new database. The
     /// connection is then an empty stand-in; callers must treat the storage as down.
     unavailable: bool,
+    /// The one step of Undo (#26): the last bookmark move or delete. Held in memory only, so it is
+    /// lost when the app closes.
+    undo: Option<folders::Undo>,
 }
 
 #[allow(dead_code)] // Status readers; callers arrive with later tickets.
@@ -86,6 +90,7 @@ impl Storage {
             files_dir,
             db_path: path.to_path_buf(),
             unavailable: false,
+            undo: None,
         };
         // The app holds one storage, opened before any run is queued, so a run still in
         // running or waiting here was left by an app that closed. A failure is logged and
@@ -208,7 +213,7 @@ mod tests {
         assert_eq!(s.journal_mode().unwrap(), "wal");
         assert_eq!(s.busy_timeout_ms().unwrap(), 5000);
         assert_eq!(s.synchronous_level().unwrap(), 1, "NORMAL");
-        assert_eq!(s.schema_version().unwrap(), 10);
+        assert_eq!(s.schema_version().unwrap(), 11);
     }
 
     #[test]
@@ -216,7 +221,7 @@ mod tests {
         let (_d, p) = temp_db();
         drop(Storage::open(&p).unwrap());
         let s = Storage::open(&p).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 10);
+        assert_eq!(s.schema_version().unwrap(), 11);
     }
 
     #[test]

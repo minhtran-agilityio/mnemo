@@ -5,25 +5,33 @@
 // events (reading, then done, link only or no summary yet). A link the core could not read
 // offers "Paste the text"; a link with no summary yet offers "Summarize later". A link whose page
 // could not be reached for now offers both (owner decision), in the link card's action slot (UI
-// request issue 179). Every part comes from ui/src/ds; bookmarks.css lays them out. All text goes
-// in as text.
+// request issue 179). Folders (#26): a folder tree beside the cards (the owner creates, renames and
+// deletes folders from the menu of each row; Unsorted is fixed), "Move to folder" and "Delete" on
+// each card, and a toast with Undo after a move or a delete (the core keeps one step). Every part
+// comes from ui/src/ds; bookmarks.css lays them out. All text goes in as text.
 import {
   buildBanner,
   buildEmptyState,
   createButton,
+  createConfirmDialog,
   createDialog,
   createDialogButton,
   createField,
   createLinkCard,
+  createMenu,
   createPageHeader,
   createTextarea,
   createTextInput,
   createToastRegion,
+  createTree,
   setFieldError,
+  type TreeActionEvent,
+  type TreeNode,
 } from "../../ds";
 import { findItem } from "../../frame/nav";
 import {
   errorMessage,
+  type Folder,
   isAppError,
   type Page,
   type SavedBookmark,
@@ -32,9 +40,12 @@ import {
 import {
   ACTION_LABELS,
   actionsFor,
+  bookmarkCount,
   type CardAction,
   moveToTop,
+  restore,
   toLinkItem,
+  UNSORTED_REFUSED,
   upsert,
 } from "./bookmarks-logic";
 
@@ -46,6 +57,15 @@ export interface BookmarksDeps {
   onBookmarkChanged(
     handler: (bookmark: SavedBookmark) => void,
   ): Promise<() => void>;
+  listFolders(): Promise<Folder[]>;
+  createFolder(name: string): Promise<Folder>;
+  renameFolder(id: string, name: string): Promise<Folder>;
+  /** Deletes the folder; its links move to Unsorted. Gives how many live links moved. */
+  deleteFolder(id: string): Promise<number>;
+  moveBookmark(id: string, folderId: string): Promise<SavedBookmark>;
+  deleteSavedBookmark(id: string): Promise<void>;
+  /** Takes back the last move or delete (the core keeps one step). */
+  undoLast(): Promise<SavedBookmark>;
 }
 
 /** How many saved links the screen reads (one page). #27 adds paging. */
@@ -61,6 +81,8 @@ export function renderBookmarks(
   deps: BookmarksDeps,
 ): () => void {
   const doc = container.ownerDocument;
+  // The folder tree beside the cards needs more than the reading width, as the Ideas board does.
+  container.dataset.layout = "wide";
   let left = false;
   let unlisten: (() => void) | null = null;
   // The one place this screen keeps its state: the saved links, newest first.
@@ -72,6 +94,21 @@ export function renderBookmarks(
   let alreadySavedId: string | null = null;
   /** Bookmarks with a summary call going, so their action is not sent twice. */
   const busy = new Set<string>();
+  /**
+   * A move, a delete or an Undo is going. The core keeps one Undo step, so only one of them runs
+   * at a time: the toast of a step then always names the step the core holds.
+   */
+  let stepRunning = false;
+  /** The folder tree was not redrawn because a name field was open; redraw when it closes. */
+  let treeStale = false;
+  /** The folders, Unsorted last; the core counts their live links. */
+  let folders: Folder[] = [];
+  /** Closes the toast of the last move or delete, so its Undo never takes back a later step. */
+  let dismissUndo: (() => void) | null = null;
+  /** Ends the menus of the cards drawn last (their listeners go when the list is drawn again). */
+  let cardMenus = new AbortController();
+  /** Ends the folder tree's listeners when the screen is left. */
+  const stop = new AbortController();
 
   const toasts = createToastRegion();
   const phase = findItem("bookmarks")?.phase;
@@ -110,7 +147,14 @@ export function renderBookmarks(
   list.className = "bookmarks-list";
   list.setAttribute("aria-label", "Saved links");
   list.setAttribute("role", "region");
-  container.replaceChildren(header, form, notice, list, toasts.element);
+  const side = doc.createElement("div");
+  side.className = "bookmarks-folders";
+  side.setAttribute("aria-label", "Folders");
+  side.setAttribute("role", "region");
+  const body = doc.createElement("div");
+  body.className = "bookmarks-body";
+  body.append(side, list);
+  container.replaceChildren(header, form, notice, body, toasts.element);
 
   function showProblem(message: string | null): void {
     notice.replaceChildren(
@@ -221,6 +265,264 @@ export function renderBookmarks(
       });
   }
 
+  // ---- folders (#26) ----
+
+  /** The Unsorted folder, once the folders are read. */
+  function unsorted(): Folder | undefined {
+    return folders.find((f) => f.isDefault);
+  }
+
+  function folderNodes(): TreeNode[] {
+    return folders.map((f) => ({
+      id: f.id,
+      label: f.name,
+      kind: "folder",
+      count: f.count,
+      ...(f.isDefault ? { refused: UNSORTED_REFUSED } : {}),
+    }));
+  }
+
+  /** Draws the folder tree. A name field that is open is not closed by a redraw of equal data. */
+  function drawFolders(): void {
+    side.replaceChildren(
+      createTree(doc, "Folders", folderNodes(), undefined, {
+        noun: "folder",
+        flat: true,
+        onAction: folderAction,
+        signal: stop.signal,
+      }),
+    );
+  }
+
+  /** True while the owner types a folder name (a new folder or a rename) in the tree. */
+  function nameFieldOpen(): boolean {
+    return side.querySelector(".tedit") !== null;
+  }
+
+  /** Reads the folders again, then fits the cards to them (a renamed folder, new counts). */
+  async function refreshFolders(): Promise<void> {
+    let next: Folder[];
+    try {
+      const read: unknown = await deps.listFolders();
+      // The core always answers with a list; anything else is treated as no folders, so a
+      // malformed answer can never break the cards.
+      next = Array.isArray(read) ? (read as Folder[]) : [];
+    } catch (error) {
+      if (!left)
+        showProblem(`Mnemo could not load the folders. ${errorMessage(error)}`);
+      return;
+    }
+    if (left) return;
+    const same = JSON.stringify(next) === JSON.stringify(folders);
+    folders = next;
+    const names = new Map(next.map((f) => [f.id, f.name]));
+    const before = items;
+    items = items.map((b) => {
+      const name = names.get(b.folderId);
+      return name !== undefined && name !== b.folder
+        ? { ...b, folder: name }
+        : b;
+    });
+    // A name field that is open is never replaced: the tree is redrawn when it closes.
+    if (!same || treeStale) {
+      if (nameFieldOpen()) treeStale = true;
+      else {
+        treeStale = false;
+        drawFolders();
+      }
+    }
+    if (items.some((b, i) => b !== before[i]) || !same) draw();
+  }
+
+  // When the name field closes after a refresh was held back, the tree catches up.
+  side.addEventListener("focusout", () => {
+    setTimeout(() => {
+      if (!left && treeStale && !nameFieldOpen()) {
+        treeStale = false;
+        drawFolders();
+      }
+    }, 0);
+  });
+
+  /** The owner's folder work: runs `work`, says why it failed, and reads the folders again. */
+  async function folderWork(
+    lead: string,
+    work: () => Promise<void>,
+  ): Promise<void> {
+    try {
+      await work();
+    } catch (error) {
+      if (!left) toasts.show(`${lead} ${errorMessage(error)}`);
+    }
+    await refreshFolders();
+  }
+
+  function folderAction(event: TreeActionEvent): Promise<void> | undefined {
+    const { action, id, name } = event;
+    if (action === "create")
+      return folderWork("The folder was not created.", async () => {
+        await deps.createFolder(name ?? "");
+      });
+    if (action === "rename" && id !== null)
+      return folderWork("The folder was not renamed.", async () => {
+        await deps.renameFolder(id, name ?? "");
+      });
+    if (action === "delete" && id !== null) askDeleteFolder(id);
+    return undefined;
+  }
+
+  /** Asks before a folder goes. Its links move to Unsorted; none is lost. */
+  function askDeleteFolder(id: string): void {
+    const folder = folders.find((f) => f.id === id);
+    if (!folder || folder.isDefault) return;
+    const opener =
+      doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
+    const n = folder.count;
+    const dialog = createConfirmDialog({
+      doc,
+      title: `Delete the folder "${folder.name}"?`,
+      message:
+        n === 0
+          ? "No bookmarks are in this folder."
+          : `${bookmarkCount(n)} ${n === 1 ? "moves" : "move"} to Unsorted.`,
+      lose: [`The folder "${folder.name}"`],
+      keepLabel: "Keep folder",
+      confirmLabel: "Delete folder",
+      onConfirm: () => {
+        void folderWork("The folder was not deleted.", async () => {
+          const moved = await deps.deleteFolder(id);
+          const home = unsorted();
+          if (home)
+            items = items.map((b) =>
+              b.folderId === id
+                ? {
+                    ...b,
+                    folderId: home.id,
+                    folder: home.name,
+                    folderReason: null,
+                    folderIsGuess: false,
+                  }
+                : b,
+            );
+          draw();
+          toasts.show(
+            moved === 0
+              ? `Folder "${folder.name}" deleted.`
+              : `Folder "${folder.name}" deleted. ${bookmarkCount(moved)} moved to Unsorted.`,
+          );
+        });
+      },
+      onKeep: () => opener?.focus(),
+    });
+    dialog.open(opener);
+  }
+
+  /** Shows a toast with Undo for the step the core just kept. A new step replaces the old toast. */
+  function offerUndo(message: string): void {
+    dismissUndo?.();
+    dismissUndo = toasts.show(message, { onUndo: undo });
+  }
+
+  /** Takes back the last move or delete, then puts the link where it belongs in the list. */
+  function undo(): void {
+    dismissUndo = null;
+    if (stepRunning) return;
+    stepRunning = true;
+    draw();
+    deps
+      .undoLast()
+      .then((b) => {
+        stepRunning = false;
+        if (left) return;
+        items = restore(items, b);
+        draw();
+        void refreshFolders();
+        toasts.show("Undone.");
+      })
+      .catch((error: unknown) => {
+        stepRunning = false;
+        if (left) return;
+        draw();
+        toasts.show(`Mnemo could not undo. ${errorMessage(error)}`);
+      });
+  }
+
+  /** Moves a link to `folder` (the owner's choice from the card's menu). */
+  function move(b: SavedBookmark, folder: Folder): void {
+    if (stepRunning) return;
+    stepRunning = true;
+    draw();
+    deps
+      .moveBookmark(b.id, folder.id)
+      .then((moved) => {
+        stepRunning = false;
+        if (left) return;
+        put(moved);
+        void refreshFolders();
+        offerUndo(`Moved to ${folder.name}.`);
+      })
+      .catch((error: unknown) => {
+        stepRunning = false;
+        if (left) return;
+        draw();
+        toasts.show(`Mnemo could not move the link. ${errorMessage(error)}`);
+      });
+  }
+
+  /** Deletes a link with no confirm dialog: the toast offers Undo. */
+  function remove(b: SavedBookmark): void {
+    if (stepRunning) return;
+    stepRunning = true;
+    draw();
+    deps
+      .deleteSavedBookmark(b.id)
+      .then(() => {
+        stepRunning = false;
+        if (left) return;
+        items = items.filter((x) => x.id !== b.id);
+        draw();
+        void refreshFolders();
+        offerUndo("Link deleted.");
+      })
+      .catch((error: unknown) => {
+        stepRunning = false;
+        if (left) return;
+        draw();
+        toasts.show(`Mnemo could not delete the link. ${errorMessage(error)}`);
+      });
+  }
+
+  /** The card's own buttons: its summary actions, "Move to folder" and the ghost "Delete". */
+  function cardButtons(b: SavedBookmark): Node[] {
+    const nodes = actionsOf(b);
+    const targets = folders.filter((f) => f.id !== b.folderId);
+    const name = b.title ?? b.site ?? b.url;
+    if (targets.length > 0) {
+      const menu = createMenu(doc, {
+        label: "Move to folder",
+        items: targets.map((f) => ({
+          label: f.name,
+          onSelect: () => move(b, f),
+        })),
+        signal: cardMenus.signal,
+      });
+      menu.anchor
+        .querySelector("button")
+        ?.setAttribute("aria-label", `Move to folder: ${name}`);
+      nodes.push(menu.anchor);
+    }
+    const del = createButton(doc, {
+      label: "Delete",
+      size: "sm",
+      variant: "ghost",
+      busy: stepRunning,
+      onClick: () => remove(b),
+    });
+    del.setAttribute("aria-label", `Delete: ${name}`);
+    nodes.push(del);
+    return nodes;
+  }
+
   /** The main action (`first`) is a default button; any other is ghost, as the link card asks. */
   function actionButton(
     b: SavedBookmark,
@@ -244,6 +546,8 @@ export function renderBookmarks(
   }
 
   function draw(): void {
+    cardMenus.abort();
+    cardMenus = new AbortController();
     if (items.length === 0) {
       list.replaceChildren(
         buildEmptyState({
@@ -258,7 +562,7 @@ export function renderBookmarks(
     grid.append(
       ...items.map((b) =>
         createLinkCard(doc, toLinkItem(b, b.id === alreadySavedId), {
-          actions: actionsOf(b),
+          actions: cardButtons(b),
         }),
       ),
     );
@@ -268,7 +572,9 @@ export function renderBookmarks(
   draw();
   deps
     .onBookmarkChanged((b) => {
-      if (!left) put(b);
+      if (left) return;
+      put(b);
+      void refreshFolders();
     })
     .then((stop) => {
       if (left) stop();
@@ -277,6 +583,7 @@ export function renderBookmarks(
     .catch((error: unknown) => {
       console.error("could not listen for bookmark changes:", error);
     });
+  void refreshFolders();
   deps
     .listBookmarkCards({ limit: BOOKMARKS_PAGE })
     .then((page) => {
@@ -299,6 +606,9 @@ export function renderBookmarks(
 
   return () => {
     left = true;
+    delete container.dataset.layout;
+    stop.abort();
+    cardMenus.abort();
     unlisten?.();
     toasts.element.remove();
   };

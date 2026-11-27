@@ -25,3 +25,22 @@
     );
   gap: var(--space-4);
 }
+
+/* The folder tree beside the cards. The tree is a column of the basis width; below the medium
+   window the two stack. */
+.bookmarks-body {
+  display: grid;
+  grid-template-columns: minmax(var(--size-basis-column), 1fr) minmax(0, 4fr);
+  gap: var(--space-5);
+  align-items: start;
+  margin-top: var(--space-5);
+}
+
+.bookmarks-body > .bookmarks-list {
+  margin-top: 0;
+  min-width: 0;
+}
+
+.bookmarks-folders {
+  min-width: 0;
+}
