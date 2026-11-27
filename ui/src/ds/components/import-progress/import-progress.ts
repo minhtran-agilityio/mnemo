@@ -3,7 +3,12 @@ import "./import-progress.css";
 import { createButton } from "../button/button";
 import { buildProgress, setProgress } from "../progress/progress";
 
-export type ImportProgressState = "running" | "waiting" | "paused" | "finished";
+export type ImportProgressState =
+  | "running"
+  | "waiting"
+  | "paused"
+  | "finished"
+  | "stopped";
 
 export interface ImportProgressOptions {
   /** The file being imported. A long name is cut with an ellipsis; the full name is its title. */
@@ -19,6 +24,8 @@ export interface ImportProgressOptions {
   readonly pending?: boolean;
   readonly onPause?: () => void;
   readonly onContinue?: () => void;
+  /** "Stop here" ends the import. Links that got no summary stay link only. */
+  readonly onStop?: () => void;
 }
 
 const STATE_WORD: Readonly<Record<ImportProgressState, string>> = {
@@ -26,7 +33,22 @@ const STATE_WORD: Readonly<Record<ImportProgressState, string>> = {
   waiting: "Waiting",
   paused: "Paused",
   finished: "Finished",
+  stopped: "Stopped",
 };
+
+type ActionKind = "pause" | "continue" | "stop";
+
+const ACTION_LABEL: Readonly<Record<ActionKind, string>> = {
+  pause: "Pause",
+  continue: "Continue",
+  stop: "Stop here",
+};
+
+export const STOPPED_REASON =
+  "Stopped. The links that got no summary are saved as link only.";
+
+/** Where focus should return once a pending request clears (the buttons are disabled meanwhile). */
+const wantedFocus = new WeakMap<HTMLElement, "main" | "stop">();
 
 const handlers = new WeakMap<HTMLElement, ImportProgressOptions>();
 
@@ -53,17 +75,26 @@ export function createImportProgress(
   head.className = "ip-head";
   const title = span(doc, "ip-title");
   title.append(span(doc, "ip-lead"), span(doc, "ip-file"));
-  head.append(title, span(doc, "ip-state"));
-  const counts = doc.createElement("p");
-  counts.className = "ip-counts";
-  counts.setAttribute("role", "status");
-  const bar = buildProgress({ label: "Import", value: 0 });
-  bar.classList.add("ip-bar");
+  head.append(title);
+  // One stable live region holds the state word and the reason, so a change of either is announced.
+  // It is always rendered (an empty reason is hidden by CSS, not by the hidden attribute). The counts
+  // are not live: they change on every tick and would be read out each time.
+  const status = doc.createElement("div");
+  status.className = "ip-status";
+  status.setAttribute("role", "status");
+  // Focus lands here when the buttons go (the import stopped or finished).
+  status.tabIndex = -1;
   const reason = doc.createElement("p");
   reason.className = "ip-reason";
+  status.append(span(doc, "ip-state"), reason);
+  const counts = doc.createElement("p");
+  counts.className = "ip-counts";
+  // buildProgress takes no document and uses the global one; this part is built for the window's document.
+  const bar = buildProgress({ label: "Import", value: 0 });
+  bar.classList.add("ip-bar");
   const actions = doc.createElement("div");
   actions.className = "ip-actions";
-  root.append(head, counts, bar, reason, actions);
+  root.append(head, status, counts, bar, actions);
   setImportProgress(root, options);
   return root;
 }
@@ -77,7 +108,11 @@ export function setImportProgress(
   const doc = root.ownerDocument;
   root.dataset.state = options.state;
   part(root, "ip-lead").textContent =
-    options.state === "finished" ? "Imported " : "Importing ";
+    options.state === "finished"
+      ? "Imported "
+      : options.state === "stopped"
+        ? "Import of "
+        : "Importing ";
   const file = part(root, "ip-file");
   file.textContent = options.fileName;
   file.title = options.fileName;
@@ -88,40 +123,81 @@ export function setImportProgress(
     options.total > 0
       ? ((options.done + options.failed) / options.total) * 100
       : 0;
-  setProgress(part(root, "ip-bar"), options.state === "finished" ? 100 : share);
-  const reason = part(root, "ip-reason");
-  reason.textContent = options.reason ?? "";
-  reason.hidden = !options.reason;
+  // Rounding must not show 100% while links are still waiting.
+  const shown =
+    options.state === "finished"
+      ? 100
+      : options.waiting > 0
+        ? Math.min(99, Math.floor(share))
+        : Math.floor(share);
+  setProgress(part(root, "ip-bar"), shown);
+  // A stopped import always says so, whatever reason an earlier state left behind.
+  part(root, "ip-reason").textContent =
+    options.state === "stopped" ? STOPPED_REASON : (options.reason ?? "");
 
   const actions = part(root, "ip-actions");
-  const kind =
-    options.state === "finished"
-      ? null
-      : options.state === "paused"
-        ? "continue"
-        : "pause";
-  const current = actions.querySelector<HTMLButtonElement>("button");
-  if (kind === null) {
-    current?.remove();
-  } else if (current && current.dataset.action === kind) {
-    current.disabled = Boolean(options.pending);
-  } else {
-    const hadFocus = current !== null && doc.activeElement === current;
-    current?.remove();
+  const ended = options.state === "finished" || options.state === "stopped";
+  const main: ActionKind = options.state === "paused" ? "continue" : "pause";
+  const wanted: ActionKind[] = ended ? [] : [main, "stop"];
+  const buttons = () => [
+    ...actions.querySelectorAll<HTMLButtonElement>("button"),
+  ];
+  // Focus must not fall to the page: Pause and Continue swap with the focus kept on the main
+  // action, and when the buttons all go (stopped, finished) it moves to the status region.
+  // While a request is pending the buttons are disabled and cannot hold focus, so the wish is
+  // kept and applied once pending clears.
+  const focused = buttons().find((b) => doc.activeElement === b);
+  const lost = !doc.activeElement || doc.activeElement === doc.body;
+  const focusKind: "main" | "stop" | undefined = focused
+    ? focused.dataset.action === "stop"
+      ? "stop"
+      : "main"
+    : lost
+      ? wantedFocus.get(root)
+      : undefined;
+  for (const old of buttons()) {
+    if (!wanted.includes(old.dataset.action as ActionKind)) old.remove();
+  }
+  for (const kind of wanted) {
+    const current = actions.querySelector<HTMLButtonElement>(
+      `button[data-action="${kind}"]`,
+    );
+    if (current) {
+      current.disabled = Boolean(options.pending);
+      continue;
+    }
     const button = createButton(doc, {
-      label: kind === "pause" ? "Pause" : "Continue",
-      variant: "ghost",
+      label: ACTION_LABEL[kind],
+      variant: kind === "stop" ? "ghost" : "default",
       size: "sm",
       disabled: options.pending,
       onClick: () => {
         const latest = handlers.get(root);
         if (kind === "pause") latest?.onPause?.();
-        else latest?.onContinue?.();
+        else if (kind === "continue") latest?.onContinue?.();
+        else latest?.onStop?.();
       },
     });
     button.dataset.action = kind;
-    actions.append(button);
-    if (hadFocus) button.focus();
+    // Pause and Continue go before Stop here. A button already in place is never moved.
+    const stop = actions.querySelector('button[data-action="stop"]');
+    if (kind !== "stop" && stop) actions.insertBefore(button, stop);
+    else actions.append(button);
   }
-  actions.hidden = kind === null;
+  actions.hidden = wanted.length === 0;
+  if (!focusKind) {
+    wantedFocus.delete(root);
+  } else if (wanted.length === 0) {
+    wantedFocus.delete(root);
+    part(root, "ip-status").focus();
+  } else if (options.pending) {
+    wantedFocus.set(root, focusKind);
+  } else {
+    wantedFocus.delete(root);
+    actions
+      .querySelector<HTMLButtonElement>(
+        `button[data-action="${focusKind === "stop" ? "stop" : main}"]`,
+      )
+      ?.focus();
+  }
 }
