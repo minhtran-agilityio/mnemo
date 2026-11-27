@@ -2,7 +2,7 @@
 // focus to the button. A disabled item stays in the list with aria-disabled and says why.
 import { ChevronDown } from "lucide";
 import { createIcon } from "../../icon";
-import { createButton } from "../button/button";
+import { type ButtonVariant, createButton } from "../button/button";
 import { nextControlId } from "../field/id";
 import { createKbd } from "../kbd/kbd";
 import { createPopover, type Popover } from "../popover/popover";
@@ -57,7 +57,12 @@ export function createMenuPanel(
     if (entry.danger) item.classList.add("danger");
     if (entry.highlighted) item.classList.add("is-hover");
     if (entry.disabled) item.setAttribute("aria-disabled", "true");
-    item.append(doc.createTextNode(entry.label));
+    const text = doc.createElement("span");
+    text.className = "menu-label";
+    text.textContent = entry.label;
+    // A disabled item keeps its full label as the title: the label holds the reason.
+    if (entry.disabled) item.title = entry.label;
+    item.append(text);
     if (entry.shortcut) item.append(createKbd(doc, entry.shortcut));
     item.addEventListener("click", () => {
       if (entry.disabled) return;
@@ -66,6 +71,20 @@ export function createMenuPanel(
     });
     menu.append(item);
   }
+  // The full name is the title only when the label is cut (checked when the pointer or focus
+  // reaches the item, when the item has a width).
+  const titleIfCut = (event: Event) => {
+    const item = (event.target as Element).closest<HTMLElement>(
+      '[role="menuitem"]',
+    );
+    const text = item?.querySelector<HTMLElement>(".menu-label");
+    if (!item || !text || item.getAttribute("aria-disabled") === "true") return;
+    if (text.scrollWidth > text.clientWidth)
+      item.title = text.textContent ?? "";
+    else item.removeAttribute("title");
+  };
+  menu.addEventListener("pointerover", titleIfCut);
+  menu.addEventListener("focusin", titleIfCut);
   menu.addEventListener("keydown", (event) => {
     const items = enabled(menu);
     if (!items.length) return;
@@ -87,13 +106,29 @@ export interface MenuOptions {
   readonly label: string;
   readonly items: readonly MenuEntry[];
   readonly onChoose?: (item: MenuItem) => void;
+  /** The trigger button's size. Default "md". */
+  readonly size?: "md" | "sm";
+  /** The trigger button's variant. Default "default". */
+  readonly variant?: ButtonVariant;
+  /** The trigger starts disabled. To change it later, call setDisabled on the menu. */
+  readonly disabled?: boolean;
   /** When it aborts, an open menu closes and its document listener goes. */
   readonly signal?: AbortSignal;
 }
 
+export interface Menu extends Popover {
+  /** Disables or enables the trigger (for example while a move runs). Disabling closes an open menu. */
+  setDisabled(disabled: boolean): void;
+}
+
 /** A button that opens a menu. */
-export function createMenu(doc: Document, options: MenuOptions): Popover {
-  const trigger = createButton(doc, { label: options.label });
+export function createMenu(doc: Document, options: MenuOptions): Menu {
+  const trigger = createButton(doc, {
+    label: options.label,
+    size: options.size,
+    variant: options.variant,
+    disabled: options.disabled,
+  });
   trigger.append(createIcon(ChevronDown));
   trigger.id = nextControlId("menu");
   let pop: Popover | undefined;
@@ -111,5 +146,12 @@ export function createMenu(doc: Document, options: MenuOptions): Popover {
     signal: options.signal,
     firstFocus: () => enabled(panel)[0] ?? null,
   });
-  return pop;
+  const popover = pop;
+  return {
+    ...popover,
+    setDisabled(disabled: boolean) {
+      if (disabled) popover.close(false);
+      trigger.disabled = disabled;
+    },
+  };
 }

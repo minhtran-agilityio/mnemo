@@ -103,6 +103,7 @@ The UI Catalog tabs need fixed lengths that no token covered (prototype v3 uses 
 | `--size-label-picker-max` | 280px |
 | `--size-menu-min` | 220px |
 | `--size-menu-max` | 320px |
+| `--size-menu-height-max` | 18rem |
 | `--size-toggle-width` | 40px |
 | `--size-toggle-height` | 24px |
 | `--size-toggle-knob` | 18px |
