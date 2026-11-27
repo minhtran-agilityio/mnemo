@@ -1676,9 +1676,13 @@ test("rows carry their actions in a trailing slot; none, no slot", () => {
     const row = make(document, pho, {
       actions: actionButtons(document, () => {}),
     });
-    const slot = row.querySelector(":scope > .link-actions");
-    expect(slot?.children).toHaveLength(2);
-    expect(row.lastElementChild).toBe(slot);
+    // The List row holds them in .link-main (so it fills the row); the Compact row after its text.
+    const holder = row.classList.contains("link-row")
+      ? row.querySelector(".link-main")
+      : row;
+    const slot = holder?.querySelector(":scope > .link-actions");
+    expect(slot?.querySelectorAll("button")).toHaveLength(2);
+    expect(holder?.lastElementChild).toBe(slot);
     const none = make(document, pho, { actions: [] });
     expect(none.querySelector(".link-actions")).toBeNull();
   }
@@ -1769,11 +1773,13 @@ test("keyboard focus on the open button still shows the full site (issue 172)", 
 
 test("the hidden Compact actions take no pointer and show on hover and focus", () => {
   const css = readFileSync(resolve(__dirname, "link-card.css"), "utf8");
-  const hidden = css.match(/\.compact-row > \.link-actions \{[^}]*\}/)?.[0];
+  const hidden = css.match(
+    /\.compact-row > \.link-actions > \.link-actions-box \{[^}]*\}/,
+  )?.[0];
   expect(hidden).toContain("pointer-events: none");
   expect(hidden).toContain("opacity: 0");
   const shown = css.match(
-    /\.compact-row:focus-within > \.link-actions \{[^}]*\}/,
+    /\.compact-row:focus-within > \.link-actions > \.link-actions-box \{[^}]*\}/,
   )?.[0];
   expect(shown).toContain("pointer-events: auto");
   expect(css).toContain("--row-surface: var(--head)");

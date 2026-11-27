@@ -195,15 +195,27 @@ function makeOpenable(
   });
 }
 
-/** The trailing action slot of a row, or null when there is no action. */
+/**
+ * The trailing action slot of a row, or null when there is no action. The Compact row (`overlay`)
+ * holds the buttons in an inner box that is drawn over its end, so the slot takes no room in the
+ * one-line row.
+ */
 function actionSlot(
   doc: Document,
   actions: readonly Node[] | undefined,
+  overlay = false,
 ): HTMLElement | null {
   if (!actions || actions.length === 0) return null;
   const slot = doc.createElement("span");
   slot.className = "link-actions";
-  slot.append(...actions);
+  if (overlay) {
+    const box = doc.createElement("span");
+    box.className = "link-actions-box";
+    box.append(...actions);
+    slot.append(box);
+  } else {
+    slot.append(...actions);
+  }
   return slot;
 }
 
@@ -570,8 +582,9 @@ export function createLinkRow(
   if (body) main.append(body);
   const meta = rowMetaLine(doc, item);
   if (meta) main.append(meta);
+  // The actions are the last item of .link-main, so it still fills the row.
   const slot = actionSlot(doc, options.actions);
-  if (slot) row.append(slot);
+  if (slot) main.append(slot);
   if (options.onOpen)
     makeOpenable(row, row.querySelector(".row-title"), item, options.onOpen);
   return row;
@@ -623,7 +636,7 @@ export function createCompactRow(
   }
   const when = item.saved || item.age;
   if (when) li.append(textEl(doc, "span", "row-meta", when));
-  const slot = actionSlot(doc, options.actions);
+  const slot = actionSlot(doc, options.actions, true);
   if (slot) li.append(slot);
   if (options.onOpen)
     makeOpenable(li, li.querySelector(".row-title"), item, options.onOpen);

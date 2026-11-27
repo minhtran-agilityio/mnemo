@@ -523,6 +523,10 @@
   text-align: start;
   overflow-wrap: inherit;
   cursor: pointer;
+  /* Room above and below the line for stacked Vietnamese marks (the button cuts what overflows it),
+     taken back by the margin so the layout does not move. */
+  padding-block: var(--border-2);
+  margin-block: calc(-1 * var(--border-2));
 }
 
 /* Rows cut a long title with an ellipsis, full text in the tooltip of the title. */
@@ -589,8 +593,23 @@
   gap: var(--space-2);
 }
 
-.link-row > .link-actions {
-  align-self: center;
+/* In the List row the actions are the last item of .link-main, after the body and the meta line, so
+   .link-main keeps filling the row. They share the line with the body when they fit, at its end; else
+   they wrap under it, each button whole (a long label wraps inside its button), so nothing spills out
+   of the row. */
+.link-main > .link-actions {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+  margin-inline-start: auto;
+}
+
+.link-actions > .btn,
+.link-actions-box > .btn {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 /* The Compact row stays one line: its actions sit over the row's end, on the row's surface, and show
@@ -614,11 +633,22 @@
   --row-surface: var(--head);
 }
 
+/* The slot has no box of its own (display: contents), so it takes no room in the line. The buttons sit
+   in .link-actions-box, drawn over the row's end, inside the focus ring and never wider than the row;
+   in a row narrower than its buttons each label is cut with an ellipsis. The slot's opacity and
+   pointer-events (hidden: none) are set on the box too, as a box-less slot cannot carry them. */
 .compact-row > .link-actions {
+  display: contents;
+}
+
+.compact-row > .link-actions > .link-actions-box {
   position: absolute;
-  /* Inside the focus ring, so the ring stays whole. */
   inset-block: var(--focus-ring);
   inset-inline-end: var(--focus-ring);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: calc(100% - 2 * var(--focus-ring));
   padding-inline: var(--space-6) var(--space-2);
   background: linear-gradient(
     to right,
@@ -629,10 +659,18 @@
   pointer-events: none;
 }
 
-.compact-row:hover > .link-actions,
-.compact-row.is-hover > .link-actions,
-.compact-row.is-focus > .link-actions,
-.compact-row:focus-within > .link-actions {
+.compact-row > .link-actions > .link-actions-box > .btn {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-row:hover > .link-actions > .link-actions-box,
+.compact-row.is-hover > .link-actions > .link-actions-box,
+.compact-row.is-focus > .link-actions > .link-actions-box,
+.compact-row:focus-within > .link-actions > .link-actions-box {
   opacity: 1;
   pointer-events: auto;
 }
