@@ -18,6 +18,7 @@ use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
 use serde::{Deserialize, Serialize};
 
 use super::error::StorageError;
+use super::folders::{self, FolderPick};
 use super::items::encoded_web_address;
 use super::items::{invalid, optional_chars, required_text, web_address, MAX_TITLE_CHARS};
 use super::labels::{clean_name, MAX_LABELS};
@@ -115,6 +116,13 @@ pub struct SavedBookmark {
     pub tags: Vec<String>,
     /// The same tags with their label ids.
     pub labels: Vec<BookmarkTag>,
+    /// The folder the bookmark is in (#26): its id and name. Unsorted when no other folder fits.
+    pub folder_id: String,
+    pub folder: String,
+    /// Why the app chose the folder. Null when the app did not choose it.
+    pub folder_reason: Option<String>,
+    /// True when the app chose the folder: it is shown as a guess.
+    pub folder_is_guess: bool,
 }
 
 /// What a finished summary run gives: the summary, the reason (a guess) and 1 to 6 tags.
@@ -179,20 +187,24 @@ pub(super) const FIND_BY_KEY_SQL: &str = "SELECT id, created_at FROM bookmark
 
 const GET_SQL: &str =
     "SELECT b.id, b.created_at, b.updated_at, b.deleted_at, b.url, b.title, b.site,
-         b.summary, b.reason, b.reason_is_guess, b.summary_status
-     FROM bookmark b WHERE b.id = ?1 AND b.deleted_at IS NULL";
+         b.summary, b.reason, b.reason_is_guess, b.summary_status,
+         b.folder_id, f.name, b.folder_reason, b.folder_is_guess
+     FROM bookmark b JOIN folder f ON f.id = b.folder_id
+     WHERE b.id = ?1 AND b.deleted_at IS NULL";
 
 // The same row, deleted or not.
 const GET_ANY_SQL: &str =
     "SELECT b.id, b.created_at, b.updated_at, b.deleted_at, b.url, b.title, b.site,
-         b.summary, b.reason, b.reason_is_guess, b.summary_status
-     FROM bookmark b WHERE b.id = ?1";
+         b.summary, b.reason, b.reason_is_guess, b.summary_status,
+         b.folder_id, f.name, b.folder_reason, b.folder_is_guess
+     FROM bookmark b JOIN folder f ON f.id = b.folder_id WHERE b.id = ?1";
 
 // ?1 and ?2 the cursor (or NULL), ?3 the row limit. Newest first; idx_bookmark_list serves it.
 const LIST_SQL: &str =
     "SELECT b.id, b.created_at, b.updated_at, b.deleted_at, b.url, b.title, b.site,
-         b.summary, b.reason, b.reason_is_guess, b.summary_status
-     FROM bookmark b
+         b.summary, b.reason, b.reason_is_guess, b.summary_status,
+         b.folder_id, f.name, b.folder_reason, b.folder_is_guess
+     FROM bookmark b JOIN folder f ON f.id = b.folder_id
      WHERE b.deleted_at IS NULL AND (?1 IS NULL OR (b.created_at, b.id) < (?1, ?2))
      ORDER BY b.created_at DESC, b.id DESC LIMIT ?3";
 
@@ -292,7 +304,10 @@ pub fn site_of(url: &url::Url) -> Option<String> {
 
 /// The live bookmark `id` with its tags, read through `conn` (the storage connection or an open
 /// transaction).
-fn saved_bookmark_on(conn: &Connection, id: &str) -> Result<SavedBookmark, StorageError> {
+pub(super) fn saved_bookmark_on(
+    conn: &Connection,
+    id: &str,
+) -> Result<SavedBookmark, StorageError> {
     let mut b = conn
         .query_row(GET_SQL, [id], row_without_tags)
         .optional()?
@@ -340,6 +355,10 @@ fn row_without_tags(r: &Row<'_>) -> rusqlite::Result<SavedBookmark> {
         summary_status,
         tags: Vec::new(),
         labels: Vec::new(),
+        folder_id: r.get(11)?,
+        folder: r.get(12)?,
+        folder_reason: r.get(13)?,
+        folder_is_guess: r.get(14)?,
     })
 }
 
@@ -667,13 +686,18 @@ impl Storage {
     /// the status to `done` and drops the claim, only by the run that holds `claim`. The tags
     /// replace the bookmark's old tags. Nothing is written when any part is invalid, or when the
     /// run lost the claim (`Held::Lost`).
-    pub fn set_bookmark_summary(
+    ///
+    /// With `pick` (#26) the bookmark is also filed in the folder the AI chose, in the same
+    /// transaction. The folder must be an existing live folder; any other name leaves the
+    /// bookmark in Unsorted and makes no folder.
+    pub fn set_bookmark_summary_filed(
         &mut self,
         id: &str,
         claim: &ClaimToken,
         summary: &BookmarkSummary,
+        pick: Option<&FolderPick>,
     ) -> Result<Held, StorageError> {
-        self.set_bookmark_summary_at(&now_iso(), id, claim, summary)
+        self.set_bookmark_summary_at(&now_iso(), id, claim, summary, pick)
     }
 
     pub(crate) fn set_bookmark_summary_at(
@@ -682,6 +706,7 @@ impl Storage {
         id: &str,
         claim: &ClaimToken,
         summary: &BookmarkSummary,
+        pick: Option<&FolderPick>,
     ) -> Result<Held, StorageError> {
         let tags = checked_tags(summary)?;
         let tx = self.immediate()?;
@@ -698,6 +723,9 @@ impl Storage {
         if n == 0 {
             drop(tx);
             return self.held(0, id);
+        }
+        if let Some(pick) = pick {
+            folders::apply_pick(&tx, id, pick)?;
         }
         let mut keep = HashSet::new();
         for name in &tags {
@@ -764,7 +792,7 @@ mod tests {
     /// Claims `id` and stores `sum` for it, as a summary run does.
     fn summarized(s: &mut Storage, now: &str, id: &str, sum: &BookmarkSummary) -> SavedBookmark {
         let (_, claim) = s.claim_bookmark_for_summary_at(now, id).unwrap();
-        written(s.set_bookmark_summary_at(now, id, &claim, sum))
+        written(s.set_bookmark_summary_at(now, id, &claim, sum, None))
     }
 
     /// The stored claim of `id`, deleted or not.
@@ -1020,7 +1048,7 @@ mod tests {
         for input in bad {
             assert!(
                 matches!(
-                    s.set_bookmark_summary_at(T2, &b.base.id, &claim, &input),
+                    s.set_bookmark_summary_at(T2, &b.base.id, &claim, &input, None),
                     Err(StorageError::Invalid(_))
                 ),
                 "{input:?}"
@@ -1032,7 +1060,7 @@ mod tests {
         assert!(after.tags.is_empty());
         assert!(s.list_labels().unwrap().is_empty());
         assert_eq!(
-            s.set_bookmark_summary_at(T2, "missing", &claim, &summary(&["a"])),
+            s.set_bookmark_summary_at(T2, "missing", &claim, &summary(&["a"]), None),
             Ok(Held::Lost(None))
         );
     }
@@ -1183,7 +1211,7 @@ mod tests {
             let lost = Ok(Held::Lost(Some(owner.clone())));
             assert_eq!(s.set_bookmark_title_at(T3, id, &claim, Some("AI")), lost);
             assert_eq!(
-                s.set_bookmark_summary_at(T3, id, &claim, &summary(&["ai"])),
+                s.set_bookmark_summary_at(T3, id, &claim, &summary(&["ai"]), None),
                 lost,
                 "{what}"
             );
@@ -1223,7 +1251,7 @@ mod tests {
         let lost = Ok(Held::Lost(Some(now.clone())));
         assert_eq!(s.set_bookmark_title_at(T3, id, &a, Some("A")), lost);
         assert_eq!(
-            s.set_bookmark_summary_at(T3, id, &a, &summary(&["a"])),
+            s.set_bookmark_summary_at(T3, id, &a, &summary(&["a"]), None),
             lost
         );
         assert_eq!(
@@ -1235,7 +1263,7 @@ mod tests {
             written(s.set_bookmark_title_at(T3, id, &b2, Some("B"))).title,
             Some("B".to_string())
         );
-        let done = written(s.set_bookmark_summary_at(T3, id, &b2, &summary(&["b"])));
+        let done = written(s.set_bookmark_summary_at(T3, id, &b2, &summary(&["b"]), None));
         assert_eq!(done.summary_status, SummaryStatus::Done);
         assert_eq!(claim_of(&s, id), None);
     }

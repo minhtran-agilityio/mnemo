@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 import { expect, test, vi } from "vitest";
-import type { Page, SavedBookmark, SaveResult } from "../../shared/api";
+import type { Folder, Page, SavedBookmark, SaveResult } from "../../shared/api";
 import { type BookmarksDeps, renderBookmarks } from "./bookmarks";
 import {
   actionsFor,
   moveToTop,
+  restore,
   savedDate,
   toLinkItem,
   upsert,
@@ -28,9 +29,26 @@ function bm(over: Partial<SavedBookmark> = {}): SavedBookmark {
     summaryStatus: "done",
     tags: ["security", "tauri"],
     labels: [],
+    folderId: UNSORTED.id,
+    folder: "Unsorted",
+    folderReason: null,
+    folderIsGuess: false,
     ...over,
   };
 }
+
+const UNSORTED: Folder = {
+  id: "f-unsorted",
+  name: "Unsorted",
+  isDefault: true,
+  count: 0,
+};
+const DEV: Folder = {
+  id: "f-dev",
+  name: "Dev tools",
+  isDefault: false,
+  count: 0,
+};
 
 /** A save or summary result: the bookmark, not already saved. */
 function res(over: Partial<SaveResult> = {}): SaveResult {
@@ -51,6 +69,19 @@ function deps(over: Partial<BookmarksDeps> = {}) {
       emit = h;
       return stop;
     }),
+    listFolders: vi.fn(async () => [UNSORTED]),
+    createFolder: vi.fn(async (name: string) => ({ ...DEV, name })),
+    renameFolder: vi.fn(async (id: string, name: string) => ({
+      ...DEV,
+      id,
+      name,
+    })),
+    deleteFolder: vi.fn(async () => 0),
+    moveBookmark: vi.fn(async (id: string, folderId: string) =>
+      bm({ id, folderId, folder: folderId === DEV.id ? DEV.name : "Unsorted" }),
+    ),
+    deleteSavedBookmark: vi.fn(async () => {}),
+    undoLast: vi.fn(async () => bm()),
     ...over,
   };
   return { d, emit: (b: SavedBookmark) => emit(b), stop };
@@ -366,11 +397,11 @@ function expectBothActions(card: HTMLElement): void {
   const paste = button(card, "Paste the text");
   expect(later).toBeDefined();
   expect(paste).toBeDefined();
+  // The card's own folder buttons come after the summary actions (see the folders tests).
   const shown = [...card.querySelectorAll(".lcard-action button")];
-  expect(shown.map((b) => b.textContent?.trim())).toEqual([
-    "Summarize later",
-    "Paste the text",
-  ]);
+  expect(
+    shown.map((b) => b.textContent?.trim()).filter((t) => t !== "Delete"),
+  ).toEqual(["Summarize later", "Paste the text"]);
   expect(later?.classList.contains("btn-ghost")).toBe(false);
   expect(paste?.classList.contains("btn-ghost")).toBe(true);
 }
@@ -508,4 +539,334 @@ test("a link saved again before the list has loaded stays on top with its note a
   expect(cards[0]?.textContent).toContain("Already saved");
   expect(cards[1]?.textContent).toContain("Summary two.");
   expect(cards[1]?.textContent).not.toContain("Already saved");
+});
+
+// ---- folders, Move, Delete and Undo (#26) ----
+
+const WORK: Folder = { id: "f-work", name: "Work", isDefault: false, count: 0 };
+const withFolders = (
+  list: Folder[],
+  cards: SavedBookmark[],
+  over: Partial<BookmarksDeps> = {},
+) =>
+  deps({
+    listFolders: vi.fn(async () => list.map((f) => ({ ...f }))),
+    listBookmarkCards: vi.fn(async () => page(cards)),
+    ...over,
+  });
+const treeNode = (root: ParentNode, name: string) =>
+  [...root.querySelectorAll<HTMLElement>(".tnode")].find(
+    (n) => n.querySelector(".tname")?.textContent === name,
+  ) as HTMLElement;
+const menuItem = (root: ParentNode, name: string) =>
+  [...root.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((i) =>
+    i.textContent?.startsWith(name),
+  ) as HTMLElement;
+const toastAction = () =>
+  document.querySelector(".toast-action") as HTMLButtonElement | null;
+
+test("the folder tree lists the folders with their counts, Unsorted last", async () => {
+  const { d } = withFolders(
+    [
+      { ...DEV, count: 2 },
+      { ...UNSORTED, count: 1 },
+    ],
+    [bm()],
+  );
+  const { box } = mount(d);
+  await flush();
+  const names = [...box.querySelectorAll(".tree-box .tname")].map(
+    (n) => n.textContent,
+  );
+  expect(names).toEqual(["Dev tools", "Unsorted"]);
+  expect(treeNode(box, "Dev tools").textContent).toContain("2");
+});
+
+test("Unsorted refuses rename and delete in its menu, with the reason", async () => {
+  const { d } = withFolders([DEV, UNSORTED], []);
+  const { box } = mount(d);
+  await flush();
+  const row = treeNode(box, "Unsorted").closest(".trow") as HTMLElement;
+  (row.querySelector(".tmore") as HTMLButtonElement).click();
+  for (const name of ["Rename", "Delete"]) {
+    const item = menuItem(row, name);
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.textContent).toContain("Unsorted is the default folder.");
+  }
+  const dev = treeNode(box, "Dev tools").closest(".trow") as HTMLElement;
+  expect(menuItem(dev, "Rename").getAttribute("aria-disabled")).toBeNull();
+});
+
+test("the card shows its folder, with the guess label and the app's reason, as the core sent them", async () => {
+  const { d } = withFolders(
+    [DEV, UNSORTED],
+    [
+      bm({
+        id: "a",
+        folderId: DEV.id,
+        folder: "Dev tools",
+        folderReason: "It is a reference page.",
+        folderIsGuess: true,
+      }),
+      bm({ id: "b", summaryStatus: "ai_off", summary: null, tags: [] }),
+    ],
+  );
+  const { box } = mount(d);
+  await flush();
+  const [first, second] = [...box.querySelectorAll("article")];
+  expect(first.textContent).toContain("Dev tools");
+  expect(first.textContent).toContain("It is a reference page.");
+  expect(first.textContent).toContain("Guess");
+  expect(second.textContent).toContain("Unsorted");
+  expect(second.textContent).not.toContain("Guess");
+});
+
+test("the owner creates a folder from the tree; the screen asks the core and reads the folders again", async () => {
+  const folders = [UNSORTED];
+  const { d } = withFolders(folders, [], {
+    listFolders: vi.fn(async () => [...folders]),
+    createFolder: vi.fn(async (name: string) => {
+      folders.unshift({ ...WORK, name });
+      return WORK;
+    }),
+  });
+  const { box } = mount(d);
+  await flush();
+  button(box, "New folder")?.click();
+  const input = box.querySelector(".tedit input") as HTMLInputElement;
+  input.value = "Work";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+  );
+  await flush();
+  expect(d.createFolder).toHaveBeenCalledWith("Work");
+  expect(treeNode(box, "Work")).toBeDefined();
+});
+
+test("a refused folder create says why in a toast and keeps the tree as the core has it", async () => {
+  const { d } = withFolders([UNSORTED], [], {
+    createFolder: vi.fn(async () => {
+      throw {
+        code: "invalid_input",
+        message: "A folder with this name already exists.",
+      };
+    }),
+  });
+  const { box } = mount(d);
+  await flush();
+  button(box, "New folder")?.click();
+  const input = box.querySelector(".tedit input") as HTMLInputElement;
+  input.value = "Work";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+  );
+  await flush();
+  expect(document.querySelector(".toast")?.textContent).toContain(
+    "The folder was not created. A folder with this name already exists.",
+  );
+});
+
+test("a folder delete asks first and says how many bookmarks move to Unsorted; Keep does nothing", async () => {
+  const { d } = withFolders(
+    [{ ...DEV, count: 3 }, UNSORTED],
+    [bm({ id: "a", folderId: DEV.id, folder: "Dev tools" })],
+  );
+  const { box } = mount(d);
+  await flush();
+  const row = treeNode(box, "Dev tools").closest(".trow") as HTMLElement;
+  (row.querySelector(".tmore") as HTMLButtonElement).click();
+  menuItem(row, "Delete").click();
+  const dialog = document.querySelector("dialog") as HTMLElement;
+  expect(dialog.textContent).toContain('Delete the folder "Dev tools"?');
+  expect(dialog.textContent).toContain("3 bookmarks move to Unsorted.");
+  button(dialog, "Keep folder")?.click();
+  await flush();
+  expect(d.deleteFolder).not.toHaveBeenCalled();
+});
+
+test("a confirmed folder delete moves its cards to Unsorted at once, and no card is lost", async () => {
+  const folders = [{ ...DEV, count: 1 }, UNSORTED];
+  const { d } = withFolders(
+    folders,
+    [
+      bm({
+        id: "a",
+        folderId: DEV.id,
+        folder: "Dev tools",
+        folderReason: "A tool.",
+        folderIsGuess: true,
+      }),
+    ],
+    {
+      deleteFolder: vi.fn(async () => {
+        folders.shift();
+        folders[0] = { ...UNSORTED, count: 1 };
+        return 1;
+      }),
+    },
+  );
+  const { box } = mount(d);
+  await flush();
+  const row = treeNode(box, "Dev tools").closest(".trow") as HTMLElement;
+  (row.querySelector(".tmore") as HTMLButtonElement).click();
+  menuItem(row, "Delete").click();
+  button(
+    document.querySelector("dialog") as HTMLElement,
+    "Delete folder",
+  )?.click();
+  await flush();
+  expect(d.deleteFolder).toHaveBeenCalledWith(DEV.id);
+  const card = box.querySelector("article") as HTMLElement;
+  expect(card.textContent).toContain("Unsorted");
+  expect(card.textContent).not.toContain("A tool.");
+  expect(card.querySelector(".lcard-folder")?.textContent).not.toContain(
+    "Guess",
+  );
+  expect(treeNode(box, "Dev tools")).toBeUndefined();
+  expect(document.querySelector(".toast")?.textContent).toContain(
+    "1 bookmark moved to Unsorted.",
+  );
+});
+
+test("Move to folder lists the other folders; a move updates the card and offers Undo, and Undo puts it back", async () => {
+  const { d } = withFolders([DEV, UNSORTED], [bm({ id: "a" })], {
+    undoLast: vi.fn(async () => bm({ id: "a" })),
+  });
+  const { box } = mount(d);
+  await flush();
+  const card = box.querySelector("article") as HTMLElement;
+  button(card, "Move to folder")?.click();
+  const items = [...card.querySelectorAll('[role="menuitem"]')].map(
+    (i) => i.textContent,
+  );
+  expect(items).toEqual(["Dev tools"]);
+  menuItem(card, "Dev tools").click();
+  await flush();
+  expect(d.moveBookmark).toHaveBeenCalledWith("a", DEV.id);
+  expect(box.querySelector("article")?.textContent).toContain("Dev tools");
+  expect(document.querySelector(".toast")?.textContent).toContain(
+    "Moved to Dev tools.",
+  );
+  toastAction()?.click();
+  await flush();
+  expect(d.undoLast).toHaveBeenCalledTimes(1);
+  expect(box.querySelector("article")?.textContent).toContain("Unsorted");
+  expect(box.querySelectorAll("article")).toHaveLength(1);
+});
+
+test("a refused move says so and leaves the card where it was", async () => {
+  const { d } = withFolders([DEV, UNSORTED], [bm({ id: "a" })], {
+    moveBookmark: vi.fn(async () => {
+      throw {
+        code: "not_found",
+        message: "There is no such folder. It may have been deleted.",
+      };
+    }),
+  });
+  const { box } = mount(d);
+  await flush();
+  const card = box.querySelector("article") as HTMLElement;
+  button(card, "Move to folder")?.click();
+  menuItem(card, "Dev tools").click();
+  await flush();
+  expect(document.querySelector(".toast")?.textContent).toContain(
+    "Mnemo could not move the link. There is no such folder.",
+  );
+  expect(toastAction()).toBeNull();
+  expect(box.querySelector("article")?.textContent).toContain("Unsorted");
+});
+
+test("Delete on a card asks for no confirm; the card leaves and a toast offers Undo, which brings it back in date order", async () => {
+  const older = bm({
+    id: "old",
+    createdAt: "2026-11-20T10:00:00Z",
+    title: "Older",
+  });
+  const newer = bm({
+    id: "new",
+    createdAt: "2026-11-25T10:00:00Z",
+    title: "Newer",
+  });
+  const { d } = withFolders([UNSORTED], [newer, older], {
+    undoLast: vi.fn(async () => newer),
+  });
+  const { box } = mount(d);
+  await flush();
+  const card = box.querySelector("article") as HTMLElement;
+  const del = button(card, "Delete");
+  expect(del?.classList.contains("btn-ghost")).toBe(true);
+  del?.click();
+  await flush();
+  expect(document.querySelector("dialog[open]")).toBeNull();
+  expect(d.deleteSavedBookmark).toHaveBeenCalledWith("new");
+  expect(box.querySelectorAll("article")).toHaveLength(1);
+  expect(document.querySelector(".toast")?.textContent).toContain(
+    "Link deleted.",
+  );
+  toastAction()?.click();
+  await flush();
+  const titles = [...box.querySelectorAll("article")].map((a) =>
+    a.textContent?.includes("Newer") ? "Newer" : "Older",
+  );
+  expect(titles).toEqual(["Newer", "Older"]);
+});
+
+test("a second step replaces the toast of the first, so Undo never takes back a step it does not show", async () => {
+  const { d } = withFolders(
+    [DEV, UNSORTED],
+    [bm({ id: "a" }), bm({ id: "b" })],
+  );
+  const { box } = mount(d);
+  await flush();
+  const cards = [...box.querySelectorAll("article")];
+  button(cards[0] as HTMLElement, "Delete")?.click();
+  await flush();
+  expect(document.querySelectorAll(".toast-action")).toHaveLength(1);
+  button(box.querySelector("article") as HTMLElement, "Delete")?.click();
+  await flush();
+  expect(document.querySelectorAll(".toast-action")).toHaveLength(1);
+  expect(d.deleteSavedBookmark).toHaveBeenCalledTimes(2);
+});
+
+test("a failed Undo says why", async () => {
+  const { d } = withFolders([UNSORTED], [bm({ id: "a" })], {
+    undoLast: vi.fn(async () => {
+      throw { code: "invalid_input", message: "There is nothing to undo." };
+    }),
+  });
+  const { box } = mount(d);
+  await flush();
+  button(box.querySelector("article") as HTMLElement, "Delete")?.click();
+  await flush();
+  toastAction()?.click();
+  await flush();
+  expect(document.body.textContent).toContain(
+    "Mnemo could not undo. There is nothing to undo.",
+  );
+});
+
+test("a folder read that fails says so, and the cards still show", async () => {
+  const { d } = withFolders([UNSORTED], [bm({ id: "a" })], {
+    listFolders: vi.fn(async () => {
+      throw { code: "storage_unavailable", message: "Quit and start again." };
+    }),
+  });
+  const { box } = mount(d);
+  await flush();
+  expect(box.querySelector('[role="alert"]')?.textContent).toContain(
+    "Mnemo could not load the folders. Quit and start again.",
+  );
+  expect(box.querySelectorAll("article")).toHaveLength(1);
+});
+
+test("restore puts a deleted link back by its date, and replaces one that is there", () => {
+  const a = bm({ id: "a", createdAt: "2026-11-25T10:00:00Z" });
+  const b = bm({ id: "b", createdAt: "2026-11-24T10:00:00Z" });
+  const c = bm({ id: "c", createdAt: "2026-11-23T10:00:00Z" });
+  expect(restore([a, c], b).map((x) => x.id)).toEqual(["a", "b", "c"]);
+  expect(restore([a, b], c).map((x) => x.id)).toEqual(["a", "b", "c"]);
+  expect(restore([b, c], a).map((x) => x.id)).toEqual(["a", "b", "c"]);
+  expect(restore([a, b], { ...b, folder: "X" })[1]?.folder).toBe("X");
 });

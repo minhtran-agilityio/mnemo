@@ -63,6 +63,11 @@ export function toLinkItem(b: SavedBookmark, alreadySaved = false): LinkItem {
     reason: done ? (b.reason ?? undefined) : undefined,
     reasonKind: b.reasonIsGuess ? "guess" : "owner",
     alreadySaved: alreadySaved ? true : undefined,
+    // The core's folder flag is passed as it is, in every status (a link filed with AI off is
+    // in Unsorted with no guess).
+    folder: b.folder,
+    folderIsGuess: b.folderIsGuess,
+    folderReason: b.folderReason ?? undefined,
   };
 }
 
@@ -114,3 +119,30 @@ export function moveToTop<T extends SavedBookmark>(
   const rest = items.filter((x) => x.id !== b.id);
   return b.deletedAt ? rest : [b, ...rest];
 }
+
+/**
+ * The list with `b` back in it after an Undo: a bookmark already in the list is replaced in place;
+ * one that is not (a delete taken back) goes where its saved date puts it, newest first.
+ */
+export function restore<T extends SavedBookmark>(
+  items: readonly T[],
+  b: T,
+): T[] {
+  if (b.deletedAt) return items.filter((x) => x.id !== b.id);
+  if (items.some((x) => x.id === b.id)) return upsert(items, b);
+  const at = items.findIndex((x) => x.createdAt < b.createdAt);
+  const next = items.slice();
+  next.splice(at < 0 ? next.length : at, 0, b);
+  return next;
+}
+
+/** "1 bookmark" or "3 bookmarks". */
+export function bookmarkCount(n: number): string {
+  return `${n} ${n === 1 ? "bookmark" : "bookmarks"}`;
+}
+
+/** The reason Unsorted gives for a refused rename or delete (the menu shows it, disabled). */
+export const UNSORTED_REFUSED = {
+  rename: "Unsorted is the default folder. It cannot be renamed.",
+  delete: "Unsorted is the default folder. It cannot be deleted.",
+} as const;

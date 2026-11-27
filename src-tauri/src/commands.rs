@@ -24,6 +24,7 @@ use crate::storage::ai_control::{StoredAiControl, StoredPause, StoredReading};
 use crate::storage::bookmarks::{Held, SavedBookmark};
 use crate::storage::export::{ExportError, ExportSummary, FolderState};
 use crate::storage::files::OrphanReport;
+use crate::storage::folders::Folder;
 use crate::storage::ideas::{Idea, IdeaInput, IdeaProject};
 use crate::storage::items::{
     Bookmark, BookmarkInput, Event, EventInput, Memory, MemoryInput, Note, NoteInput, Project,
@@ -2824,6 +2825,98 @@ pub async fn list_bookmark_cards(
             .get()?
             .list_bookmark_cards(&page)
             .map_err(item_failed)
+    })
+    .await
+}
+
+// ---- Folders, Move and Undo (#26, BM-02) ----
+// Each command runs one storage function. Only the owner calls them: a save never makes a folder.
+
+/// The live folders with their bookmark counts, by name, Unsorted last.
+#[tauri::command]
+pub async fn list_folders(app: tauri::AppHandle) -> Result<Vec<Folder>, AppError> {
+    off_main_thread(app, move |storage| {
+        storage.get()?.list_folders().map_err(item_failed)
+    })
+    .await
+}
+
+/// Creates a folder with this name.
+#[tauri::command]
+pub async fn create_folder(app: tauri::AppHandle, name: String) -> Result<Folder, AppError> {
+    off_main_thread(app, move |storage| {
+        storage.get()?.create_folder(&name).map_err(item_failed)
+    })
+    .await
+}
+
+/// Renames a folder. Unsorted is refused.
+#[tauri::command]
+pub async fn rename_folder(
+    app: tauri::AppHandle,
+    id: String,
+    name: String,
+) -> Result<Folder, AppError> {
+    check_bookmark_id(&id)?;
+    off_main_thread(app, move |storage| {
+        storage
+            .get()?
+            .rename_folder(&id, &name)
+            .map_err(item_failed)
+    })
+    .await
+}
+
+/// Deletes a folder; its bookmarks move to Unsorted. Gives how many live bookmarks moved.
+/// Unsorted is refused.
+#[tauri::command]
+pub async fn delete_folder(app: tauri::AppHandle, id: String) -> Result<u32, AppError> {
+    check_bookmark_id(&id)?;
+    off_main_thread(app, move |storage| {
+        storage.get()?.delete_folder(&id).map_err(item_failed)
+    })
+    .await
+}
+
+/// Moves a bookmark to a folder. The last move or delete can be taken back with `undo_last`.
+#[tauri::command]
+pub async fn move_bookmark(
+    app: tauri::AppHandle,
+    id: String,
+    folder_id: String,
+) -> Result<SavedBookmark, AppError> {
+    check_bookmark_id(&id)?;
+    check_bookmark_id(&folder_id)?;
+    off_main_thread(app, move |storage| {
+        storage
+            .get()?
+            .move_bookmark(&id, &folder_id)
+            .map_err(item_failed)
+    })
+    .await
+}
+
+/// Deletes a bookmark (it is kept, marked deleted). The last move or delete can be taken back
+/// with `undo_last`.
+#[tauri::command]
+pub async fn delete_saved_bookmark(app: tauri::AppHandle, id: String) -> Result<(), AppError> {
+    check_bookmark_id(&id)?;
+    off_main_thread(app, move |storage| {
+        storage
+            .get()?
+            .delete_saved_bookmark(&id)
+            .map(|_| ())
+            .map_err(item_failed)
+    })
+    .await
+}
+
+/// Takes back the last bookmark move or delete (one step, held in memory until the app closes).
+/// Gives the bookmark as it is now.
+#[tauri::command]
+pub async fn undo_last(app: tauri::AppHandle) -> Result<SavedBookmark, AppError> {
+    off_main_thread(app, move |storage| {
+        storage.get()?.undo_last().map_err(item_failed)
     })
     .await
 }
