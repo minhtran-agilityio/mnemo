@@ -21,7 +21,7 @@
   font-size: var(--text-lg);
   font-weight: var(--weight-bold);
   /* A long name wraps; stacked Vietnamese marks get line room. */
-  line-height: 1.5;
+  line-height: var(--leading-body);
   overflow-wrap: anywhere;
 }
 

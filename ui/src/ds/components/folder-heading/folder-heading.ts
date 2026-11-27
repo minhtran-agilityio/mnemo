@@ -23,6 +23,8 @@ export interface FolderHeading {
   element: HTMLElement;
   setExpanded(expanded: boolean): void;
   setCount(count: number): void;
+  /** Shows or drops the toggle, for when every link shows or not. */
+  setCanToggle(canToggle: boolean): void;
 }
 
 export function createFolderHeading(
@@ -43,31 +45,41 @@ export function createFolderHeading(
 
   let count = options.count;
   let expanded = options.expanded ?? false;
+  let canToggle = options.canToggle ?? true;
   let toggle: HTMLButtonElement | null = null;
 
-  function render(): void {
-    root.hidden = count <= 0;
-    countNode.textContent = new Intl.NumberFormat("en").format(count);
-    if (!toggle) return;
-    const label = expanded ? "Show less" : `Show all ${count}`;
-    toggle.textContent = label;
-    toggle.setAttribute("aria-expanded", String(expanded));
-    toggle.setAttribute("aria-label", `${label} in ${options.name}`);
-  }
-
-  if (options.canToggle ?? true) {
-    toggle = doc.createElement("button");
-    toggle.type = "button";
-    toggle.className = "folder-heading-toggle";
-    if (options.forceState) toggle.classList.add(`is-${options.forceState}`);
+  function makeToggle(): HTMLButtonElement {
+    const button = doc.createElement("button");
+    button.type = "button";
+    button.className = "folder-heading-toggle";
+    if (options.forceState) button.classList.add(`is-${options.forceState}`);
     if (options.controls)
-      toggle.setAttribute("aria-controls", options.controls);
-    toggle.addEventListener("click", () => {
+      button.setAttribute("aria-controls", options.controls);
+    button.addEventListener("click", () => {
       expanded = !expanded;
       render();
       options.onToggle?.(expanded);
     });
-    root.append(toggle);
+    return button;
+  }
+
+  function render(): void {
+    root.hidden = count <= 0;
+    // One formatted number, shown in the count and in the toggle.
+    const shown = new Intl.NumberFormat("en").format(count);
+    countNode.textContent = shown;
+    if (canToggle && !toggle) {
+      toggle = makeToggle();
+      root.append(toggle);
+    } else if (!canToggle && toggle) {
+      toggle.remove();
+      toggle = null;
+    }
+    if (!toggle) return;
+    const label = expanded ? "Show less" : `Show all ${shown}`;
+    toggle.textContent = label;
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.setAttribute("aria-label", `${label} in ${options.name}`);
   }
   render();
 
@@ -79,6 +91,10 @@ export function createFolderHeading(
     },
     setCount(next) {
       count = next;
+      render();
+    },
+    setCanToggle(next) {
+      canToggle = next;
       render();
     },
   };
