@@ -95,6 +95,7 @@ function core(all: SavedBookmark[], over: Partial<BookmarksDeps> = {}) {
       settings.set(key, value);
     }),
     openLink: vi.fn(async () => {}),
+    openImport: vi.fn(),
     ...over,
   };
   return { d, settings };
