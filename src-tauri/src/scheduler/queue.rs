@@ -324,9 +324,8 @@ impl AiRunner for BackgroundRunner {
                         task.name,
                         ticket.id
                     );
-                    // No result and no one stopped it: not a storage fault, not Claude Code
-                    // missing (the caller says "no one stopped it" from its own flags).
-                    return Err(AiError::Cancelled);
+                    // Not a storage fault, not Claude Code missing, and no one cancelled it.
+                    return Err(AiError::Stopped);
                 }
             }
         }
@@ -363,7 +362,7 @@ impl AiRunner for QueuedRunner {
                         task.name,
                         ticket.id
                     );
-                    return Err(AiError::Unavailable);
+                    return Err(AiError::Stopped);
                 }
             }
         }

@@ -593,6 +593,7 @@ fn problem(e: &AiError, status: SummaryStatus) -> Problem {
         AiError::Unavailable => ("unavailable", "Claude Code could not be started."),
         AiError::Cancelled => ("cancelled", "The run was cancelled."),
         AiError::NotRecorded => ("not_recorded", "Mnemo could not record the run."),
+        AiError::Stopped => ("stopped", "The run stopped without an answer."),
     };
     Problem {
         code,

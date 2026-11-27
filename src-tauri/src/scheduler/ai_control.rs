@@ -485,9 +485,7 @@ impl AiControl {
     /// listener. It waits for the control's lock, which a change holds across its storage write,
     /// so a caller must not hold a lock of its own that others need.
     pub fn may_run(&self, priority: Priority, now: i64) -> Decision {
-        let mut st = self.lock();
-        st.observe_gate(now);
-        st.decide(priority, now)
+        self.lock().decide(priority, now)
     }
 
     /// How many times the background gate went from closed to open. A caller that waits for the

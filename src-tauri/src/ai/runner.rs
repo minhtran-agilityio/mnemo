@@ -83,6 +83,8 @@ pub enum AiError {
     /// Mnemo's own run queue or run log could not take the run, so it never started. Claude
     /// Code itself may be fine.
     NotRecorded,
+    /// The run's thread ended with no result (the runner panicked), and no one stopped it.
+    Stopped,
 }
 
 impl fmt::Display for AiError {
@@ -96,6 +98,7 @@ impl fmt::Display for AiError {
             AiError::Unavailable => write!(f, "AI is not available"),
             AiError::Cancelled => write!(f, "the AI run was cancelled"),
             AiError::NotRecorded => write!(f, "the AI run could not be recorded"),
+            AiError::Stopped => write!(f, "the AI run stopped without an answer"),
         }
     }
 }

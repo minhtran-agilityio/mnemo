@@ -194,6 +194,7 @@ fn ai_failed(error: &AiError) -> AppError {
         AiError::Unavailable => "Claude Code could not be started.",
         AiError::Cancelled => "The run was cancelled.",
         AiError::NotRecorded => "Mnemo could not record the run.",
+        AiError::Stopped => "The run stopped without an answer.",
     };
     AppError {
         code: error_kind(error),

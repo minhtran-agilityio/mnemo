@@ -716,8 +716,8 @@ fn outcome_of(result: &SaveResult, stopped: bool) -> Outcome {
             // AI may not run now: the link stays waiting, the gate starts it again.
             "usage_limit" | "ai_off" => Outcome::Stop,
             "cancelled" if stopped => Outcome::Stop,
-            // Cancelled by no one (or a run thread that died): a fault.
-            "cancelled" => Outcome::Fault(Fault::Other),
+            // Cancelled by no one, or a run thread that died: a fault.
+            "cancelled" | "stopped" => Outcome::Fault(Fault::Other),
             // The run queue or run log could not take the run: Mnemo's storage, not Claude Code.
             "not_recorded" => Outcome::Fault(Fault::Storage),
             // Claude Code could not be started (the card says AI off): the link stays waiting
@@ -1019,6 +1019,25 @@ mod tests {
                 .find(|b| b.url.contains(of))
                 .map(|b| b.base.id)
                 .unwrap()
+        }
+
+        /// The owner's own summary of the one imported link (no import running), through the
+        /// run queue as the app does it.
+        fn owner_summary(&self) -> SaveResult {
+            self.worker.start(&self.links(1), false).unwrap();
+            let id = self.statuses_ids("/import/");
+            let store = Shared(self.store.clone());
+            let runner = crate::scheduler::queue::QueuedRunner(self.queue.clone());
+            let ai_on = || true;
+            let emit = |_: &SavedBookmark| {};
+            let ctx = SaveContext {
+                store: &store,
+                reader: self.pages.as_ref(),
+                runner: &runner,
+                ai_on: &ai_on,
+                emit: &emit,
+            };
+            bookmark_save::summarize(&ctx, &id, None).unwrap()
         }
 
         fn statuses(&self, of: &str) -> Vec<SummaryStatus> {
@@ -1719,6 +1738,32 @@ mod tests {
         assert_eq!(w.statuses("/import/"), vec![SummaryStatus::Pending]);
         w.worker.pause(&id).unwrap();
         w.settled();
+    }
+
+    #[test]
+    fn the_owners_own_run_the_queue_cannot_record_says_no_summary_yet_not_ai_off() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        w.log.fail.store(true, Ordering::SeqCst);
+        let got = w.owner_summary();
+        assert_eq!(got.bookmark.summary_status, SummaryStatus::Pending);
+        let problem = got.ai_error.unwrap();
+        assert_eq!(problem.code, "not_recorded");
+        assert!(problem
+            .message
+            .starts_with("Mnemo could not record the run."));
+    }
+
+    #[test]
+    fn the_owners_own_run_whose_thread_dies_does_not_say_it_was_cancelled_or_ai_off() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        w.gauge.die.store(true, Ordering::SeqCst);
+        let got = w.owner_summary();
+        assert_eq!(got.bookmark.summary_status, SummaryStatus::Pending);
+        let problem = got.ai_error.unwrap();
+        assert_eq!(problem.code, "stopped");
+        assert!(problem
+            .message
+            .starts_with("The run stopped without an answer."));
     }
 
     #[test]
