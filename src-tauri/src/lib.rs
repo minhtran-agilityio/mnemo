@@ -169,11 +169,34 @@ pub fn run() {
                     );
                 }
             });
-            app.manage(RunQueue::new(
+            let queue = RunQueue::new(
                 runner,
                 Arc::new(AppRunLog(app.handle().clone())),
                 notify,
                 control,
+            );
+            app.manage(queue.clone());
+
+            // The file import (#29) makes its summaries as background work through the queue.
+            // An import a closed app left running opens paused; it waits for Continue.
+            let import_handle = app.handle().clone();
+            let bookmark_handle = app.handle().clone();
+            app.manage(scheduler::import::ImportWorker::new(
+                scheduler::import::ImportDeps {
+                    store: Arc::new(commands::AppBookmarkStore(app.handle().clone())),
+                    reader: Arc::new(crate::ai::fetch::HttpReader::default()),
+                    queue,
+                    notify: Arc::new(move |status| {
+                        if let Err(e) = import_handle.emit(commands::IMPORT_EVENT, status) {
+                            log::error!("could not send the import event: {e}");
+                        }
+                    }),
+                    bookmark_changed: Arc::new(move |b| {
+                        if let Err(e) = bookmark_handle.emit(commands::BOOKMARK_EVENT, b) {
+                            log::error!("could not send the bookmark event of {}: {e}", b.base.id);
+                        }
+                    }),
+                },
             ));
 
             // The Claude Code check runs off the main thread, so the window never waits for
@@ -275,6 +298,12 @@ pub fn run() {
             commands::delete_saved_bookmark,
             commands::undo_last,
             commands::open_link,
+            commands::preview_import,
+            commands::start_import,
+            commands::get_import,
+            commands::pause_import,
+            commands::stop_import,
+            commands::continue_import,
             commands::add_note,
             commands::get_note,
             commands::list_notes,

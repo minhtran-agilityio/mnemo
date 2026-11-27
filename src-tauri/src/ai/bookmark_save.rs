@@ -366,6 +366,16 @@ pub fn summarize(
     summarize_from(ctx, b, &claim, source, false)
 }
 
+/// The first summary of a link a file import stored link only (#29): it reads the page again, as
+/// "Summarize later" does, and it also files the link, as the run of a new save does. The import
+/// is how these links are saved, so this run is their first, and a link only goes from Unsorted
+/// into a folder (`storage::folders::apply_pick`): one the owner moved first stays where it is.
+/// Refused, like `summarize`, when the bookmark is done or being read.
+pub fn summarize_import(ctx: &SaveContext<'_>, id: &str) -> Result<SaveResult, SaveError> {
+    let (b, claim) = ctx.start(&mut |s| s.claim_bookmark_for_summary(id))?;
+    summarize_from(ctx, b, &claim, Source::Page, true)
+}
+
 /// Makes the summary of `b` for the run that holds `claim`. Every write names the claim
 /// (`storage::bookmarks::Held`):
 /// - when the run lost it (the owner edited the bookmark, or deleted it) the run stops quietly

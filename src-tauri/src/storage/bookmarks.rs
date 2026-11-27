@@ -179,6 +179,13 @@ const INSERT_SQL: &str = "INSERT INTO bookmark
           summary_status, claim, compare_key)
      VALUES (?1, ?2, ?2, ?3, NULL, NULL, NULL, 0, ?4, ?5, ?6, ?7)";
 
+// An imported link (#29): link only, pending, no claim; ?3 the link, ?4 the title or NULL, ?5 the
+// site, ?6 the compare key.
+const INSERT_LINK_ONLY_SQL: &str = "INSERT INTO bookmark
+         (id, created_at, updated_at, url, title, summary, reason, reason_is_guess, site,
+          summary_status, claim, compare_key)
+     VALUES (?1, ?2, ?2, ?3, ?4, NULL, NULL, 0, ?5, 'pending', NULL, ?6)";
+
 // The live bookmarks with compare key ?1 (old duplicates are kept, so there may be several; the
 // caller takes the oldest). No ORDER BY: with one, SQLite walks idx_bookmark_list instead of
 // idx_bookmark_compare_key and a new link would read every live bookmark.
@@ -289,6 +296,45 @@ fn parsed_link(url: &str) -> Result<url::Url, StorageError> {
         return Err(refused());
     }
     Ok(parsed)
+}
+
+/// The link as a save stores it, and its #28 compare key (`None` when unknown): trimmed, an
+/// http or https web address by the same rules as save a link. The import (#29) checks each
+/// entry of a file with it.
+pub(super) fn checked_link(url: &str) -> Result<(url::Url, Option<String>), StorageError> {
+    let url = url.trim();
+    web_address(url)?;
+    let parsed = parsed_link(url)?;
+    encoded_web_address(&parsed)?;
+    let key = compare_key(&parsed);
+    Ok((parsed, key))
+}
+
+/// True when a live bookmark has compare key `key` (a soft-deleted one does not count).
+pub(super) fn live_key_exists(conn: &Connection, key: &str) -> Result<bool, StorageError> {
+    let mut st = conn.prepare_cached(FIND_BY_KEY_SQL)?;
+    Ok(st.exists([key])?)
+}
+
+/// Stores a link checked by `checked_link` as link only (`pending`, no claim, no summary), with
+/// `title` when it is 1 to 500 characters after trimming (else none), inside the caller's open
+/// transaction. The caller has already checked that it is not saved. Gives the new id.
+pub(super) fn insert_link_only_on(
+    tx: &Transaction<'_>,
+    now: &str,
+    parsed: &url::Url,
+    key: Option<&str>,
+    title: Option<&str>,
+) -> Result<String, StorageError> {
+    let title = title
+        .map(str::trim)
+        .filter(|t| !t.is_empty() && t.chars().count() <= MAX_TITLE_CHARS);
+    let base = RecordBase::new_at(now);
+    tx.execute(
+        INSERT_LINK_ONLY_SQL,
+        params![base.id, now, parsed.as_str(), title, site_of(parsed), key],
+    )?;
+    Ok(base.id)
 }
 
 /// The host of a parsed link, lower case, without a leading "www." or a trailing dot, or `None`.
@@ -473,11 +519,7 @@ impl Storage {
         url: &str,
         claim: Option<&ClaimToken>,
     ) -> Result<Inserted, StorageError> {
-        let url = url.trim();
-        web_address(url)?;
-        let parsed = parsed_link(url)?;
-        encoded_web_address(&parsed)?;
-        let key = compare_key(&parsed);
+        let (parsed, key) = checked_link(url)?;
         let base = RecordBase::new_at(now);
         let status = if claim.is_some() {
             SummaryStatus::Reading

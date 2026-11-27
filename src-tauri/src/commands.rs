@@ -17,6 +17,7 @@ use crate::scheduler::ai_control::{
     AiControl, ControlError, ControlStore, ControlStoreError, Decision, DenyReason, WindowNow,
     THRESHOLDS_MESSAGE,
 };
+use crate::scheduler::import::{ImportStatus, ImportWorker};
 use crate::scheduler::queue::{
     CancelOutcome, Priority, QueuedRunner, RunLog, RunLogError, RunQueue,
 };
@@ -26,6 +27,7 @@ use crate::storage::export::{ExportError, ExportSummary, FolderState};
 use crate::storage::files::OrphanReport;
 use crate::storage::folders::Folder;
 use crate::storage::ideas::{Idea, IdeaInput, IdeaProject};
+use crate::storage::imports::ImportPreview;
 use crate::storage::items::{
     Bookmark, BookmarkInput, Event, EventInput, Memory, MemoryInput, Note, NoteInput, Project,
     ProjectInput, Run, Task, TaskInput,
@@ -2806,9 +2808,14 @@ pub async fn summarize_bookmark(
     check_bookmark_id(&id)?;
     task_result(
         tauri::async_runtime::spawn_blocking(move || {
-            with_save_context(&app, |ctx| {
+            let done = with_save_context(&app, |ctx| {
                 bookmark_save::summarize(ctx, &id, pasted_text.as_deref())
-            })
+            });
+            // A link of a file import this summary held may go on (#29).
+            if let Some(worker) = app.try_state::<ImportWorker>() {
+                worker.owner_summary_ended();
+            }
+            done
         })
         .await,
     )
@@ -2985,6 +2992,170 @@ pub async fn open_link(app: tauri::AppHandle, id: String) -> Result<(), AppError
         })
     })
     .await
+}
+
+// ---- Import old links from a file (#29, LIB-03) ----
+
+/// The event sent with the import after each change.
+pub const IMPORT_EVENT: &str = "import-changed";
+
+/// The longest file path the import commands take.
+const MAX_IMPORT_PATH_LEN: usize = 4096;
+/// The longest import id the commands take. Ids are UUIDs (36 characters).
+const MAX_IMPORT_ID_LEN: usize = 100;
+
+/// The app's storage for the import worker's own threads.
+pub struct AppBookmarkStore(pub tauri::AppHandle);
+
+impl BookmarkStore for AppBookmarkStore {
+    fn with_storage(
+        &self,
+        call: &mut dyn FnMut(&mut Storage) -> Result<Held, StorageError>,
+    ) -> Result<Held, SaveError> {
+        self.0.state::<AppStorage>().inner().with_storage(call)
+    }
+}
+
+/// The error the UI sees for an import. The text never holds the file's path.
+fn import_failed(e: SaveError) -> AppError {
+    match e {
+        SaveError::NotFound => AppError {
+            code: "not_found",
+            message: "There is no such import.".to_string(),
+        },
+        SaveError::Storage(detail) => {
+            log::error!("import storage call failed: {detail}");
+            AppError {
+                code: "storage_error",
+                message: "Mnemo could not save the import. Nothing was deleted.".to_string(),
+            }
+        }
+        other => save_failed(other),
+    }
+}
+
+/// The picked file: an absolute path, not too long. The path is never logged or sent back.
+fn check_import_path(path: &str) -> Result<std::path::PathBuf, AppError> {
+    let p = std::path::Path::new(path);
+    if path.trim().is_empty() || path.len() > MAX_IMPORT_PATH_LEN || !p.is_absolute() {
+        return Err(AppError {
+            code: "invalid_input",
+            message: "Pick a file to import.".to_string(),
+        });
+    }
+    Ok(p.to_path_buf())
+}
+
+fn check_import_id(id: &str) -> Result<(), AppError> {
+    if id.trim().is_empty() || id.len() > MAX_IMPORT_ID_LEN {
+        return Err(AppError {
+            code: "invalid_input",
+            message: "That is not an import id.".to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Runs one import call on a blocking thread with the app's import worker.
+async fn with_import<T, F>(app: tauri::AppHandle, work: F) -> Result<T, AppError>
+where
+    T: Send + 'static,
+    F: FnOnce(&ImportWorker) -> Result<T, SaveError> + Send + 'static,
+{
+    task_result(
+        tauri::async_runtime::spawn_blocking(move || {
+            let worker = app.state::<ImportWorker>();
+            work(&worker).map_err(import_failed)
+        })
+        .await,
+    )
+}
+
+/// Reads the picked file and says what an import would do: links to add, repeats inside the
+/// file, links already saved and entries that are not links. Stores nothing.
+#[tauri::command]
+pub async fn preview_import(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<ImportPreview, AppError> {
+    let path = check_import_path(&path)?;
+    with_import(app, move |w| w.preview_file(&path)).await
+}
+
+/// Imports the picked file: its new links are stored at once as link only; with summaries,
+/// they are then made as background work. Progress goes out as `import-changed` events.
+#[tauri::command]
+pub async fn start_import(
+    app: tauri::AppHandle,
+    path: String,
+    with_summaries: bool,
+) -> Result<ImportStatus, AppError> {
+    let path = check_import_path(&path)?;
+    with_import(app, move |w| w.start_file(&path, with_summaries)).await
+}
+
+/// The newest import with its counts, or null when there was none.
+#[tauri::command]
+pub async fn get_import(app: tauri::AppHandle) -> Result<Option<ImportStatus>, AppError> {
+    with_import(app, |w| w.status()).await
+}
+
+/// Pauses this import only.
+#[tauri::command]
+pub async fn pause_import(app: tauri::AppHandle, id: String) -> Result<ImportStatus, AppError> {
+    check_import_id(&id)?;
+    with_import(app, move |w| w.pause(&id)).await
+}
+
+/// "Stop here": ends the import now. Its links with no summary yet stay link only.
+#[tauri::command]
+pub async fn stop_import(app: tauri::AppHandle, id: String) -> Result<ImportStatus, AppError> {
+    check_import_id(&id)?;
+    with_import(app, move |w| w.stop(&id)).await
+}
+
+/// Continues a paused import. While AI may not run it keeps waiting and says why.
+#[tauri::command]
+pub async fn continue_import(app: tauri::AppHandle, id: String) -> Result<ImportStatus, AppError> {
+    check_import_id(&id)?;
+    with_import(app, move |w| w.resume(&id)).await
+}
+
+#[cfg(test)]
+mod import_command_tests {
+    use super::*;
+
+    #[test]
+    fn import_commands_take_only_an_absolute_path_and_never_echo_it() {
+        for bad in ["", "   ", "links.txt", "./a/b.html"] {
+            let e = check_import_path(bad).unwrap_err();
+            assert_eq!(e.code, "invalid_input");
+            assert!(!e.message.contains("links.txt"));
+        }
+        let long = format!("/{}", "a".repeat(MAX_IMPORT_PATH_LEN));
+        assert!(check_import_path(&long).is_err());
+        assert!(check_import_path("/tmp/bookmarks.html").is_ok());
+        assert!(check_import_id("").is_err());
+        assert!(check_import_id(&"x".repeat(MAX_IMPORT_ID_LEN + 1)).is_err());
+        assert!(check_import_id("3f1c").is_ok());
+    }
+
+    #[test]
+    fn import_errors_have_stable_codes_and_hide_storage_detail() {
+        let e = import_failed(SaveError::NotFound);
+        assert_eq!(
+            (e.code, e.message.as_str()),
+            ("not_found", "There is no such import.")
+        );
+        let e = import_failed(SaveError::Storage("disk I/O error at /home/x".into()));
+        assert_eq!(e.code, "storage_error");
+        assert!(!e.message.contains("/home"));
+        let e = import_failed(SaveError::Invalid("Pick a file, not a folder.".into()));
+        assert_eq!(
+            (e.code, e.message.as_str()),
+            ("invalid_input", "Pick a file, not a folder.")
+        );
+    }
 }
 
 #[cfg(test)]
