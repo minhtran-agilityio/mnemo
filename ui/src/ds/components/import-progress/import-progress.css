@@ -64,12 +64,13 @@
   color: var(--ink2);
 }
 
-.ip-bar {
+.import-progress .ip-bar {
   max-width: none;
 }
 
 .import-progress[data-state="paused"] .ip-bar > span,
-.import-progress[data-state="waiting"] .ip-bar > span {
+.import-progress[data-state="waiting"] .ip-bar > span,
+.import-progress[data-state="stopped"] .ip-bar > span {
   background: var(--muted);
 }
 

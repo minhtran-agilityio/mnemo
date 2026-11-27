@@ -86,7 +86,9 @@ test("the button is keyboard reachable and has an accessible name", () => {
   expect(b.type).toBe("button");
   expect(b.tabIndex).toBe(0);
   expect(b.textContent).toBe("Pause");
-  expect(q(r, ".ip-counts")?.getAttribute("role")).toBe("status");
+  expect(q(r, ".ip-counts")?.hasAttribute("role")).toBe(false);
+  expect(q(r, ".ip-state")?.getAttribute("role")).toBe("status");
+  expect(q(r, ".ip-reason")?.getAttribute("role")).toBe("status");
 });
 
 test("counts of 1000 and more get separators; a long name keeps its full title", () => {
@@ -96,4 +98,62 @@ test("counts of 1000 and more get separators; a long name keeps its full title",
     "1,200 done, 3,400 waiting",
   );
   expect(q(r, ".ip-file")?.title).toBe(name);
+});
+
+const names = (r: HTMLElement) =>
+  [...r.querySelectorAll("button")].map((b) => b.textContent);
+
+test("Stop here sits next to Pause or Continue in running, waiting and paused", () => {
+  expect(names(make())).toEqual(["Pause", "Stop here"]);
+  expect(
+    names(make({ state: "waiting", reason: "Waiting: AI is off." })),
+  ).toEqual(["Pause", "Stop here"]);
+  expect(names(make({ state: "paused", reason: "Paused by you" }))).toEqual([
+    "Continue",
+    "Stop here",
+  ]);
+});
+
+test("Stop here is quiet, calls onStop and every button is disabled while pending", () => {
+  const onStop = vi.fn();
+  const r = make({ onStop });
+  const stop = q(r, 'button[data-action="stop"]') as HTMLButtonElement;
+  expect(stop.classList.contains("btn-ghost")).toBe(true);
+  stop.click();
+  expect(onStop).toHaveBeenCalledOnce();
+  setImportProgress(r, { ...base, onStop, pending: true });
+  expect([...r.querySelectorAll("button")].every((b) => b.disabled)).toBe(true);
+});
+
+test("stopped shows the word, the link-only line, counts and no buttons", () => {
+  const r = make({ state: "stopped", done: 20, waiting: 28, failed: 2 });
+  expect(q(r, ".ip-state")?.textContent).toBe("Stopped");
+  expect(q(r, ".ip-reason")?.textContent).toBe(
+    "Stopped. The links that got no summary are saved as link only.",
+  );
+  expect(q(r, ".ip-counts")?.textContent).toBe(
+    "20 done, 28 waiting, 2 failed of 50",
+  );
+  expect(r.querySelectorAll("button").length).toBe(0);
+  expect(q(r, ".ip-actions")?.hidden).toBe(true);
+});
+
+test("a running block that gets stopped loses its buttons in place", () => {
+  const r = make();
+  setImportProgress(r, { ...base, state: "stopped" });
+  expect(r.querySelectorAll("button").length).toBe(0);
+});
+
+test("the bar never shows 100% before the import is finished", () => {
+  const r = make({ done: 999, waiting: 1, failed: 0, total: 1000 });
+  expect(q(r, ".ip-bar")?.getAttribute("aria-valuenow")).toBe("99");
+  setImportProgress(r, {
+    ...base,
+    state: "finished",
+    done: 1000,
+    waiting: 0,
+    failed: 0,
+    total: 1000,
+  });
+  expect(q(r, ".ip-bar")?.getAttribute("aria-valuenow")).toBe("100");
 });
