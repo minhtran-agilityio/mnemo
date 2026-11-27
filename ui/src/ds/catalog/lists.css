@@ -24,3 +24,9 @@
 .ui-catalog .lst-settings-narrow {
   max-width: calc(var(--size-basis-setting) * 2);
 }
+
+/* The folder heading examples: the width of a page column. */
+.ui-catalog .lst-folder {
+  width: 100%;
+  max-width: var(--size-section-list-max);
+}
