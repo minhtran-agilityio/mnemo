@@ -221,3 +221,44 @@ test("the bar reaches 100% when every link is processed and stays under it while
   });
   expect(q(r, ".ip-bar")?.getAttribute("aria-valuenow")).toBe("44");
 });
+
+test("when Stop here is pressed and the buttons go, focus moves to the status region", () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const r = make({ state: "paused", reason: "Paused by you" });
+  host.append(r);
+  (q(r, 'button[data-action="stop"]') as HTMLButtonElement).focus();
+  setImportProgress(r, { ...base, state: "stopped" });
+  expect(r.querySelectorAll("button").length).toBe(0);
+  expect(q(r, ".ip-status")?.tabIndex).toBe(-1);
+  expect(document.activeElement).toBe(q(r, ".ip-status"));
+  host.remove();
+});
+
+test("a swap of Pause for Continue while pending restores focus when pending clears", () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const r = make();
+  host.append(r);
+  (q(r, 'button[data-action="pause"]') as HTMLButtonElement).focus();
+  setImportProgress(r, {
+    ...base,
+    state: "paused",
+    reason: "Paused by you",
+    pending: true,
+  });
+  // The new button is disabled, so it cannot hold focus yet.
+  (document.activeElement as HTMLElement | null)?.blur();
+  setImportProgress(r, { ...base, state: "paused", reason: "Paused by you" });
+  expect(document.activeElement).toBe(q(r, 'button[data-action="continue"]'));
+  host.remove();
+});
+
+test("a stopped import never shows an earlier reason", () => {
+  const stopped =
+    "Stopped. The links that got no summary are saved as link only.";
+  const r = make({ state: "stopped", reason: "Paused by you" });
+  expect(q(r, ".ip-reason")?.textContent).toBe(stopped);
+  const r2 = make({ state: "stopped", reason: "" });
+  expect(q(r2, ".ip-reason")?.textContent).toBe(stopped);
+});

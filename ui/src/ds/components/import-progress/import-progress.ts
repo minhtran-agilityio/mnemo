@@ -47,6 +47,9 @@ const ACTION_LABEL: Readonly<Record<ActionKind, string>> = {
 export const STOPPED_REASON =
   "Stopped. The links that got no summary are saved as link only.";
 
+/** Where focus should return once a pending request clears (the buttons are disabled meanwhile). */
+const wantedFocus = new WeakMap<HTMLElement, "main" | "stop">();
+
 const handlers = new WeakMap<HTMLElement, ImportProgressOptions>();
 
 const num = (n: number) => n.toLocaleString("en-US");
@@ -79,6 +82,8 @@ export function createImportProgress(
   const status = doc.createElement("div");
   status.className = "ip-status";
   status.setAttribute("role", "status");
+  // Focus lands here when the buttons go (the import stopped or finished).
+  status.tabIndex = -1;
   const reason = doc.createElement("p");
   reason.className = "ip-reason";
   status.append(span(doc, "ip-state"), reason);
@@ -126,8 +131,9 @@ export function setImportProgress(
         ? Math.min(99, Math.floor(share))
         : Math.floor(share);
   setProgress(part(root, "ip-bar"), shown);
+  // A stopped import always says so, whatever reason an earlier state left behind.
   part(root, "ip-reason").textContent =
-    options.reason ?? (options.state === "stopped" ? STOPPED_REASON : "");
+    options.state === "stopped" ? STOPPED_REASON : (options.reason ?? "");
 
   const actions = part(root, "ip-actions");
   const ended = options.state === "finished" || options.state === "stopped";
@@ -136,10 +142,19 @@ export function setImportProgress(
   const buttons = () => [
     ...actions.querySelectorAll<HTMLButtonElement>("button"),
   ];
-  // Swapping Pause for Continue (or back) keeps the focus on the main action.
-  const mainHadFocus = buttons().some(
-    (b) => b.dataset.action !== "stop" && doc.activeElement === b,
-  );
+  // Focus must not fall to the page: Pause and Continue swap with the focus kept on the main
+  // action, and when the buttons all go (stopped, finished) it moves to the status region.
+  // While a request is pending the buttons are disabled and cannot hold focus, so the wish is
+  // kept and applied once pending clears.
+  const focused = buttons().find((b) => doc.activeElement === b);
+  const lost = !doc.activeElement || doc.activeElement === doc.body;
+  const focusKind: "main" | "stop" | undefined = focused
+    ? focused.dataset.action === "stop"
+      ? "stop"
+      : "main"
+    : lost
+      ? wantedFocus.get(root)
+      : undefined;
   for (const old of buttons()) {
     if (!wanted.includes(old.dataset.action as ActionKind)) old.remove();
   }
@@ -168,7 +183,21 @@ export function setImportProgress(
     const stop = actions.querySelector('button[data-action="stop"]');
     if (kind !== "stop" && stop) actions.insertBefore(button, stop);
     else actions.append(button);
-    if (kind !== "stop" && mainHadFocus && !options.pending) button.focus();
   }
   actions.hidden = wanted.length === 0;
+  if (!focusKind) {
+    wantedFocus.delete(root);
+  } else if (wanted.length === 0) {
+    wantedFocus.delete(root);
+    part(root, "ip-status").focus();
+  } else if (options.pending) {
+    wantedFocus.set(root, focusKind);
+  } else {
+    wantedFocus.delete(root);
+    actions
+      .querySelector<HTMLButtonElement>(
+        `button[data-action="${focusKind === "stop" ? "stop" : main}"]`,
+      )
+      ?.focus();
+  }
 }

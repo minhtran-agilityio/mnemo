@@ -91,7 +91,7 @@ export const FEEDBACK = [
     ],
     source: "ds",
     className: "import-progress",
-    notes: `Counts, the state in words, a one-line reason when it waits, a bar and buttons: Pause while running or waiting and Continue while paused are the main action (default button, not ghost), and a quiet ghost Stop here sits beside them (it ends the import; links without a summary stay link only). No buttons when finished or stopped. Updates in place. No empty, loading or error state: failed links are a count (${ref(207)}).`,
+    notes: `Counts, the state in words, a one-line reason when it waits, a bar and buttons: Pause while running or waiting and Continue while paused are the main action (default button, not ghost), and a quiet ghost Stop here sits beside them (it ends the import and cannot be undone; links without a summary stay link only, so the host must confirm with the owner before it acts on onStop). No buttons when finished or stopped. Updates in place. No empty, loading or error state: failed links are a count (${ref(207)}).`,
   },
   {
     name: "spinner",
