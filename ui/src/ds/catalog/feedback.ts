@@ -76,6 +76,15 @@ export const FEEDBACK = [
     notes: "Anything over a second shows progress. AI tasks always do.",
   },
   {
+    name: "step indicator",
+    tab: "Feedback",
+    variants: ["default"],
+    states: ["success", "overflow"],
+    source: "ds",
+    className: "steps",
+    notes: `The steps of a flow in order: done, current (aria-current="step") and to come. Number, label and a hidden state word, so colour is not the only signal. Not clickable: no hover, focus-visible, active or disabled. Empty, loading and AI off do not apply. No animation, so reduced motion needs nothing. On a narrow window the steps wrap onto new lines and a long label wraps inside its step, so nothing scrolls sideways (${ref(212)}).`,
+  },
+  {
     name: "spinner",
     tab: "Feedback",
     variants: ["small", "large", "with words"],

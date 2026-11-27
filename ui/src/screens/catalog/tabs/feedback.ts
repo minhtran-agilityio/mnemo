@@ -26,6 +26,7 @@ import {
   buildUsageMeter,
   buildUsageWindows,
   createIcon,
+  createStepIndicator,
   createToastRegion,
   type PillTint,
 } from "../../../ds/index";
@@ -227,6 +228,31 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
           grow: true,
         }),
       ],
+      "step indicator": () => {
+        const steps = ["Pick a file", "Check", "Import", "Done"];
+        const make = (current: number, list = steps) =>
+          createStepIndicator(doc, {
+            label: "Import steps",
+            steps: list,
+            current,
+          });
+        const narrow = el(doc, "div", "fb-steps-narrow");
+        narrow.append(
+          make(3, [
+            "Pick a bookmarks export file from your computer",
+            "Check the links before they are saved",
+            "Import",
+            "Done",
+          ]),
+        );
+        return [
+          state(doc, "step 1 current", make(1), { grow: true }),
+          state(doc, "step 2 current (1 done)", make(2), { grow: true }),
+          state(doc, "step 3 current (sample)", make(3), { grow: true }),
+          state(doc, "step 4 current (all done)", make(4), { grow: true }),
+          state(doc, "overflow: long labels wrap", narrow),
+        ];
+      },
       spinner: () => [
         state(doc, "small", buildSpinner()),
         state(doc, "large", buildSpinner("lg")),
