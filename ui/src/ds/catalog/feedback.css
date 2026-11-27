@@ -22,3 +22,7 @@
 .ui-catalog .fb-force-focus .toast-action {
   outline-color: var(--paper);
 }
+
+.ui-catalog .fb-steps-narrow {
+  width: var(--size-basis-column);
+}

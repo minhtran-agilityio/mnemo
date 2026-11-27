@@ -1,0 +1,76 @@
+/* Step indicator: number and label per step; done, current and to come differ by fill, weight
+   and hidden text, never by colour alone. Labels wrap, so a narrow window never scrolls. */
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.steps-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-md);
+  color: var(--muted);
+}
+
+.steps-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-icon-lg);
+  height: var(--size-icon-lg);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.steps-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.steps-done {
+  color: var(--ink2);
+}
+
+.steps-done .steps-mark {
+  border-color: var(--good);
+  background: var(--good-soft);
+  color: var(--ink);
+}
+
+.steps-current {
+  color: var(--ink);
+  font-weight: var(--weight-bold);
+}
+
+.steps-current .steps-mark {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.steps-todo .steps-mark {
+  border-style: dashed;
+  border-color: var(--muted);
+}
+
+.steps-state {
+  position: absolute;
+  width: var(--border-1);
+  height: var(--border-1);
+  margin: calc(-1 * var(--border-1));
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
