@@ -1,0 +1,80 @@
+/* Import summary: the file name, a labelled list of counts, a slot and two actions. */
+.import-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: var(--border-1) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  width: 100%;
+  max-width: var(--size-state-max);
+  min-width: 0;
+}
+
+.import-summary-file {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--ink);
+  overflow: hidden;
+  padding-block: var(--border-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-summary-counts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.import-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  font-size: var(--text-md);
+  color: var(--muted);
+}
+
+.import-summary-row dt,
+.import-summary-row dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.import-summary-row dd {
+  font-weight: var(--weight-semibold);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.import-summary-row-add dt {
+  color: var(--ink);
+}
+
+.import-summary-why,
+.import-summary-message {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--muted);
+}
+
+.import-summary-message {
+  padding: var(--space-3);
+  border: var(--border-1) solid var(--bad);
+  border-radius: var(--radius-md);
+  background: var(--bad-soft);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.import-summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}

@@ -14,6 +14,9 @@
 // (`folder`, labelled Guess when `folderIsGuess`). The rows show neither.
 // Issue 193: the folder line shows the app's reason for the folder (`folderReason`) under the
 // folder name, labelled Guess, only on a read (`done`) link.
+// Issue 205: open a link and per-item actions in all three views (`onOpen`, `actions`). With
+// `onOpen` the title is a real button (the main control: Tab, Enter and Space reach it), and a click
+// anywhere else on the row or card opens too, except on an action or another control.
 import { BookmarkCheck, Clock, Folder, Link, PowerOff } from "lucide";
 import { createIcon } from "../../icon";
 import { createListRow } from "../list-row/list-row";
@@ -115,6 +118,14 @@ export interface LinkCardOptions {
   readonly actions?: readonly Node[];
   /** One action: the same as `actions: [action]`. Shown only when `actions` is empty or left out. */
   readonly action?: Node;
+  /**
+   * Opens the link: called with the item on a click on the card or on Enter (or Space) on its
+   * title button. A click on an action button or a link inside the card does not open. Left out:
+   * the card is not openable.
+   */
+  readonly onOpen?: (item: LinkItem) => void;
+  /** Draws a state that cannot be live in a still view (the UI Catalog). */
+  readonly forceState?: "hover" | "focus" | "active";
 }
 
 /** The actions to show: a non-empty `actions`, else `action` alone, else none. */
@@ -130,10 +141,89 @@ function cardActions(options: LinkCardOptions): readonly Node[] {
 export interface LinkRowOptions {
   /** Draws a state that cannot be live in a still view (the UI Catalog). */
   readonly forceState?: "hover" | "focus" | "active";
+  /**
+   * Opens the link, as on the card (see `LinkCardOptions.onOpen`). The row keeps its place in the
+   * list; its title is the button. Left out: the row is focusable but not openable, as before.
+   */
+  readonly onOpen?: (item: LinkItem) => void;
+  /**
+   * The actions of the row, in order, in a trailing `.link-actions` slot (the screen picks the
+   * buttons and their variants, as for the card). The List row shows them always; the Compact row
+   * shows them on hover and on focus, over its end, so it stays one line. Left out or empty: no
+   * slot.
+   */
+  readonly actions?: readonly Node[];
 }
 
 /** Past this many tags the tag list shows one "+N" item. */
 const MAX_TAGS = 6;
+
+/** Controls inside an openable row or card that a click must not turn into "open". */
+const OWN_CONTROL = ".link-actions, .lcard-action, a, button:not(.link-open)";
+
+/**
+ * Makes a row or card openable: its title text becomes a button (the main control), and a click on
+ * the box opens too, unless it lands on an action or another control. One handler on the box, so a
+ * click on the title button opens once.
+ */
+function makeOpenable(
+  box: HTMLElement,
+  title: Element | null,
+  item: LinkItem,
+  onOpen: (item: LinkItem) => void,
+): void {
+  box.dataset.openable = "true";
+  if (title) {
+    const button = box.ownerDocument.createElement("button");
+    button.type = "button";
+    button.className = "link-open";
+    button.append(...title.childNodes);
+    title.append(button);
+  }
+  box.addEventListener("click", (event) => {
+    if (event.defaultPrevented) return;
+    const target = event.target as Element | null;
+    // Another control only counts when it is inside this box, not a wrapper around it.
+    const own = target?.closest(OWN_CONTROL);
+    if (own && box.contains(own)) return;
+    // A click from the title button (Enter, Space or the pointer on it) always opens. On the rest of
+    // the box, the owner selecting text is not a request to open.
+    if (!target?.closest(".link-open")) {
+      const selection = box.ownerDocument.defaultView?.getSelection();
+      if (
+        selection &&
+        !selection.isCollapsed &&
+        box.contains(selection.anchorNode)
+      )
+        return;
+    }
+    onOpen(item);
+  });
+}
+
+/**
+ * The trailing action slot of a row, or null when there is no action. The Compact row (`overlay`)
+ * holds the buttons in an inner box that is drawn over its end, so the slot takes no room in the
+ * one-line row.
+ */
+function actionSlot(
+  doc: Document,
+  actions: readonly Node[] | undefined,
+  overlay = false,
+): HTMLElement | null {
+  if (!actions || actions.length === 0) return null;
+  const slot = doc.createElement("span");
+  slot.className = "link-actions";
+  if (overlay) {
+    const box = doc.createElement("span");
+    box.className = "link-actions-box";
+    box.append(...actions);
+    slot.append(box);
+  } else {
+    slot.append(...actions);
+  }
+  return slot;
+}
 
 function textEl<K extends keyof HTMLElementTagNameMap>(
   doc: Document,
@@ -401,6 +491,7 @@ export function createLinkCard(
   const card = doc.createElement("article");
   card.className = "lcard";
   card.dataset.status = linkStatus(item);
+  if (options.forceState) card.classList.add(`is-${options.forceState}`);
   if (options.thumb) {
     const thumb = doc.createElement("div");
     thumb.className = "thumb";
@@ -449,6 +540,8 @@ export function createLinkCard(
     slot.append(...actions);
     card.append(slot);
   }
+  if (options.onOpen)
+    makeOpenable(card, card.querySelector(".title"), item, options.onOpen);
   return card;
 }
 
@@ -469,6 +562,8 @@ export function createLinkRow(
     title: item.title,
     sub: summary ?? noSummaryText(item),
     icon: Link,
+    // An openable row is reached by its title button, so the row itself is not a second tab stop.
+    focusable: !options.onOpen,
   });
   row.classList.add("link-row");
   if (options.forceState) row.classList.add(`is-${options.forceState}`);
@@ -493,6 +588,11 @@ export function createLinkRow(
   if (body) main.append(body);
   const meta = rowMetaLine(doc, item);
   if (meta) main.append(meta);
+  // The actions are the last item of .link-main, so it still fills the row.
+  const slot = actionSlot(doc, options.actions);
+  if (slot) main.append(slot);
+  if (options.onOpen)
+    makeOpenable(row, row.querySelector(".row-title"), item, options.onOpen);
   return row;
 }
 
@@ -516,7 +616,7 @@ export function createCompactRow(
   li.className = "compact-row";
   if (options.forceState) li.classList.add(`is-${options.forceState}`);
   li.dataset.status = linkStatus(item);
-  li.tabIndex = 0;
+  li.tabIndex = options.onOpen ? -1 : 0;
   const title = textEl(doc, "span", "row-title", item.title);
   title.title = item.title;
   li.append(title);
@@ -542,21 +642,40 @@ export function createCompactRow(
   }
   const when = item.saved || item.age;
   if (when) li.append(textEl(doc, "span", "row-meta", when));
+  const slot = actionSlot(doc, options.actions, true);
+  if (slot) li.append(slot);
+  if (options.onOpen)
+    makeOpenable(li, li.querySelector(".row-title"), item, options.onOpen);
   return li;
 }
 
 export type LinkView = "list" | "cards" | "compact";
+
+/** Options of a Bookmarks view: they apply to every row or card of it. */
+export interface LinkViewOptions {
+  /** Opens a link, from any of the three views. */
+  readonly onOpen?: (item: LinkItem) => void;
+  /** The actions of one item, in order (the main one first), for its row or card. */
+  readonly actions?: (item: LinkItem) => readonly Node[];
+}
 
 /** One of the three Bookmarks views of the same links. */
 export function createLinkView(
   doc: Document,
   view: LinkView,
   items: readonly LinkItem[],
+  options: LinkViewOptions = {},
 ): HTMLElement {
+  const per = (item: LinkItem) => ({
+    onOpen: options.onOpen,
+    actions: options.actions?.(item),
+  });
   if (view === "cards") {
     const grid = doc.createElement("div");
     grid.className = "views cards";
-    grid.append(...items.map((i) => createLinkCard(doc, i, { thumb: true })));
+    grid.append(
+      ...items.map((i) => createLinkCard(doc, i, { thumb: true, ...per(i) })),
+    );
     return grid;
   }
   const ul = doc.createElement("ul");
@@ -567,7 +686,9 @@ export function createLinkView(
   );
   ul.append(
     ...items.map((i) =>
-      view === "list" ? createLinkRow(doc, i) : createCompactRow(doc, i),
+      view === "list"
+        ? createLinkRow(doc, i, per(i))
+        : createCompactRow(doc, i, per(i)),
     ),
   );
   return ul;

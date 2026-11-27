@@ -93,7 +93,7 @@ export const FEEDBACK = [
   {
     name: "import-progress",
     tab: "Feedback",
-    variants: ["running", "waiting", "paused", "finished"],
+    variants: ["running", "waiting", "paused", "finished", "stopped"],
     states: [
       "default",
       "hover",
@@ -106,7 +106,7 @@ export const FEEDBACK = [
     ],
     source: "ds",
     className: "import-progress",
-    notes: `Counts, the state in words, a one-line reason when it waits, a bar and one text button: Pause while running or waiting, Continue while paused, none when finished. Updates in place. No empty, loading or error state: failed links are a count (${ref(207)}).`,
+    notes: `Counts, the state in words, a one-line reason when it waits, a bar and buttons: Pause while running or waiting and Continue while paused are the main action (default button, not ghost), and a quiet ghost Stop here sits beside them (it ends the import and cannot be undone; links without a summary stay link only, so the host must confirm with the owner before it acts on onStop). No buttons when finished or stopped. Updates in place. No empty, loading or error state: failed links are a count (${ref(207)}).`,
   },
   {
     name: "spinner",
@@ -180,6 +180,25 @@ export const FEEDBACK = [
     source: "ds",
     className: "state-box",
     notes: `Links still save and search still works, in every reason. At limit shows the reset time when known; paused is for work stopped by the owner or at the pause line (${ref(146)}). The action is optional.`,
+  },
+  {
+    name: "import summary",
+    tab: "Feedback",
+    variants: ["with counts", "with a checkbox slot"],
+    states: [
+      "default",
+      "loading",
+      "success",
+      "error",
+      "partial",
+      "hover",
+      "focus",
+      "active",
+      "long content",
+    ],
+    source: "ds",
+    className: "import-summary",
+    notes: `What a chosen file holds, before anything is stored (${ref(208)}). Partial is zero to add: Import is disabled (its disabled state) and a plain line says why. Cancel shows only when the screen gives it a handler. Error keeps Choose another file and Cancel; loading keeps only Cancel. Empty and AI off do not apply.`,
   },
   {
     name: "text",
