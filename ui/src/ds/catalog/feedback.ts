@@ -161,12 +161,11 @@ export const FEEDBACK = [
       "hover",
       "focus",
       "active",
-      "disabled",
       "long content",
     ],
     source: "ds",
     className: "import-summary",
-    notes: `What a chosen file holds, before anything is stored (${ref(208)}). Partial is zero to add: Import is disabled and a plain line says why. Error keeps Choose another file and Cancel; loading keeps only Cancel. Empty and AI off do not apply.`,
+    notes: `What a chosen file holds, before anything is stored (${ref(208)}). Partial is zero to add: Import is disabled (its disabled state) and a plain line says why. Cancel shows only when the screen gives it a handler. Error keeps Choose another file and Cancel; loading keeps only Cancel. Empty and AI off do not apply.`,
   },
   {
     name: "text",

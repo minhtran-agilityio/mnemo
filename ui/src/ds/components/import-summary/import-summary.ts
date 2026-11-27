@@ -35,6 +35,7 @@ export interface ImportSummaryOptions {
   readonly forced?: ButtonForcedState;
 }
 
+let uid = 0;
 const NUMBER = new Intl.NumberFormat("en-US");
 
 const ROWS: readonly (readonly [keyof ImportCounts, string])[] = [
@@ -56,31 +57,41 @@ export function createImportSummary(
   const state = options.state ?? "ready";
   const root = doc.createElement("section");
   root.className = `import-summary is-${state}`;
-  root.setAttribute("aria-label", `Import summary: ${options.fileName}`);
 
   const name = doc.createElement("p");
   name.className = "import-summary-file";
+  name.id = `import-summary-${++uid}`;
+  root.setAttribute("aria-labelledby", name.id);
   name.textContent = options.fileName;
   name.title = options.fileName;
   root.append(name);
 
   const actions = doc.createElement("div");
   actions.className = "import-summary-actions";
-  const cancel = createButton(doc, {
-    label: "Cancel",
-    variant: "ghost",
-    onClick: options.onCancel,
-  });
+  // The quiet action is drawn only when there is a handler for it.
+  const cancel = options.onCancel
+    ? createButton(doc, {
+        label: "Cancel",
+        variant: "ghost",
+        forced: state === "loading" ? options.forced : undefined,
+        onClick: options.onCancel,
+      })
+    : null;
+  const addCancel = () => {
+    if (cancel) actions.append(cancel);
+  };
 
   if (state === "loading") {
     root.setAttribute("aria-busy", "true");
-    actions.append(cancel);
-    root.append(buildBusyLine("Reading the file…"), actions);
+    addCancel();
+    root.append(buildBusyLine("Reading the file…"));
+    if (cancel) root.append(actions);
     return root;
   }
 
   const choose = createButton(doc, {
     label: "Choose another file",
+    forced: state === "error" ? options.forced : undefined,
     onClick: options.onChooseAnother,
   });
 
@@ -90,12 +101,14 @@ export function createImportSummary(
     line.setAttribute("role", "alert");
     line.textContent =
       options.error ?? "The file could not be read. Nothing was stored.";
-    actions.append(choose, cancel);
+    actions.append(choose);
+    addCancel();
     root.append(line, actions);
     return root;
   }
 
   const given = options.counts;
+  // No counts given is a different thing from all counts being 0: show no rows and no reason.
   const clean = (n: number | undefined): number =>
     typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
   const counts: ImportCounts = {
@@ -104,25 +117,27 @@ export function createImportSummary(
     saved: clean(given?.saved),
     notLinks: clean(given?.notLinks),
   };
-  const list = doc.createElement("dl");
-  list.className = "import-summary-counts";
-  for (const [key, label] of ROWS) {
-    const row = doc.createElement("div");
-    row.className =
-      key === "toAdd"
-        ? "import-summary-row import-summary-row-add"
-        : "import-summary-row";
-    const term = doc.createElement("dt");
-    term.textContent = label;
-    const value = doc.createElement("dd");
-    value.textContent = NUMBER.format(counts[key]);
-    row.append(term, value);
-    list.append(row);
+  if (given) {
+    const list = doc.createElement("dl");
+    list.className = "import-summary-counts";
+    for (const [key, label] of ROWS) {
+      const row = doc.createElement("div");
+      row.className =
+        key === "toAdd"
+          ? "import-summary-row import-summary-row-add"
+          : "import-summary-row";
+      const term = doc.createElement("dt");
+      term.textContent = label;
+      const value = doc.createElement("dd");
+      value.textContent = NUMBER.format(counts[key]);
+      row.append(term, value);
+      list.append(row);
+    }
+    root.append(list);
   }
-  root.append(list);
 
   const none = counts.toAdd === 0;
-  if (none) {
+  if (given && none) {
     const why = doc.createElement("p");
     why.className = "import-summary-why";
     const empty = counts.repeats + counts.saved + counts.notLinks === 0;
@@ -139,15 +154,15 @@ export function createImportSummary(
   }
   actions.append(
     createButton(doc, {
-      label: importLabel(counts.toAdd),
+      label: given ? importLabel(counts.toAdd) : "Import",
       variant: "primary",
       disabled: none,
       forced: options.forced,
       onClick: options.onImport,
     }),
     choose,
-    cancel,
   );
+  addCancel();
   root.append(actions);
   return root;
 }

@@ -462,7 +462,7 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
             state: "error",
             error: "The file could not be read. Nothing was stored.",
           }),
-          sum("partial, disabled: zero to add", {
+          sum("partial: zero to add (Import disabled)", {
             counts: { toAdd: 0, repeats: 12, saved: 0, notLinks: 0 },
           }),
           sum("hover", { forced: "hover" }),

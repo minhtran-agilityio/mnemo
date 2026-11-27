@@ -14,6 +14,7 @@ test("success lists the counts with labels and two actions", () => {
     counts: COUNTS,
     onImport,
     onChooseAnother,
+    onCancel: () => {},
   });
   expect(node.querySelector(".import-summary-file")?.textContent).toBe(
     "bookmarks.html",
@@ -72,16 +73,18 @@ test("loading shows a status line and only Cancel", () => {
   const node = createImportSummary(document, {
     fileName: "a.html",
     state: "loading",
+    onCancel: () => {},
   });
   expect(node.getAttribute("aria-busy")).toBe("true");
   expect(node.querySelector("[role=status]")?.textContent).toContain("Reading");
   expect(buttons(node).map((b) => b.textContent)).toEqual(["Cancel"]);
 });
 
-test("error is an alert with only Choose another file", () => {
+test("error is an alert with Choose another file and Cancel", () => {
   const node = createImportSummary(document, {
     fileName: "a.html",
     state: "error",
+    onCancel: () => {},
   });
   expect(node.querySelector("[role=alert]")?.textContent).toContain(
     "Nothing was stored",
@@ -113,7 +116,9 @@ test("the region has an accessible name from the file", () => {
     fileName: "a.html",
     counts: COUNTS,
   });
-  expect(node.getAttribute("aria-label")).toBe("Import summary: a.html");
+  const id = node.getAttribute("aria-labelledby") ?? "";
+  expect(id).not.toBe("");
+  expect(node.querySelector(`[id="${id}"]`)?.textContent).toBe("a.html");
 });
 
 test("a long file name is kept whole in the title and set as text", () => {
@@ -188,4 +193,61 @@ test("Cancel is a quiet third action that calls onCancel, also when Import is di
   expect(all[2]?.disabled).toBe(false);
   all[2]?.click();
   expect(onCancel).toHaveBeenCalledOnce();
+});
+
+test("Cancel is drawn only when there is a handler", () => {
+  const loading = createImportSummary(document, {
+    fileName: "a.html",
+    state: "loading",
+  });
+  expect(loading.querySelector("button")).toBeNull();
+  expect(loading.querySelector("[role=status]")).not.toBeNull();
+  const ready = createImportSummary(document, {
+    fileName: "a.html",
+    counts: COUNTS,
+  });
+  expect(buttons(ready).map((b) => b.textContent)).toEqual([
+    "Import 50 links",
+    "Choose another file",
+  ]);
+});
+
+test("no counts given shows no rows and no reason, unlike all counts at 0", () => {
+  const none = createImportSummary(document, { fileName: "a.html" });
+  expect(none.querySelector("dl")).toBeNull();
+  expect(none.querySelector(".import-summary-why")).toBeNull();
+  expect(buttons(none)[0]?.disabled).toBe(true);
+  const zero = createImportSummary(document, {
+    fileName: "a.html",
+    counts: { toAdd: 0, repeats: 0, saved: 0, notLinks: 0 },
+  });
+  expect(zero.querySelector(".import-summary-why")?.textContent).toBe(
+    "The file has no entries.",
+  );
+});
+
+test("a forced state reaches the first button of each state", () => {
+  const loading = createImportSummary(document, {
+    fileName: "a.html",
+    state: "loading",
+    onCancel: () => {},
+    forced: "focus",
+  });
+  expect(buttons(loading)[0]?.className).toContain("is-focus");
+  const error = createImportSummary(document, {
+    fileName: "a.html",
+    state: "error",
+    onCancel: () => {},
+    forced: "hover",
+  });
+  expect(buttons(error)[0]?.className).toContain("is-hover");
+  expect(buttons(error)[1]?.className).not.toContain("is-hover");
+});
+
+test("two summaries get different name ids", () => {
+  const a = createImportSummary(document, { fileName: "a" });
+  const b = createImportSummary(document, { fileName: "b" });
+  expect(a.getAttribute("aria-labelledby")).not.toBe(
+    b.getAttribute("aria-labelledby"),
+  );
 });
