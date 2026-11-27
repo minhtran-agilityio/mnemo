@@ -617,7 +617,7 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
 /// `page_text_until` with the whole read time as its deadline. Tests use it; the reader calls
 /// `page_text_until` with the deadline of the read.
 #[cfg(test)]
-fn page_text(
+pub(super) fn page_text(
     body: &[u8],
     content_type: &str,
     limits: &FetchLimits,
