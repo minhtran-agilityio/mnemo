@@ -1011,4 +1011,44 @@ mod tests {
         // Used up now.
         assert!(s.undo_last_at(T3).is_err());
     }
+
+    #[test]
+    fn folder_count_equals_the_live_bookmarks_in_the_folder_after_every_step() {
+        let (mut s, _d) = open_temp();
+        let dev = s.create_folder_at(T1, "Dev tools").unwrap();
+        let work = s.create_folder_at(T1, "Work").unwrap();
+        let ids: Vec<String> = (0..4)
+            .map(|i| saved(&mut s, &format!("https://{i}.example/")).base.id)
+            .collect();
+        // The count of each folder, and the live bookmarks that name it.
+        let check = |s: &Storage, expected: [u32; 3]| {
+            let counts: Vec<u32> = s.list_folders().unwrap().iter().map(|f| f.count).collect();
+            assert_eq!(counts, expected.to_vec(), "Dev tools, Work, Unsorted");
+            let live: i64 = s
+                .conn
+                .query_row(
+                    "SELECT count(*) FROM bookmark WHERE deleted_at IS NULL",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(i64::from(expected.iter().sum::<u32>()), live);
+        };
+        check(&s, [0, 0, 4]);
+        s.move_bookmark_at(T2, &ids[0], &dev.id).unwrap();
+        s.move_bookmark_at(T2, &ids[1], &dev.id).unwrap();
+        s.move_bookmark_at(T2, &ids[2], &work.id).unwrap();
+        check(&s, [2, 1, 1]);
+        s.delete_saved_bookmark_at(T2, &ids[3]).unwrap();
+        check(&s, [2, 1, 0]);
+        s.undo_last_at(T3).unwrap();
+        check(&s, [2, 1, 1]);
+        s.move_bookmark_at(T3, &ids[0], &work.id).unwrap();
+        check(&s, [1, 2, 1]);
+        s.undo_last_at(T3).unwrap();
+        check(&s, [2, 1, 1]);
+        s.delete_folder_at(T3, &dev.id).unwrap();
+        let counts: Vec<u32> = s.list_folders().unwrap().iter().map(|f| f.count).collect();
+        assert_eq!(counts, vec![1, 3], "Work, Unsorted");
+    }
 }

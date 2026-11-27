@@ -935,3 +935,139 @@ test("a bookmark-changed event never wipes the folder name the owner is typing",
   expect(box.querySelector(".tedit")).toBeNull();
   expect(treeNode(box, "Unsorted").textContent).toContain("5");
 });
+
+// ---- a folder count equals the bookmarks in that folder (#26, for #27) ----
+
+/** A core stand-in that keeps the data: counts come from the live bookmarks, as the real core's do. */
+function statefulCore(cards: SavedBookmark[], folderList: Folder[]) {
+  const all = cards.map((c) => ({ ...c }));
+  let folderRows = folderList.map((f) => ({ ...f }));
+  let last: (() => SavedBookmark) | null = null;
+  const unsorted = () => folderRows.find((f) => f.isDefault) as Folder;
+  const nameOf = (id: string) =>
+    folderRows.find((f) => f.id === id)?.name ?? "Unsorted";
+  const core: Partial<BookmarksDeps> = {
+    listBookmarkCards: vi.fn(async () =>
+      page(all.filter((b) => !b.deletedAt).map((b) => ({ ...b }))),
+    ),
+    listFolders: vi.fn(async () =>
+      folderRows.map((f) => ({
+        ...f,
+        count: all.filter((b) => !b.deletedAt && b.folderId === f.id).length,
+      })),
+    ),
+    moveBookmark: vi.fn(async (id: string, folderId: string) => {
+      const b = all.find((x) => x.id === id) as SavedBookmark;
+      const old = { folderId: b.folderId, folder: b.folder };
+      Object.assign(b, { folderId, folder: nameOf(folderId) });
+      last = () => Object.assign(b, old) && { ...b };
+      return { ...b };
+    }),
+    deleteSavedBookmark: vi.fn(async (id: string) => {
+      const b = all.find((x) => x.id === id) as SavedBookmark;
+      b.deletedAt = "2026-11-27T10:00:00Z";
+      last = () => {
+        b.deletedAt = null;
+        return { ...b };
+      };
+    }),
+    undoLast: vi.fn(async () => (last as () => SavedBookmark)()),
+    deleteFolder: vi.fn(async (id: string) => {
+      const moved = all.filter((b) => !b.deletedAt && b.folderId === id);
+      for (const b of all.filter((x) => x.folderId === id))
+        Object.assign(b, { folderId: unsorted().id, folder: "Unsorted" });
+      folderRows = folderRows.filter((f) => f.id !== id);
+      return moved.length;
+    }),
+  };
+  return core;
+}
+
+/** The tree's counts by folder name, and the number of cards that say "Filed in <name>". */
+function shownCounts(box: HTMLElement) {
+  const tree = new Map(
+    [...box.querySelectorAll(".trow")].map((row) => [
+      row.querySelector(".tname")?.textContent ?? "",
+      Number(row.querySelector(".cnt")?.textContent ?? "0"),
+    ]),
+  );
+  const cards = new Map<string, number>();
+  for (const line of box.querySelectorAll(".lcard-folder")) {
+    const name = line
+      .querySelector(".lcard-folder-where")
+      ?.textContent?.replace(/^Filed in\s*/, "")
+      .trim() as string;
+    cards.set(name, (cards.get(name) ?? 0) + 1);
+  }
+  return { tree, cards };
+}
+
+function expectCountsMatchCards(box: HTMLElement): void {
+  const { tree, cards } = shownCounts(box);
+  for (const [name, count] of tree)
+    expect(count, `count of ${name}`).toBe(cards.get(name) ?? 0);
+}
+
+test("a folder count equals the cards in that folder after a load, a move, a delete, an Undo and a folder delete", async () => {
+  const folders = [DEV, WORK, UNSORTED];
+  const core = statefulCore(
+    [
+      bm({ id: "a", folderId: DEV.id, folder: "Dev tools" }),
+      bm({ id: "b", folderId: DEV.id, folder: "Dev tools" }),
+      bm({ id: "c", folderId: WORK.id, folder: "Work" }),
+      bm({ id: "d" }),
+      bm({ id: "e" }),
+    ],
+    folders,
+  );
+  const { d } = deps(core);
+  const { box } = mount(d);
+  await flush();
+  expect(shownCounts(box).tree.get("Dev tools")).toBe(2);
+  expect(shownCounts(box).tree.get("Unsorted")).toBe(2);
+  expectCountsMatchCards(box);
+
+  // Delete a card in Unsorted: its count goes down; Undo brings it back.
+  const deleteFirstIn = async (name: string) => {
+    const card = [...box.querySelectorAll("article")].find((a) =>
+      a.querySelector(".lcard-folder-where")?.textContent?.includes(name),
+    ) as HTMLElement;
+    button(card, "Delete")?.click();
+    await flush();
+  };
+  await deleteFirstIn("Unsorted");
+  expect(shownCounts(box).tree.get("Unsorted")).toBe(1);
+  expectCountsMatchCards(box);
+  toastAction()?.click();
+  await flush();
+  expect(shownCounts(box).tree.get("Unsorted")).toBe(2);
+  expectCountsMatchCards(box);
+
+  // Move a card from Dev tools to Work, then Undo.
+  const devCard = [...box.querySelectorAll("article")].find((a) =>
+    a.querySelector(".lcard-folder-where")?.textContent?.includes("Dev tools"),
+  ) as HTMLElement;
+  button(devCard, "Move to folder")?.click();
+  menuItem(devCard, "Work").click();
+  await flush();
+  expect(shownCounts(box).tree.get("Dev tools")).toBe(1);
+  expect(shownCounts(box).tree.get("Work")).toBe(2);
+  expectCountsMatchCards(box);
+  toastAction()?.click();
+  await flush();
+  expect(shownCounts(box).tree.get("Dev tools")).toBe(2);
+  expectCountsMatchCards(box);
+
+  // Delete the Dev tools folder: its two cards go to Unsorted and the counts follow.
+  const row = treeNode(box, "Dev tools").closest(".trow") as HTMLElement;
+  (row.querySelector(".tmore") as HTMLButtonElement).click();
+  menuItem(row, "Delete").click();
+  button(
+    document.querySelector("dialog") as HTMLElement,
+    "Delete folder",
+  )?.click();
+  await flush();
+  expect(shownCounts(box).tree.has("Dev tools")).toBe(false);
+  expect(shownCounts(box).tree.get("Unsorted")).toBe(4);
+  expectCountsMatchCards(box);
+});
