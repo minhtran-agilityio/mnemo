@@ -1,0 +1,40 @@
+Delete on a card asks for no confirm; the card leaves and a toast offers Undo, which brings it back in date order
+Move to folder lists the other folders; a move updates the card and offers Undo, and Undo puts it back
+Paste the text opens a dialog and Make summary sends the text for that bookmark
+Save link lines up with the Link box with an error under the box
+Save link lines up with the Link box with the hint
+Save sends the link, clears the box at once, and the card follows the events
+Summarize later asks again without pasted text and an AI error shows as a toast
+Summarize later on a not-reached card asks again without pasted text
+Unsorted refuses rename and delete in its menu, with the reason
+a bookmark deleted while it was read leaves the list quietly
+a bookmark-changed event never wipes the folder name the owner is typing
+a confirmed folder delete moves its cards to Unsorted at once, and no card is lost
+a done link shows its summary, tags and reason as a guess
+a failed Undo says why
+a folder count equals the cards in that folder after a load, a move, a delete, an Undo and a folder delete
+a folder delete asks first and says how many bookmarks move to Unsorted; Keep does nothing
+a folder read that fails says so, and the cards still show
+a link saved again before the list has loaded stays on top with its note after the list loads
+a link that is not done never shows a summary, tags or reason, and has a title
+a link whose page could not be reached offers both actions, and pasted text makes its summary
+a load failure says so, and leaving stops the event listener
+a not-reached link loaded from the list offers both actions, with no toast
+a page that could not be reached offers both Summarize later and Paste the text
+a refused folder create says why in a toast and keeps the tree as the core has it
+a refused move says so and leaves the card where it was
+a second step replaces the toast of the first, so Undo never takes back a step it does not show
+an empty box or a refused link shows the reason on the field and keeps the text
+another failure shows a banner and no card
+each status has its actions
+moveToTop puts a link saved again first and leaves no second row for it
+only one move, delete or Undo runs at a time, so a toast always names the step the core holds
+restore puts a deleted link back by its date, and replaces one that is there
+savedDate gives day, month and year in UTC
+saving a link that is already saved shows its old card on top with the note and adds no card
+the card shows its folder, with the guess label and the app's reason, as the core sent them
+the folder tree lists the folders with their counts, Unsorted last
+the owner creates a folder from the tree; the screen asks the core and reads the folders again
+the screen has a labelled link box, a Save link button, and an empty state
+toLinkItem marks the card Already saved only when asked
+upsert replaces in place and puts a new link first

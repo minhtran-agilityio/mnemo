@@ -82,6 +82,9 @@ function deps(over: Partial<BookmarksDeps> = {}) {
     ),
     deleteSavedBookmark: vi.fn(async () => {}),
     undoLast: vi.fn(async () => bm()),
+    getSetting: vi.fn(async () => null),
+    setSetting: vi.fn(async () => {}),
+    openLink: vi.fn(async () => {}),
     ...over,
   };
   return { d, emit: (b: SavedBookmark) => emit(b), stop };
@@ -175,11 +178,11 @@ test("the screen has a labelled link box, a Save link button, and an empty state
   const { d } = deps();
   const { box } = mount(d);
   await flush();
-  const input = box.querySelector("input");
+  const input = box.querySelector<HTMLInputElement>("form input");
   expect(input?.labels?.[0]?.textContent).toBe("Link");
   expect(button(box, "Save link")).toBeDefined();
   expect(box.textContent).toContain("No saved links yet");
-  expect(d.listBookmarkCards).toHaveBeenCalledWith({ limit: 100 });
+  expect(d.listBookmarkCards).toHaveBeenCalledWith({ limit: 100, after: null });
 });
 
 test("Save sends the link, clears the box at once, and the card follows the events", async () => {
@@ -195,7 +198,7 @@ test("Save sends the link, clears the box at once, and the card follows the even
   });
   const { box } = mount(d);
   await flush();
-  const input = box.querySelector("input") as HTMLInputElement;
+  const input = box.querySelector("form input") as HTMLInputElement;
   input.value = " https://v2.tauri.app/security/ ";
   box.querySelector("form")?.dispatchEvent(new Event("submit"));
   expect(d.saveLink).toHaveBeenCalledWith("https://v2.tauri.app/security/");
@@ -222,7 +225,7 @@ test("an empty box or a refused link shows the reason on the field and keeps the
   });
   const { box } = mount(d);
   await flush();
-  const input = box.querySelector("input") as HTMLInputElement;
+  const input = box.querySelector("form input") as HTMLInputElement;
   box.querySelector("form")?.dispatchEvent(new Event("submit"));
   expect(input.getAttribute("aria-invalid")).toBe("true");
   expect(d.saveLink).not.toHaveBeenCalled();
@@ -243,7 +246,8 @@ test("another failure shows a banner and no card", async () => {
   });
   const { box } = mount(d);
   await flush();
-  (box.querySelector("input") as HTMLInputElement).value = "https://a.example";
+  (box.querySelector("form input") as HTMLInputElement).value =
+    "https://a.example";
   box.querySelector("form")?.dispatchEvent(new Event("submit"));
   await flush();
   expect(box.querySelector('[role="alert"]')?.textContent).toContain(
@@ -333,7 +337,8 @@ test("a link whose page could not be reached offers both actions, and pasted tex
   });
   const { box } = mount(d);
   await flush();
-  (box.querySelector("input") as HTMLInputElement).value = "https://a.example";
+  (box.querySelector("form input") as HTMLInputElement).value =
+    "https://a.example";
   box.querySelector("form")?.dispatchEvent(new Event("submit"));
   await flush();
   const card = box.querySelector("article") as HTMLElement;
@@ -422,7 +427,8 @@ test("a bookmark deleted while it was read leaves the list quietly", async () =>
   await flush();
   emit(bm({ id: "g1", summaryStatus: "reading", summary: null }));
   expect(box.querySelectorAll("article")).toHaveLength(1);
-  (box.querySelector("input") as HTMLInputElement).value = "https://g.example";
+  (box.querySelector("form input") as HTMLInputElement).value =
+    "https://g.example";
   box.querySelector("form")?.dispatchEvent(new Event("submit"));
   await flush();
   expect(box.querySelectorAll("article")).toHaveLength(0);
@@ -483,7 +489,8 @@ test("saving a link that is already saved shows its old card on top with the not
   const { box } = mount(d);
   await flush();
   expect(box.textContent).not.toContain("Already saved");
-  (box.querySelector("input") as HTMLInputElement).value = "https://a.example/";
+  (box.querySelector("form input") as HTMLInputElement).value =
+    "https://a.example/";
   box.querySelector("form")?.dispatchEvent(new Event("submit"));
   await flush();
   const cards = [...box.querySelectorAll("article")];
@@ -497,7 +504,8 @@ test("saving a link that is already saved shows its old card on top with the not
   expect(status?.textContent).toContain("This link was already saved.");
   // The next save clears the note.
   d.saveLink = vi.fn(async (url: string) => res({ id: "n2", url }));
-  (box.querySelector("input") as HTMLInputElement).value = "https://c.example/";
+  (box.querySelector("form input") as HTMLInputElement).value =
+    "https://c.example/";
   box.querySelector("form")?.dispatchEvent(new Event("submit"));
   await flush();
   expect(box.textContent).not.toContain("Already saved");
@@ -527,7 +535,8 @@ test("a link saved again before the list has loaded stays on top with its note a
     saveLink: vi.fn(async () => res({ ...older, alreadySaved: true })),
   });
   const { box } = mount(d);
-  (box.querySelector("input") as HTMLInputElement).value = "https://a.example/";
+  (box.querySelector("form input") as HTMLInputElement).value =
+    "https://a.example/";
   box.querySelector("form")?.dispatchEvent(new Event("submit"));
   await flush();
   // The duplicate answered first; the list resolves after it.

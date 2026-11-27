@@ -57,6 +57,7 @@ import {
   moveLabel,
   onBookmarkChanged,
   openDataFolder,
+  openLink,
   pickFolder,
   ping,
   renameFolder,
@@ -324,6 +325,9 @@ async function start(): Promise<void> {
         moveBookmark,
         deleteSavedBookmark,
         undoLast,
+        getSetting,
+        setSetting,
+        openLink,
       });
     } else if (isRoadmapItem(item)) {
       renderEmptyState(screen, { item, query: route.query });

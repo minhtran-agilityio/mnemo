@@ -1,5 +1,14 @@
-// The Bookmarks screen of #25 (BM-01): a link box and the cards of the saved links. This is the
-// minimal route; #27 replaces it with the full Bookmarks page.
+// The Bookmarks page (#25 BM-01, #26 BM-02, #27 BM-03): a link box, a folder list with counts, the
+// saved links in three views (List, Cards, Compact; the chosen one is kept after a restart), a search
+// box, a bar for the links that have no summary, and a dialog with the full card of a link.
+//
+// #27: "All bookmarks" shows one section per folder (Unsorted last) with its count, its 4 newest
+// links and "Show all N". A folder, or "Needs a look", shows all its links. The page loads every
+// bookmark through the paged `list_bookmark_cards` and filters in the screen: search is on the
+// title, summary and tags, within the folder or filter chosen; folder counts stay the full counts
+// from the core. Every row is drawn (no virtual scrolling). A click, or Enter on a row or card,
+// opens the link card in a dialog whose "Open in browser" asks the core (`open_link`) to open the
+// stored link; the UI has no opener permission.
 //
 // Save stores the link at once in the core; the card then follows the core's bookmark-changed
 // events (reading, then done, link only or no summary yet). A link the core could not read
@@ -11,25 +20,33 @@
 // comes from ui/src/ds; bookmarks.css lays them out. All text goes in as text.
 import {
   buildBanner,
+  buildBusyLine,
   buildEmptyState,
   createButton,
   createConfirmDialog,
   createDialog,
   createDialogButton,
   createField,
+  createFolderHeading,
   createLinkCard,
+  createLinkView,
   createMenu,
   createPageHeader,
+  createSearch,
+  createSegmented,
   createTextarea,
   createTextInput,
   createToastRegion,
   createTree,
+  type LinkItem,
+  type LinkView,
   setFieldError,
   type TreeActionEvent,
   type TreeNode,
 } from "../../ds";
 import { findItem } from "../../frame/nav";
 import {
+  type Cursor,
   errorMessage,
   type Folder,
   isAppError,
@@ -42,18 +59,30 @@ import {
   actionsFor,
   bookmarkCount,
   type CardAction,
+  groupByFolder,
+  matchesSearch,
   moveToTop,
+  needsLook,
+  needsLookLine,
+  newestFirst,
+  parseView,
   restore,
+  SECTION_FIRST,
   toLinkItem,
   UNSORTED_REFUSED,
   upsert,
+  VIEW_LABELS,
+  VIEW_SETTING,
 } from "./bookmarks-logic";
 
 /** The calls the screen makes; main.ts passes the typed client from shared/api. */
 export interface BookmarksDeps {
   saveLink(url: string): Promise<SaveResult>;
   summarizeBookmark(id: string, pastedText?: string): Promise<SaveResult>;
-  listBookmarkCards(args: { limit: number }): Promise<Page<SavedBookmark>>;
+  listBookmarkCards(args: {
+    limit: number;
+    after?: Cursor | null;
+  }): Promise<Page<SavedBookmark>>;
   onBookmarkChanged(
     handler: (bookmark: SavedBookmark) => void,
   ): Promise<() => void>;
@@ -66,10 +95,28 @@ export interface BookmarksDeps {
   deleteSavedBookmark(id: string): Promise<void>;
   /** Takes back the last move or delete (the core keeps one step). */
   undoLast(): Promise<SavedBookmark>;
+  /** A saved setting (null when never saved); the page reads `bookmarks.view`. */
+  getSetting(key: string): Promise<string | null>;
+  setSetting(key: string, value: string): Promise<void>;
+  /** Opens the stored link of the bookmark in the system browser (the core checks it). */
+  openLink(id: string): Promise<void>;
 }
 
-/** How many saved links the screen reads (one page). #27 adds paging. */
+/** How many saved links one call reads. The page asks again until the core has no more (#27). */
 export const BOOKMARKS_PAGE = 100;
+
+/** What the page shows: every folder in sections, one folder, or the links with no summary. */
+type Selection =
+  | { kind: "all" }
+  | { kind: "folder"; id: string }
+  | { kind: "needs" };
+
+/** How long the search box waits after a key, so a long list is not drawn for every letter. */
+const SEARCH_DELAY_MS = 120;
+
+/** The line under the title until the folders are read. */
+const HEADER_CONTEXT =
+  "Paste a link and save it. Mnemo stores it at once, reads the page, and adds a summary, tags and a reason. AI text is labelled.";
 
 /** What the status region says when the owner saves a link that is already saved (#28). */
 const ALREADY_SAVED_ANNOUNCEMENT =
@@ -109,16 +156,44 @@ export function renderBookmarks(
   let cardMenus = new AbortController();
   /** Ends the folder tree's listeners when the screen is left. */
   const stop = new AbortController();
+  /** What the page shows now (the sidebar picks it). */
+  let selection: Selection = { kind: "all" };
+  /** The words in the search box, as typed. */
+  let query = "";
+  /** The chosen view, once the saved one is read (nothing is drawn before). */
+  let view: LinkView = "cards";
+  let viewReady = false;
+  /** True once every page of bookmarks is loaded: only then is the needs-a-look count whole. */
+  let loaded = false;
+  /** True when a page failed to load: the busy line stops, and the problem banner explains. */
+  let loadFailed = false;
+  /** The bookmark behind each link item drawn, so an open or an action finds its bookmark. */
+  const byItem = new Map<LinkItem, SavedBookmark>();
+  /** The sidebar as last drawn; it is built again only when this changes. */
+  let sideKey = "";
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
   const toasts = createToastRegion();
   const phase = findItem("bookmarks")?.phase;
+  // The search box: on the title, summary and tags of the links of the folder or filter shown.
+  const search = createSearch(doc, { placeholder: "Search your bookmarks" });
+  search.input.setAttribute("aria-label", "Search your bookmarks");
+  search.input.autocomplete = "off";
+  search.input.spellcheck = false;
+  search.input.addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      query = search.input.value;
+      draw();
+    }, SEARCH_DELAY_MS);
+  });
   const header = createPageHeader({
     doc,
     title: "Bookmarks",
     crumb: phase === undefined ? undefined : `Phase ${phase}`,
-    context:
-      "Paste a link and save it. Mnemo stores it at once, reads the page, and adds a summary, tags and a reason. AI text is labelled.",
+    context: HEADER_CONTEXT,
   });
+  const context = header.querySelector(".context");
 
   // The link box: a labelled field and the Save link button, in a form so Enter saves too.
   const input = createTextInput(doc, { type: "url" });
@@ -143,18 +218,31 @@ export function renderBookmarks(
 
   const notice = doc.createElement("div");
   notice.className = "bookmarks-notice";
+  // The needs-a-look bar: links with no summary, and "Show them".
+  const bar = doc.createElement("div");
+  bar.className = "bookmarks-bar";
   const list = doc.createElement("div");
   list.className = "bookmarks-list";
   list.setAttribute("aria-label", "Saved links");
   list.setAttribute("role", "region");
+  // The view control (built when the saved view is read) and the search box, above the links. The
+  // search box comes after the link box in the page, so the link box stays the first field.
+  const viewSlot = doc.createElement("div");
+  viewSlot.className = "bookmarks-view";
+  const tools = doc.createElement("div");
+  tools.className = "bookmarks-tools";
+  tools.append(viewSlot, search.wrap);
   const side = doc.createElement("div");
   side.className = "bookmarks-folders";
   side.setAttribute("aria-label", "Folders");
   side.setAttribute("role", "region");
+  const main = doc.createElement("div");
+  main.className = "bookmarks-main";
+  main.append(tools, list);
   const body = doc.createElement("div");
   body.className = "bookmarks-body";
-  body.append(side, list);
-  container.replaceChildren(header, form, notice, body, toasts.element);
+  body.append(side, main);
+  container.replaceChildren(header, form, notice, bar, body, toasts.element);
 
   function showProblem(message: string | null): void {
     notice.replaceChildren(
@@ -278,19 +366,84 @@ export function renderBookmarks(
       label: f.name,
       kind: "folder",
       count: f.count,
+      current: selection.kind === "folder" && selection.id === f.id,
       ...(f.isDefault ? { refused: UNSORTED_REFUSED } : {}),
     }));
   }
 
-  /** Draws the folder tree. A name field that is open is not closed by a redraw of equal data. */
+  /** The links with no summary among the bookmarks loaded (live ones only). */
+  function needsCount(): number {
+    return items.filter(needsLook).length;
+  }
+
+  /** "All bookmarks" and, when some link has no summary, "Needs a look": the two views of the list. */
+  function viewNodes(): TreeNode[] {
+    const total = folders.reduce((sum, f) => sum + f.count, 0);
+    const nodes: TreeNode[] = [
+      {
+        id: "all",
+        label: "All bookmarks",
+        kind: "folder",
+        count: total,
+        current: selection.kind === "all",
+      },
+    ];
+    // The count is whole only when every page is loaded; before that no row claims a number.
+    const needs = needsCount();
+    if (loaded && needs > 0)
+      nodes.push({
+        id: "needs",
+        label: "Needs a look",
+        kind: "folder",
+        count: needs,
+        current: selection.kind === "needs",
+      });
+    return nodes;
+  }
+
+  /** The owner picked a row of the sidebar: show it, and draw the sidebar and the list again. */
+  function select(next: Selection): void {
+    selection = next;
+    draw();
+    // The tree that was clicked is built again; keep keyboard focus on the chosen row.
+    side
+      .querySelector<HTMLElement>('.tnode[aria-current="true"]')
+      ?.focus({ preventScroll: true });
+  }
+
+  /**
+   * Draws the sidebar: the two views, then the folder tree. Built again only when its data
+   * changed, and never while a name field is open (it catches up when the field closes).
+   */
   function drawFolders(): void {
+    const nodes = [...viewNodes(), ...folderNodes()];
+    const key = JSON.stringify(nodes);
+    if (key === sideKey && !treeStale) return;
+    if (nameFieldOpen()) {
+      treeStale = true;
+      return;
+    }
+    treeStale = false;
+    sideKey = key;
     side.replaceChildren(
-      createTree(doc, "Folders", folderNodes(), undefined, {
-        noun: "folder",
-        flat: true,
-        onAction: folderAction,
-        signal: stop.signal,
-      }),
+      createTree(doc, "Views", viewNodes(), (label) =>
+        select(label === "Needs a look" ? { kind: "needs" } : { kind: "all" }),
+      ),
+      createTree(
+        doc,
+        "Folders",
+        folderNodes(),
+        (label) => {
+          const f = folders.find((x) => x.name === label);
+          if (f) select({ kind: "folder", id: f.id });
+        },
+        {
+          noun: "folder",
+          flat: true,
+          onAction: folderAction,
+          signal: stop.signal,
+        },
+      ),
     );
   }
 
@@ -323,15 +476,12 @@ export function renderBookmarks(
         ? { ...b, folder: name }
         : b;
     });
-    // A name field that is open is never replaced: the tree is redrawn when it closes.
-    if (!same || treeStale) {
-      if (nameFieldOpen()) treeStale = true;
-      else {
-        treeStale = false;
-        drawFolders();
-      }
-    }
-    if (items.some((b, i) => b !== before[i]) || !same) draw();
+    // A folder that is gone (deleted, here or elsewhere) cannot stay chosen.
+    const chosen = selection;
+    if (chosen.kind === "folder" && !next.some((f) => f.id === chosen.id))
+      selection = { kind: "all" };
+    // A name field that is open is never replaced: `drawFolders` waits until it closes.
+    if (items.some((b, i) => b !== before[i]) || !same || treeStale) draw();
   }
 
   // When the name field closes after a refresh was held back, the tree catches up.
@@ -500,6 +650,9 @@ export function renderBookmarks(
     if (targets.length > 0) {
       const menu = createMenu(doc, {
         label: "Move to folder",
+        size: "sm",
+        variant: "ghost",
+        disabled: stepRunning,
         items: targets.map((f) => ({
           label: f.name,
           onSelect: () => move(b, f),
@@ -545,28 +698,257 @@ export function renderBookmarks(
     return actionsFor(b).map((action, i) => actionButton(b, action, i === 0));
   }
 
+  // ---- the list: sections, the three views, the needs-a-look bar and the dialog (#27) ----
+
+  /** The links the page shows for the chosen folder or filter, before the search. */
+  function pool(): SavedBookmark[] {
+    if (selection.kind === "needs") return items.filter(needsLook);
+    if (selection.kind === "folder") {
+      const id = selection.id;
+      return items.filter((b) => b.folderId === id);
+    }
+    return items;
+  }
+
+  /** The three views of one list of links: the same items, in the same order. */
+  function linkView(shown: readonly SavedBookmark[]): HTMLElement {
+    const linkItems = shown.map((b) => {
+      const item = toLinkItem(b, b.id === alreadySavedId);
+      byItem.set(item, b);
+      return item;
+    });
+    return createLinkView(doc, view, linkItems, {
+      onOpen: openBookmark,
+      actions: (item) => {
+        const b = byItem.get(item);
+        return b ? cardButtons(b) : [];
+      },
+    });
+  }
+
+  interface Section {
+    id: string;
+    name: string;
+    count: number;
+    items: SavedBookmark[];
+    /** True on "All bookmarks" without a search: the first few links and "Show all N". */
+    folds: boolean;
+  }
+
+  function buildSection(section: Section): HTMLElement {
+    const box = doc.createElement("section");
+    box.className = "bookmarks-section";
+    box.setAttribute("aria-label", section.name);
+    const body = doc.createElement("div");
+    body.className = "bookmarks-section-body";
+    body.append(
+      linkView(
+        section.folds ? section.items.slice(0, SECTION_FIRST) : section.items,
+      ),
+    );
+    // "Show all N" opens the folder: the page then shows all its links, as picking it in the sidebar.
+    const heading = createFolderHeading(doc, {
+      name: section.name,
+      count: section.count,
+      canToggle: section.folds && section.count > SECTION_FIRST,
+      onToggle: () => select({ kind: "folder", id: section.id }),
+    });
+    box.append(heading.element, body);
+    return box;
+  }
+
+  /** The sections of the page: one per folder on "All bookmarks", otherwise one for the choice. */
+  function sections(): Section[] {
+    const found = query.trim() !== "";
+    const match = (list: SavedBookmark[]) =>
+      found ? list.filter((b) => matchesSearch(b, query)) : list;
+    if (selection.kind === "all") {
+      return groupByFolder(items, folders)
+        .map((g) => {
+          const hits = match(g.items);
+          return {
+            id: g.id,
+            name: g.name,
+            // The core's count is the full one; a link just saved shows before the count is read.
+            count: found ? hits.length : Math.max(g.count, hits.length),
+            items: hits,
+            folds: !found,
+          };
+        })
+        .filter((g) => g.count > 0);
+    }
+    const hits = match(pool());
+    if (selection.kind === "needs")
+      return [
+        {
+          id: "needs",
+          name: "Needs a look",
+          count: hits.length,
+          items: hits,
+          folds: false,
+        },
+      ];
+    const id = selection.id;
+    const folder = folders.find((f) => f.id === id);
+    return [
+      {
+        id,
+        name: folder?.name ?? hits[0]?.folder ?? "Folder",
+        count: found ? hits.length : Math.max(folder?.count ?? 0, hits.length),
+        items: hits,
+        folds: false,
+      },
+    ];
+  }
+
+  /** The words an empty list says, for the choice and the search. */
+  function emptyText(): { title: string; body: string } {
+    if (query.trim() !== "")
+      return {
+        title: "No bookmark matches",
+        body: "Try another word, or clear the search box.",
+      };
+    if (selection.kind === "needs")
+      return {
+        title: "Every link has a summary",
+        body: "Nothing needs a look.",
+      };
+    if (selection.kind === "folder")
+      return {
+        title: "No bookmarks here yet",
+        body: 'Open a bookmark and use "Move to folder".',
+      };
+    return {
+      title: "No saved links yet",
+      body: "Paste a link in the box above and choose Save link.",
+    };
+  }
+
+  /** The bar above the list: how many links have no summary, and "Show them". */
+  function drawBar(): void {
+    const n = needsCount();
+    // Whole only once every page is loaded; on the filter itself the bar has nothing to add.
+    if (!loaded || n === 0 || selection.kind === "needs") {
+      bar.replaceChildren();
+      return;
+    }
+    bar.replaceChildren(
+      buildBanner({
+        tone: "warn",
+        message: needsLookLine(n),
+        action: {
+          label: "Show them",
+          onClick: () => select({ kind: "needs" }),
+        },
+      }),
+    );
+  }
+
+  /** The line under the title: how many links, in how many folders. */
+  function drawContext(): void {
+    if (!context || folders.length === 0) return;
+    const total = folders.reduce((sum, f) => sum + f.count, 0);
+    const used = folders.filter((f) => f.count > 0).length;
+    context.textContent = `${bookmarkCount(total)} in ${used === 1 ? "1 folder" : `${used} folders`}.`;
+  }
+
   function draw(): void {
     cardMenus.abort();
     cardMenus = new AbortController();
-    if (items.length === 0) {
+    byItem.clear();
+    drawFolders();
+    drawBar();
+    drawContext();
+    if (!viewReady) return;
+    if (!loaded && items.length === 0) {
+      // A failed load is explained by the banner above; it is not an empty library.
       list.replaceChildren(
-        buildEmptyState({
-          title: "No saved links yet",
-          body: "Paste a link in the box above and choose Save link.",
-        }),
+        ...(loadFailed ? [] : [buildBusyLine("Loading your bookmarks")]),
       );
       return;
     }
-    const grid = doc.createElement("div");
-    grid.className = "bookmarks-cards";
-    grid.append(
-      ...items.map((b) =>
-        createLinkCard(doc, toLinkItem(b, b.id === alreadySavedId), {
-          actions: cardButtons(b),
-        }),
-      ),
+    const shown = sections();
+    if (shown.every((sec) => sec.items.length === 0)) {
+      list.replaceChildren(buildEmptyState(emptyText()));
+      return;
+    }
+    list.replaceChildren(...shown.map(buildSection));
+  }
+
+  /** The dialog with the full card of a link and "Open in browser". */
+  function openBookmark(item: LinkItem): void {
+    const b = byItem.get(item);
+    if (!b) return;
+    const opener =
+      doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
+    let opening = false;
+    // The dialog is modal, so a toast would sit behind it: a failure shows inside the dialog.
+    const problem = doc.createElement("div");
+    const dialog = createDialog({
+      doc,
+      title: "Bookmark",
+      children: [createLinkCard(doc, toLinkItem(b, false)), problem],
+      actions: (close) => {
+        const open = createDialogButton(
+          "Open in browser",
+          "primary",
+          () => {
+            if (opening) return;
+            opening = true;
+            open.disabled = true;
+            problem.replaceChildren();
+            deps
+              .openLink(b.id)
+              .catch((error: unknown) => {
+                problem.replaceChildren(
+                  buildBanner({
+                    tone: "bad",
+                    message: `Mnemo could not open the link. ${errorMessage(error)}`,
+                  }),
+                );
+              })
+              .finally(() => {
+                opening = false;
+                open.disabled = false;
+              });
+          },
+          doc,
+        );
+        return [createDialogButton("Close", "default", close, doc), open];
+      },
+      onClose: () => dialog.element.remove(),
+    });
+    dialog.open(opener);
+  }
+
+  /** The saved view: read it, build the view control, then draw the list. */
+  function startView(saved: string | null): void {
+    if (left) return;
+    view = parseView(saved);
+    const labels = Object.values(VIEW_LABELS);
+    viewSlot.replaceChildren(
+      createSegmented(doc, {
+        label: "View",
+        options: labels,
+        value: VIEW_LABELS[view],
+        onChange: (label) => {
+          const next = (Object.keys(VIEW_LABELS) as LinkView[]).find(
+            (v) => VIEW_LABELS[v] === label,
+          );
+          if (!next || next === view) return;
+          view = next;
+          draw();
+          deps.setSetting(VIEW_SETTING, next).catch((error: unknown) => {
+            if (!left)
+              toasts.show(
+                `Mnemo could not save the view for next time. ${errorMessage(error)}`,
+              );
+          });
+        },
+      }),
     );
-    list.replaceChildren(grid);
+    viewReady = true;
+    draw();
   }
 
   draw();
@@ -585,24 +967,41 @@ export function renderBookmarks(
     });
   void refreshFolders();
   deps
-    .listBookmarkCards({ limit: BOOKMARKS_PAGE })
-    .then((page) => {
+    .getSetting(VIEW_SETTING)
+    .catch(() => null)
+    .then(startView);
+  void loadAll();
+
+  /** Reads every page of bookmarks, newest first, and draws as the pages arrive. */
+  async function loadAll(): Promise<void> {
+    let after: Cursor | null = null;
+    try {
+      do {
+        const page: Page<SavedBookmark> = await deps.listBookmarkCards({
+          limit: BOOKMARKS_PAGE,
+          after,
+        });
+        if (left) return;
+        // A link saved or changed while the list loaded keeps its newer state.
+        const known = new Set(items.map((b) => b.id));
+        items = [...items, ...page.items.filter((b) => !known.has(b.id))];
+        items.sort(newestFirst);
+        // A link the owner saved again before the list loaded stays on top, not at its date.
+        const again = items.find((b) => b.id === alreadySavedId);
+        if (again) items = moveToTop(items, again);
+        after = page.next;
+        loaded = after === null;
+        draw();
+      } while (after !== null);
+    } catch (error) {
       if (left) return;
-      // A link saved or changed while the list loaded keeps its newer state.
-      const known = new Set(items.map((b) => b.id));
-      items = [...items, ...page.items.filter((b) => !known.has(b.id))];
-      items.sort((a, z) => z.createdAt.localeCompare(a.createdAt));
-      // A link the owner saved again before the list loaded stays on top, not at its date.
-      const again = items.find((b) => b.id === alreadySavedId);
-      if (again) items = moveToTop(items, again);
-      draw();
-    })
-    .catch((error: unknown) => {
-      if (left) return;
+      loadFailed = true;
       showProblem(
         `Mnemo could not load the saved links. ${errorMessage(error)}`,
       );
-    });
+      draw();
+    }
+  }
 
   return () => {
     left = true;

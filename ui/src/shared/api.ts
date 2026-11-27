@@ -854,6 +854,15 @@ export function undoLast(): Promise<SavedBookmark> {
   return invoke<SavedBookmark>("undo_last");
 }
 
+/**
+ * Opens the stored link of a saved bookmark in the system browser (#27). The core reads the link
+ * from the bookmark and opens it only when it is an http or https address; the UI sends an id and
+ * has no opener permission.
+ */
+export function openLink(id: string): Promise<void> {
+  return invoke<void>("open_link", { id });
+}
+
 /** The event the core sends with the bookmark after each step of a save or a summary. */
 export const BOOKMARK_EVENT = "bookmark-changed";
 

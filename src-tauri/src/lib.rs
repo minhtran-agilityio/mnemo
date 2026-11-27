@@ -274,6 +274,7 @@ pub fn run() {
             commands::move_bookmark,
             commands::delete_saved_bookmark,
             commands::undo_last,
+            commands::open_link,
             commands::add_note,
             commands::get_note,
             commands::list_notes,
