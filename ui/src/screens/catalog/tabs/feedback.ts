@@ -239,24 +239,34 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
             state: "running",
             onPause: noop,
             onContinue: noop,
+            onStop: noop,
             ...o,
           });
         const grow = { grow: true };
+        const limit =
+          "Waiting: Claude is at its usage limit. It continues when AI may run again.";
+        const forcedButton = (
+          caption: string,
+          cls: "is-hover" | "is-focus" | "is-pressed",
+        ) => {
+          const block = mk({});
+          block.querySelector("button")?.classList.add(cls);
+          return state(doc, caption, block, grow);
+        };
         return [
-          state(doc, "running", mk({}), grow),
+          state(doc, "default: running", mk({}), grow),
+          forcedButton("hover (Pause)", "is-hover"),
+          forcedButton("focus-visible (Pause)", "is-focus"),
+          forcedButton("active (Pause)", "is-pressed"),
           state(
             doc,
-            "waiting: usage limit",
-            mk({
-              state: "waiting",
-              reason:
-                "Waiting: Claude is at its usage limit. It continues when AI may run again.",
-            }),
+            "partial: waiting, usage limit",
+            mk({ state: "waiting", reason: limit }),
             grow,
           ),
           state(
             doc,
-            "waiting: AI off",
+            "AI off: waiting",
             mk({
               state: "waiting",
               reason: "Waiting: AI is off. It continues when you turn AI on.",
@@ -277,7 +287,7 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
           ),
           state(
             doc,
-            "request sent (button disabled)",
+            "disabled: request sent",
             mk({ state: "paused", reason: "Paused by you", pending: true }),
             grow,
           ),
@@ -285,6 +295,12 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
             doc,
             "finished",
             mk({ state: "finished", done: 50, waiting: 0, failed: 2 }),
+            grow,
+          ),
+          state(
+            doc,
+            "stopped",
+            mk({ state: "stopped", done: 20, waiting: 28, failed: 2 }),
             grow,
           ),
           state(

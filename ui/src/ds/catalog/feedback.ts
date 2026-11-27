@@ -78,7 +78,7 @@ export const FEEDBACK = [
   {
     name: "import-progress",
     tab: "Feedback",
-    variants: ["running", "waiting", "paused", "finished"],
+    variants: ["running", "waiting", "paused", "finished", "stopped"],
     states: [
       "default",
       "hover",
@@ -91,7 +91,7 @@ export const FEEDBACK = [
     ],
     source: "ds",
     className: "import-progress",
-    notes: `Counts, the state in words, a one-line reason when it waits, a bar and one text button: Pause while running or waiting, Continue while paused, none when finished. Updates in place. No empty, loading or error state: failed links are a count (${ref(207)}).`,
+    notes: `Counts, the state in words, a one-line reason when it waits, a bar and buttons: Pause while running or waiting, Continue while paused, and a quiet Stop here beside them (it ends the import; links without a summary stay link only). No buttons when finished or stopped. Updates in place. No empty, loading or error state: failed links are a count (${ref(207)}).`,
   },
   {
     name: "spinner",
