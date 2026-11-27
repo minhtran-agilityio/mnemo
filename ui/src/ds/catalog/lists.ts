@@ -46,7 +46,12 @@ export const LISTS = [
   {
     name: "tree",
     tab: "Lists",
-    variants: ["folders", "nested labels", "with label actions"],
+    variants: [
+      "folders",
+      "nested labels",
+      "with label actions",
+      "flat folders",
+    ],
     states: [
       "collapsed",
       "expanded",
@@ -63,7 +68,7 @@ export const LISTS = [
     ],
     source: "ds",
     className: "tree",
-    notes: `Folders and nested labels. With actions (${ref(126)}) each node has a menu: New label inside, Rename (F2), Move to, Delete (Delete key); Shift+F10 or the context menu key opens it. Rename and create are a field in the row: Enter saves, Escape cancels, an empty or duplicate name is refused at the field. The tree reports the node and the action; the screen does the work. The tree only reports: after a save it changes nothing it shows (name, menu names, ids), and the screen re-renders the tree from its own data on success and on failure. The duplicate check runs against the labels the tree was given. The screen may refuse a rename or create by returning a message from onAction: the field stays open with the message and the typed name. A handler that throws shows "Could not save. Try again." at the field (under the node for Move and Delete, and for a rejected async handler; refuse synchronously, a resolved value is ignored). A typed name is not lost to a stray click or the window losing focus: only an empty or unchanged field closes on leaving. Escape, or any other tree action, cancels it. Loading, success, partial and AI off do not apply: the screen shows a skeleton or a toast.`,
+    notes: `Folders and nested labels. With actions (${ref(126)}) each node has a menu: New label inside, Rename (F2), Move to, Delete (Delete key); Shift+F10 or the context menu key opens it. Rename and create are a field in the row: Enter saves, Escape cancels, an empty or duplicate name is refused at the field. The tree reports the node and the action; the screen does the work. The tree only reports: after a save it changes nothing it shows (name, menu names, ids), and the screen re-renders the tree from its own data on success and on failure. The duplicate check runs against the labels the tree was given. The screen may refuse a rename or create by returning a message from onAction: the field stays open with the message and the typed name. A handler that throws shows "Could not save. Try again." at the field (under the node for Move and Delete, and for a rejected async handler; refuse synchronously, a resolved value is ignored). A typed name is not lost to a stray click or the window losing focus: only an empty or unchanged field closes on leaving. Escape, or any other tree action, cancels it. Flat folders (${ref(192)}): the options noun: "folder" and flat: true make a one-level list: the menu has Rename and Delete only, the button, the field and the empty state say "New folder", "New folder name" and "No folders yet", children are not drawn, and each row can show a count. The tree keeps the order it is given, so the screen puts Unsorted last and refuses its Rename and Delete with a reason. Nested labels stay the default. Loading, success, partial and AI off do not apply: the screen shows a skeleton or a toast.`,
   },
   {
     name: "section list",

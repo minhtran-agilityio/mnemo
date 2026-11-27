@@ -19,7 +19,7 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
   check: ["checkbox", "radio"],
   chip: ["filter chip"],
   column: ["page"],
-  field: ["input"],
+  field: ["input", "field with action"],
   "heading-bar": ["page header"],
   kbd: ["shortcut hint"],
   "state-box": ["empty state", "error state", "AI-off state"],

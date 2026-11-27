@@ -86,6 +86,47 @@ const LONG_LABELS: TreeNode[] = [
   },
 ];
 
+/** The flat folder list of the Bookmarks screen (#192): Unsorted is last and refuses changes. */
+const UNSORTED_WHY = "Unsorted is fixed. It holds bookmarks with no folder.";
+const FOLDERS: TreeNode[] = [
+  {
+    label: "AI and agents",
+    kind: "folder",
+    count: 12,
+    id: "f1",
+    current: true,
+  },
+  { label: "Dev tools", kind: "folder", count: 8, id: "f2" },
+  { label: "Design", kind: "folder", count: 3, id: "f3" },
+  { label: "Reading", kind: "folder", count: 5, id: "f4" },
+  {
+    label: "Unsorted",
+    kind: "folder",
+    count: 2,
+    id: "unsorted",
+    refused: { rename: UNSORTED_WHY, delete: UNSORTED_WHY },
+  },
+];
+const MANY_FOLDERS: TreeNode[] = [
+  {
+    label: "Thư mục đọc sau về kiến trúc phần mềm và hệ thống phân tán cục bộ",
+    kind: "folder",
+    count: 41,
+    id: "long",
+  },
+  { label: "Sức khoẻ và tập luyện", kind: "folder", count: 7, id: "vi" },
+  ...Array.from(
+    { length: 27 },
+    (_, i): TreeNode => ({
+      label: `Folder ${i + 1}`,
+      kind: "folder",
+      count: i % 9,
+      id: `n${i + 1}`,
+    }),
+  ),
+  FOLDERS[4],
+];
+
 /** Room under a tree whose menu is held open, so the menu does not cover the caption. */
 const wrapRoom = (doc: Document, tree: HTMLElement): HTMLElement => {
   const room = el(doc, "div", "lst-menu-room");
@@ -406,6 +447,145 @@ export const renderLists: TabRenderer = (panel, ctx) => {
             onAction: () => {},
             signal: ctx.signal,
           }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "flat folders, live: 5 folders with counts, Unsorted last",
+          createTree(doc, "Folders, live example", FOLDERS, undefined, {
+            ...labelActions(ctx.toast, ctx.signal),
+            noun: "folder",
+            flat: true,
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "flat folders, empty: no folders yet",
+          createTree(doc, "Folders, empty example", [], undefined, {
+            onAction: () => {},
+            signal: ctx.signal,
+            noun: "folder",
+            flat: true,
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "flat folders, empty: Unsorted only",
+          createTree(
+            doc,
+            "Folders, Unsorted only example",
+            [FOLDERS[4]],
+            undefined,
+            {
+              onAction: () => {},
+              signal: ctx.signal,
+              noun: "folder",
+              flat: true,
+            },
+          ),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "flat folders, menu open: Rename and Delete only",
+          wrapRoom(
+            doc,
+            createTree(doc, "Folders, menu example", FOLDERS, undefined, {
+              onAction: () => {},
+              signal: ctx.signal,
+              noun: "folder",
+              flat: true,
+              forced: { id: "f3", state: "menu" },
+            }),
+          ),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "flat folders, disabled: Unsorted refuses Rename and Delete with a reason",
+          wrapRoom(
+            doc,
+            createTree(
+              doc,
+              "Folders, Unsorted menu example",
+              FOLDERS,
+              undefined,
+              {
+                onAction: () => {},
+                signal: ctx.signal,
+                noun: "folder",
+                flat: true,
+                forced: { id: "unsorted", state: "menu" },
+              },
+            ),
+          ),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "flat folders, error: duplicate name at the field",
+          createTree(doc, "Folders, rename error example", FOLDERS, undefined, {
+            onAction: () => {},
+            signal: ctx.signal,
+            noun: "folder",
+            flat: true,
+            forced: { id: "f3", state: "error", value: "Dev tools" },
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "flat folders, hover",
+          createTree(doc, "Folders, hover example", FOLDERS, undefined, {
+            onAction: () => {},
+            signal: ctx.signal,
+            noun: "folder",
+            flat: true,
+            forced: { id: "f2", state: "hover" },
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "flat folders, focus-visible",
+          createTree(doc, "Folders, focus example", FOLDERS, undefined, {
+            onAction: () => {},
+            signal: ctx.signal,
+            noun: "folder",
+            flat: true,
+            forced: { id: "f2", state: "focus" },
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "flat folders, active (pressed)",
+          createTree(doc, "Folders, active example", FOLDERS, undefined, {
+            onAction: () => {},
+            signal: ctx.signal,
+            noun: "folder",
+            flat: true,
+            forced: { id: "f2", state: "active" },
+          }),
+          { grow: true },
+        ),
+        state(
+          doc,
+          "flat folders, overflow: a long name, a Vietnamese name, 30 folders",
+          createTree(
+            doc,
+            "Folders, overflow example",
+            MANY_FOLDERS,
+            undefined,
+            {
+              onAction: () => {},
+              signal: ctx.signal,
+              noun: "folder",
+              flat: true,
+            },
+          ),
           { grow: true },
         ),
       ],
