@@ -585,9 +585,52 @@ export const renderControls: TabRenderer = (panel, ctx) => {
           ],
           { static: true, ariaLabel: "Menu example, open" },
         );
+        const folders = [
+          "Cooking",
+          "Dev tools",
+          "Đọc sau – bài dài về cơ sở dữ liệu và WAL",
+          "Đọc sau – bài rất dài về cơ sở dữ liệu, WAL, checkpoint, sao lưu và khôi phục",
+          ...Array.from({ length: 22 }, (_, i) => `Folder ${i + 4}`),
+          "Unsorted",
+        ].map((label) => ({ label }));
+        const small = createMenu(doc, {
+          label: "Move to folder",
+          items: folders,
+          size: "sm",
+          variant: "ghost",
+          signal: ctx.signal,
+        });
+        const off = createMenu(doc, {
+          label: "Move to folder",
+          items: folders,
+          size: "sm",
+          variant: "ghost",
+          disabled: true,
+          signal: ctx.signal,
+        });
+        const longList = createMenuPanel(doc, folders, {
+          static: true,
+          ariaLabel: "Folders, long list",
+        });
         return [
           state(doc, "menu (live, arrows)", live.anchor),
           state(doc, "menu open, item highlighted", open),
+          state(
+            doc,
+            "small ghost trigger (live, 26 folders scroll)",
+            small.anchor,
+          ),
+          state(
+            doc,
+            "small ghost trigger, disabled while a move runs",
+            off.anchor,
+          ),
+          state(
+            doc,
+            "long list: scrolls inside the panel, long name cut",
+            longList,
+            { grow: true },
+          ),
         ];
       },
       popover: () => {

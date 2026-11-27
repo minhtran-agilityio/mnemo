@@ -301,6 +301,7 @@ export const TOKEN_GROUPS: readonly TokenGroup[] = [
       "--size-link-site-min",
       "--size-menu-min",
       "--size-menu-max",
+      "--size-menu-height-max",
       "--size-toggle-width",
       "--size-toggle-height",
       "--size-toggle-knob",
