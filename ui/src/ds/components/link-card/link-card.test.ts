@@ -1593,3 +1593,169 @@ test("overflow: a long or Vietnamese reason wraps under the name, in secondary t
     ),
   ).toMatchObject({ flex: "none" });
 });
+
+// Issue 205: open a link and per-item actions in the three views.
+const pho: LinkItem = {
+  title: "Phở – Wikipedia tiếng Việt",
+  url: "https://vi.wikipedia.org/wiki/Ph%E1%BB%9F",
+  site: "vi.wikipedia.org",
+  summary: "Một món ăn.",
+};
+const pendingLink: LinkItem = { ...unread, status: "pending" };
+
+function actionButtons(doc: Document, onClick: (l: string) => void): Node[] {
+  return ["Summarize later", "Paste the text"].map((label) =>
+    createButton(doc, { label, size: "sm", onClick: () => onClick(label) }),
+  );
+}
+
+const builders: [string, (o: object) => HTMLElement][] = [
+  ["card", (o) => createLinkCard(document, pho, o)],
+  ["list row", (o) => createLinkRow(document, pho, o)],
+  ["compact row", (o) => createCompactRow(document, pho, o)],
+];
+
+for (const [name, build] of builders) {
+  test(`${name}: a click opens with the item, once per click`, () => {
+    const opened: LinkItem[] = [];
+    const box = build({ onOpen: (i: LinkItem) => opened.push(i) });
+    expect(box.dataset.openable).toBe("true");
+    box.click();
+    expect(opened).toEqual([pho]);
+    box.querySelector<HTMLElement>(".link-open")?.click();
+    expect(opened).toHaveLength(2);
+  });
+
+  test(`${name}: the title is a button named by the title, text only`, () => {
+    const box = build({ onOpen: () => {} });
+    const button = box.querySelector<HTMLButtonElement>("button.link-open");
+    expect(button?.type).toBe("button");
+    expect(button?.textContent).toBe(pho.title);
+    expect(button?.tabIndex).toBe(0);
+    // One tab stop: the row or card itself is not focusable.
+    expect(box.tabIndex).not.toBe(0);
+  });
+
+  test(`${name}: without onOpen nothing is openable`, () => {
+    const box = build({});
+    expect(box.dataset.openable).toBeUndefined();
+    expect(box.querySelector(".link-open")).toBeNull();
+  });
+
+  test(`${name}: a click on an action does not open`, () => {
+    const opened: LinkItem[] = [];
+    const clicked: string[] = [];
+    const box = build({
+      onOpen: (i: LinkItem) => opened.push(i),
+      actions: actionButtons(document, (l) => clicked.push(l)),
+    });
+    for (const b of box.querySelectorAll<HTMLButtonElement>(
+      ".link-actions button, .lcard-action button",
+    ))
+      b.click();
+    expect(clicked).toEqual(["Summarize later", "Paste the text"]);
+    expect(opened).toEqual([]);
+  });
+
+  test(`${name}: a disabled action stays disabled and does not open`, () => {
+    const opened: LinkItem[] = [];
+    const off = createButton(document, {
+      label: "Summarize later",
+      size: "sm",
+      disabled: true,
+    });
+    build({ onOpen: (i: LinkItem) => opened.push(i), actions: [off] });
+    off.click();
+    expect(off.disabled).toBe(true);
+    expect(opened).toEqual([]);
+  });
+}
+
+test("rows carry their actions in a trailing slot; none, no slot", () => {
+  for (const make of [createLinkRow, createCompactRow]) {
+    const row = make(document, pho, {
+      actions: actionButtons(document, () => {}),
+    });
+    const slot = row.querySelector(":scope > .link-actions");
+    expect(slot?.children).toHaveLength(2);
+    expect(row.lastElementChild).toBe(slot);
+    const none = make(document, pho, { actions: [] });
+    expect(none.querySelector(".link-actions")).toBeNull();
+  }
+});
+
+test("a row without onOpen stays focusable, as before", () => {
+  expect(createLinkRow(document, pho).tabIndex).toBe(0);
+  expect(createCompactRow(document, pho).tabIndex).toBe(0);
+});
+
+test("a partial card with a null summary keeps both actions and opens", () => {
+  const opened: LinkItem[] = [];
+  const card = createLinkCard(document, pendingLink, {
+    onOpen: (i) => opened.push(i),
+    actions: actionButtons(document, () => {}),
+  });
+  expect(card.querySelectorAll(".lcard-action button")).toHaveLength(2);
+  expect(card.querySelector(".sum")).toBeNull();
+  card.click();
+  expect(opened).toEqual([pendingLink]);
+});
+
+test("AI off: the actions and open still show", () => {
+  const card = createLinkCard(
+    document,
+    { ...pendingLink, status: "ai-off" },
+    { onOpen: () => {}, actions: actionButtons(document, () => {}) },
+  );
+  expect(card.querySelectorAll("button.link-open")).toHaveLength(1);
+  expect(card.querySelectorAll(".lcard-action button")).toHaveLength(2);
+});
+
+test("a long title and a 200-char URL stay text, with the full values in tooltips", () => {
+  const url = `https://example.org/${"a".repeat(180)}?q=1`;
+  const title = "Rất ".repeat(60);
+  const card = createLinkCard(
+    document,
+    { ...pho, title, url },
+    { onOpen: () => {} },
+  );
+  expect(card.querySelector<HTMLElement>(".title")?.title).toBe(title);
+  expect(card.querySelector<HTMLElement>(".url")?.title).toBe(url);
+  expect(card.querySelector(".link-open")?.textContent).toBe(title);
+});
+
+test("the view passes onOpen and a per-item actions factory to every row or card", () => {
+  const items = Array.from({ length: 500 }, (_, i) => ({
+    ...pho,
+    title: `Link ${i}`,
+  }));
+  for (const view of ["list", "cards", "compact"] as const) {
+    const opened: string[] = [];
+    const root = createLinkView(document, view, items, {
+      onOpen: (i) => opened.push(i.title),
+      actions: (i) => [createButton(document, { label: `Delete ${i.title}` })],
+    });
+    const boxes = root.querySelectorAll<HTMLElement>("[data-openable]");
+    expect(boxes).toHaveLength(500);
+    expect(
+      root.querySelectorAll(".link-actions button, .lcard-action button"),
+    ).toHaveLength(500);
+    boxes[7].click();
+    expect(opened).toEqual(["Link 7"]);
+  }
+});
+
+test("the view without options builds as before", () => {
+  const root = createLinkView(document, "list", [pho]);
+  expect(root.querySelector("[data-openable]")).toBeNull();
+  expect(root.querySelector(".link-actions")).toBeNull();
+});
+
+test("forced states mark the card", () => {
+  for (const s of ["hover", "focus", "active"] as const)
+    expect(
+      createLinkCard(document, pho, { forceState: s }).classList.contains(
+        `is-${s}`,
+      ),
+    ).toBe(true);
+});
