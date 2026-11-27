@@ -1,5 +1,25 @@
 # Mnemo
 
+## Screenshots
+
+Taken from the real UI with invented sample data (a stand-in for the Rust core, headless Chrome, 1280×800).
+
+![Bookmarks, light theme: saved links with AI-written summaries and tags, each labelled](docs/images/bookmarks-light.png)
+
+Bookmarks (light): saved links with summaries and tags; AI text is labelled, and an unreadable page keeps the link only.
+
+![Notes, light theme: a label tree and a list of notes](docs/images/notes-light.png)
+
+Notes (light): notes grouped under nested labels.
+
+![Ideas, light theme: ideas in four stages with an edit form](docs/images/ideas-light.png)
+
+Ideas (light): an idea grows from Spark to Shape, Ready and Project, with four plain checks.
+
+![Bookmarks, dark theme](docs/images/bookmarks-dark.png)
+
+Bookmarks (dark): the same screen in the dark theme.
+
 ## What is Mnemo
 
 Mnemo is a local-first desktop app built with Tauri 2. The Rust core lives in `src-tauri/` and the web UI (HTML, CSS, TypeScript) lives in `ui/`. The core has four modules, each with one job:
@@ -11,7 +31,7 @@ Mnemo is a local-first desktop app built with Tauri 2. The Rust core lives in `s
 | `scheduler` | When background work runs |
 | `system` | OS integration |
 
-The UI talks to the core through named Tauri commands. Today there is one, `ping`, which proves the bridge works: the window shows the text the Rust core returns.
+The UI talks to the core through named Tauri commands. `ping` is the simplest one: it proves the bridge works, and the footer of the window shows the text the Rust core returns.
 
 ## Prerequisites
 
@@ -50,7 +70,7 @@ npm install
 npm run tauri dev
 ```
 
-The first run compiles the Rust core and takes several minutes. An empty window opens and shows the reply from the `ping` command.
+The first run compiles the Rust core and takes several minutes. The Mnemo window opens with the sidebar and the screens shown above; the footer shows the reply from the `ping` command.
 
 ## Window and tray
 
