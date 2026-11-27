@@ -26,6 +26,7 @@ import {
   buildUsageMeter,
   buildUsageWindows,
   createIcon,
+  createImportProgress,
   createToastRegion,
   type PillTint,
 } from "../../../ds/index";
@@ -227,6 +228,80 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
           grow: true,
         }),
       ],
+      "import-progress": () => {
+        const mk = (o: Partial<Parameters<typeof createImportProgress>[1]>) =>
+          createImportProgress(doc, {
+            fileName: "bookmarks.html",
+            done: 12,
+            waiting: 36,
+            failed: 2,
+            total: 50,
+            state: "running",
+            onPause: noop,
+            onContinue: noop,
+            ...o,
+          });
+        const grow = { grow: true };
+        return [
+          state(doc, "running", mk({}), grow),
+          state(
+            doc,
+            "waiting: usage limit",
+            mk({
+              state: "waiting",
+              reason:
+                "Waiting: Claude is at its usage limit. It continues when AI may run again.",
+            }),
+            grow,
+          ),
+          state(
+            doc,
+            "waiting: AI off",
+            mk({
+              state: "waiting",
+              reason: "Waiting: AI is off. It continues when you turn AI on.",
+            }),
+            grow,
+          ),
+          state(
+            doc,
+            "paused by you",
+            mk({ state: "paused", reason: "Paused by you" }),
+            grow,
+          ),
+          state(
+            doc,
+            "paused after restart",
+            mk({ state: "paused", reason: "Paused when Mnemo closed" }),
+            grow,
+          ),
+          state(
+            doc,
+            "request sent (button disabled)",
+            mk({ state: "paused", reason: "Paused by you", pending: true }),
+            grow,
+          ),
+          state(
+            doc,
+            "finished",
+            mk({ state: "finished", done: 50, waiting: 0, failed: 2 }),
+            grow,
+          ),
+          state(
+            doc,
+            "overflow: 1000+ and a long file name",
+            mk({
+              fileName:
+                "bookmarks-export-from-the-old-laptop-2019-and-2020-all-folders.html",
+              done: 1200,
+              waiting: 3400,
+              failed: 112,
+              total: 4712,
+            }),
+            grow,
+          ),
+        ];
+      },
       spinner: () => [
         state(doc, "small", buildSpinner()),
         state(doc, "large", buildSpinner("lg")),
