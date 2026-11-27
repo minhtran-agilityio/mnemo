@@ -100,6 +100,8 @@ export interface BookmarksDeps {
   setSetting(key: string, value: string): Promise<void>;
   /** Opens the stored link of the bookmark in the system browser (the core checks it). */
   openLink(id: string): Promise<void>;
+  /** Opens the Import bookmarks page (#29). */
+  openImport(): void;
 }
 
 /** How many saved links one call reads. The page asks again until the core has no more (#27). */
@@ -192,6 +194,13 @@ export function renderBookmarks(
     title: "Bookmarks",
     crumb: phase === undefined ? undefined : `Phase ${phase}`,
     context: HEADER_CONTEXT,
+    // The way to the Import bookmarks page (#29), as in the prototype.
+    actions: [
+      createButton(doc, {
+        label: "Import from a browser",
+        onClick: () => deps.openImport(),
+      }),
+    ],
   });
   const context = header.querySelector(".context");
 

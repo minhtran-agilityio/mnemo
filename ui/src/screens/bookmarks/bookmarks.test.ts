@@ -85,6 +85,7 @@ function deps(over: Partial<BookmarksDeps> = {}) {
     getSetting: vi.fn(async () => null),
     setSetting: vi.fn(async () => {}),
     openLink: vi.fn(async () => {}),
+    openImport: vi.fn(),
     ...over,
   };
   return { d, emit: (b: SavedBookmark) => emit(b), stop };
@@ -101,6 +102,16 @@ const button = (root: ParentNode, name: string) =>
   [...root.querySelectorAll("button")].find(
     (b) => b.textContent?.trim() === name,
   );
+
+test("Import from a browser in the header opens the Import bookmarks page", async () => {
+  const { d } = deps();
+  const { box } = mount(d);
+  await Promise.resolve();
+  const open = button(box, "Import from a browser");
+  if (!open) throw new Error("no Import from a browser button");
+  open.click();
+  expect(d.openImport).toHaveBeenCalledOnce();
+});
 
 // ---- logic ----
 
