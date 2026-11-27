@@ -519,6 +519,15 @@ impl Storage {
         saved_bookmark_on(&self.conn, id)
     }
 
+    /// Test only: writes `url` into the bookmark as it is, past the check a save makes. It stands
+    /// for a damaged data file or a file from an older build (#27: `open_link` must still refuse it).
+    #[cfg(test)]
+    pub fn set_stored_link_unchecked(&self, id: &str, url: &str) -> Result<(), StorageError> {
+        self.conn
+            .execute("UPDATE bookmark SET url = ?1 WHERE id = ?2", [url, id])?;
+        Ok(())
+    }
+
     /// The bookmark with its site, status and tags, deleted or not; `None` when there is none.
     pub fn get_saved_bookmark_any(&self, id: &str) -> Result<Option<SavedBookmark>, StorageError> {
         let Some(mut b) = self

@@ -1,7 +1,7 @@
 // The plain rules of the Bookmarks screen (#25): how a saved link becomes a link card, which
 // actions its card offers, the saved date, and how a changed bookmark joins the list.
-import type { LinkItem, LinkStatus } from "../../ds";
-import type { SavedBookmark, SummaryStatus } from "../../shared/api";
+import type { LinkItem, LinkStatus, LinkView } from "../../ds";
+import type { Folder, SavedBookmark, SummaryStatus } from "../../shared/api";
 
 /** An action a card offers. */
 export type CardAction = "paste" | "later";
@@ -146,3 +146,103 @@ export const UNSORTED_REFUSED = {
   rename: "Unsorted is the default folder. It cannot be renamed.",
   delete: "Unsorted is the default folder. It cannot be deleted.",
 } as const;
+
+// ---- the page of #27 (BM-03): views, the needs-a-look filter, search and sections ----
+
+/** The setting that keeps the chosen view across restarts. */
+export const VIEW_SETTING = "bookmarks.view";
+
+/** The visible name of each view, as the view control shows it. */
+export const VIEW_LABELS: Record<LinkView, string> = {
+  list: "List",
+  cards: "Cards",
+  compact: "Compact",
+};
+
+/** The view when none is saved, or the saved value is not one of the three. */
+export const DEFAULT_VIEW: LinkView = "cards";
+
+/** The view a saved setting names; anything else gives the default. */
+export function parseView(value: string | null | undefined): LinkView {
+  return value === "list" || value === "cards" || value === "compact"
+    ? value
+    : DEFAULT_VIEW;
+}
+
+/** How many bookmarks a folder section shows before "Show all N" (the prototype shows 4). */
+export const SECTION_FIRST = 4;
+
+/** True when the bookmark has no summary: it needs a look. */
+export function needsLook(b: SavedBookmark): boolean {
+  return b.summary === null && !b.deletedAt;
+}
+
+/** The text a search is made of: NFC-normalized, lower case, white space trimmed. */
+export function normalizeSearch(text: string): string {
+  return text.normalize("NFC").toLowerCase().trim();
+}
+
+/**
+ * True when every word of `query` is in the title, the summary or a tag of `b`. Case does not
+ * matter and the text is compared in NFC, so a word typed with combined or separate accents finds
+ * the same text. Accents are not ignored: "pho" does not find "phở". The summary counts only when
+ * the card shows it (status done), so a search never matches text the owner cannot see.
+ */
+export function matchesSearch(b: SavedBookmark, query: string): boolean {
+  const words = normalizeSearch(query).split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const text = normalizeSearch(
+    [
+      b.title ?? "",
+      b.summaryStatus === "done" ? (b.summary ?? "") : "",
+      ...b.tags,
+    ].join("\n"),
+  );
+  return words.every((w) => text.includes(w));
+}
+
+/** The bookmarks of one folder, with the folder's full count. */
+export interface FolderGroup {
+  id: string;
+  name: string;
+  /** The folder's count from the core (every live link), not the number loaded or matched. */
+  count: number;
+  items: SavedBookmark[];
+}
+
+/**
+ * The bookmarks grouped by folder, in the folders' order (the core puts Unsorted last). A folder
+ * with no bookmark loaded is kept, so its count still shows. A bookmark whose folder is not in
+ * `folders` (the folders are not read yet) goes in a group of its own, after them.
+ */
+export function groupByFolder(
+  items: readonly SavedBookmark[],
+  folders: readonly Folder[],
+): FolderGroup[] {
+  const groups = new Map<string, FolderGroup>(
+    folders.map((f) => [
+      f.id,
+      { id: f.id, name: f.name, count: f.count, items: [] },
+    ]),
+  );
+  for (const b of items) {
+    let g = groups.get(b.folderId);
+    if (!g) {
+      g = { id: b.folderId, name: b.folder, count: 0, items: [] };
+      groups.set(b.folderId, g);
+    }
+    g.items.push(b);
+    if (!folders.some((f) => f.id === b.folderId)) g.count += 1;
+  }
+  return [...groups.values()];
+}
+
+/** Newest first, then by id, so the order is the same for every view and every load. */
+export function newestFirst(a: SavedBookmark, z: SavedBookmark): number {
+  return z.createdAt.localeCompare(a.createdAt) || z.id.localeCompare(a.id);
+}
+
+/** "1 link has no summary" or "20 links have no summary": the needs-a-look bar. */
+export function needsLookLine(n: number): string {
+  return n === 1 ? "1 link has no summary" : `${n} links have no summary`;
+}

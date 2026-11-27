@@ -2888,6 +2888,35 @@ fn undo_step(storage: &AppStorage) -> Result<SavedBookmark, AppError> {
     storage.get()?.undo_last().map_err(item_failed)
 }
 
+/// Opens the stored link of the live bookmark `id` through `open`, and only when that link is an
+/// http or https address. The UI sends an id, never a link, so it cannot open anything else.
+fn open_stored_link(
+    storage: &AppStorage,
+    id: &str,
+    open: &dyn Fn(&str) -> Result<(), String>,
+) -> Result<(), AppError> {
+    check_bookmark_id(id)?;
+    let bookmark = storage.get()?.get_saved_bookmark(id).map_err(item_failed)?;
+    let web = url::Url::parse(&bookmark.url)
+        .ok()
+        .filter(|u| matches!(u.scheme(), "http" | "https") && u.host_str().is_some());
+    let Some(web) = web else {
+        return Err(AppError {
+            code: "invalid_input",
+            message: "Mnemo opens only web addresses that start with http:// or https://."
+                .to_string(),
+        });
+    };
+    open(web.as_str()).map_err(|e| {
+        log::error!("could not open a saved link: {e}");
+        AppError {
+            code: "open_link_failed",
+            message: "Mnemo could not open the link in your browser. Copy it from the link card."
+                .to_string(),
+        }
+    })
+}
+
 /// The live folders with their bookmark counts, by name, Unsorted last.
 #[tauri::command]
 pub async fn list_folders(app: tauri::AppHandle) -> Result<Vec<Folder>, AppError> {
@@ -2939,6 +2968,23 @@ pub async fn delete_saved_bookmark(app: tauri::AppHandle, id: String) -> Result<
 #[tauri::command]
 pub async fn undo_last(app: tauri::AppHandle) -> Result<SavedBookmark, AppError> {
     off_main_thread(app, undo_step).await
+}
+
+/// Opens the stored link of a saved bookmark in the system browser. The link is read from the
+/// bookmark here, so the UI never passes one and has no opener permission.
+#[tauri::command]
+pub async fn open_link(app: tauri::AppHandle, id: String) -> Result<(), AppError> {
+    let opener = app.clone();
+    off_main_thread(app, move |storage| {
+        open_stored_link(storage, &id, &|url| {
+            use tauri_plugin_opener::OpenerExt;
+            opener
+                .opener()
+                .open_url(url, None::<&str>)
+                .map_err(|e| e.to_string())
+        })
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -3125,6 +3171,81 @@ mod bookmark_command_tests {
         assert_eq!(
             (again.code, again.message.as_str()),
             ("invalid_input", "There is nothing to undo.")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn open_link_opens_only_the_stored_http_link_of_its_bookmark() {
+        let (state, dir) = app_storage();
+        let b = saved_in(&state, "https://example.org/a?x=1");
+        let opened = std::cell::RefCell::new(Vec::new());
+        open_stored_link(&state, &b.base.id, &|url| {
+            opened.borrow_mut().push(url.to_string());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(*opened.borrow(), vec!["https://example.org/a?x=1"]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn open_link_refuses_a_stored_link_that_is_not_http_and_opens_nothing() {
+        let (state, dir) = app_storage();
+        for (n, url) in [
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "ftp://example.org/x",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            // Storage never accepts such a link; a damaged file or an old build could hold one.
+            let b = saved_in(&state, &format!("https://example.org/{n}"));
+            state
+                .get()
+                .unwrap()
+                .set_stored_link_unchecked(&b.base.id, url)
+                .unwrap();
+            let opened = std::cell::Cell::new(false);
+            let err = open_stored_link(&state, &b.base.id, &|_| {
+                opened.set(true);
+                Ok(())
+            })
+            .unwrap_err();
+            assert_eq!(err.code, "invalid_input", "{url}");
+            assert!(!opened.get(), "{url} was opened");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn open_link_gives_not_found_for_an_unknown_or_deleted_bookmark_and_a_plain_error_when_the_opener_fails(
+    ) {
+        let (state, dir) = app_storage();
+        let never = |_: &str| -> Result<(), String> { panic!("opened") };
+        assert_eq!(
+            open_stored_link(&state, "no-such", &never)
+                .unwrap_err()
+                .code,
+            "not_found"
+        );
+        assert_eq!(
+            open_stored_link(&state, " ", &never).unwrap_err().code,
+            "invalid_input"
+        );
+        let b = saved_in(&state, "https://example.org/b");
+        let fails = |_: &str| -> Result<(), String> { Err("/home/someone/xdg-open: boom".into()) };
+        let err = open_stored_link(&state, &b.base.id, &fails).unwrap_err();
+        assert_eq!(err.code, "open_link_failed");
+        assert!(!err.message.contains('/') || err.message.contains("link card"));
+        assert!(!err.message.contains("someone"));
+        bookmark_delete(&state, &b.base.id).unwrap();
+        assert_eq!(
+            open_stored_link(&state, &b.base.id, &never)
+                .unwrap_err()
+                .code,
+            "not_found"
         );
         let _ = std::fs::remove_dir_all(dir);
     }
