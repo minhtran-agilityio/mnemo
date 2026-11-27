@@ -418,6 +418,39 @@ export function findItem(id: string): NavItem | undefined {
   return ALL_ITEMS.find((item) => item.id === id);
 }
 
+/**
+ * A page reached from inside a screen, not from the sidebar: it has its own address, and the
+ * sidebar marks its parent screen while it is open.
+ */
+export interface PageItem extends NavItem {
+  /** The sidebar item marked while the page is open. */
+  parent: string;
+}
+
+/** The id of the Import bookmarks page (#29), reached from Bookmarks. Address `#/import`. */
+export const IMPORT_ID = "import";
+
+/** Every page outside the sidebar. The router opens them; the sidebar does not list them. */
+export const PAGE_ITEMS: readonly PageItem[] = [
+  {
+    id: IMPORT_ID,
+    label: "Import bookmarks",
+    phase: 2,
+    parent: "bookmarks",
+    icon: [],
+  },
+];
+
+/** The page `id`, or undefined. */
+export function findPage(id: string): PageItem | undefined {
+  return PAGE_ITEMS.find((item) => item.id === id);
+}
+
+/** The sidebar item to mark for `id`: a page's parent, else the item itself. */
+export function sidebarIdFor(id: string): string {
+  return findPage(id)?.parent ?? id;
+}
+
 /** Every group the sidebar shows, in order: the roadmap groups, then the dev-only ones. */
 export const SIDEBAR_GROUPS: readonly SidebarGroup[] = [
   ...GROUPS,

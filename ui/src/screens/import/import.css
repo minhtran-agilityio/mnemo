@@ -1,0 +1,30 @@
+/* The Import bookmarks page (#29): layout only, with token values. Every look comes from ui/src/ds. */
+.import-steps {
+  margin-top: var(--space-5);
+}
+
+.import-notice:empty {
+  display: none;
+}
+
+.import-notice {
+  margin-top: var(--space-4);
+}
+
+.import-body {
+  margin-top: var(--space-5);
+  max-width: var(--measure-intro);
+}
+
+.import-pick,
+.import-done {
+  display: grid;
+  gap: var(--space-4);
+  justify-items: start;
+}
+
+.import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}

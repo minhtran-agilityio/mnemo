@@ -5,6 +5,7 @@ import {
   DEV_ITEMS,
   EVERYTHING_ID,
   findItem,
+  findPage,
   HOME_ID,
   hashItemPath,
   type NavItem,
@@ -29,7 +30,11 @@ export function splitHash(hash: string): { path: string; search: string } {
 
 export function parseHash(hash: string): Route {
   const { path, search } = splitHash(hash);
-  const item = findItem(path) ?? DEV_ITEMS.find((i) => i.id === path) ?? HOME;
+  const item =
+    findItem(path) ??
+    findPage(path) ??
+    DEV_ITEMS.find((i) => i.id === path) ??
+    HOME;
   if (item.id !== EVERYTHING_ID) return { item, query: null };
   const query = new URLSearchParams(search).get("q");
   return { item, query: query?.trim() ? query : null };
