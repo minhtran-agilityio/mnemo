@@ -180,3 +180,8 @@
 .tnote {
   padding: 0 var(--space-2) var(--space-1);
 }
+
+/* Flat folders (#192): one level, so no room is kept for a chevron. */
+.tree-box.is-flat .spacer {
+  display: none;
+}

@@ -1,5 +1,7 @@
 // Field: a visible label above a control, a hint below, and an error that replaces the hint.
 // Never a placeholder as the label. The control keeps its own id; the label points at it.
+// With `action`, a button (or other element) sits beside the control on one row, centred on it;
+// the hint and the error stay under the control at its left edge, not under the action.
 import { CircleAlert } from "lucide";
 import { createIcon } from "../../icon";
 import "./field.css";
@@ -14,6 +16,12 @@ export interface FieldOptions {
   readonly hint?: string;
   /** Replaces the hint and marks the target invalid. */
   readonly error?: string;
+  /**
+   * An element beside the control, such as a primary submit button. It sits on the control's row,
+   * centred on the control, and is not restyled. The label stays above, and the hint or error
+   * under the control only. Without it the field is the plain column.
+   */
+  readonly action?: HTMLElement;
 }
 
 interface FieldState {
@@ -22,6 +30,8 @@ interface FieldState {
   readonly hintEl: HTMLElement | null;
   /** The polite live region. Only the error goes inside it. */
   readonly note: HTMLElement;
+  /** Where the hint goes: the field, or the line under the control when there is an action. */
+  readonly host: HTMLElement;
   readonly errorId: string;
   /** Built on the first error and kept; its message text node is updated in place. */
   err: HTMLElement | null;
@@ -58,11 +68,30 @@ export function createField(doc: Document, options: FieldOptions): HTMLElement {
     hintEl.id = `${target.id}-hint`;
     hintEl.textContent = options.hint;
   }
-  wrap.append(label, options.control, note);
+  let host = wrap;
+  if (options.action) {
+    // The label across the top, the control and the action on one row, the hint and error under
+    // the control's column only. The wrappers are the grid's cells, so a screen needs no child
+    // selectors.
+    wrap.classList.add("field--action");
+    const controlCell = doc.createElement("div");
+    controlCell.className = "field-control";
+    controlCell.append(options.control);
+    const actionCell = doc.createElement("div");
+    actionCell.className = "field-action";
+    actionCell.append(options.action);
+    host = doc.createElement("div");
+    host.className = "field-under";
+    host.append(note);
+    wrap.append(label, controlCell, actionCell, host);
+  } else {
+    wrap.append(label, options.control, note);
+  }
   fields.set(wrap, {
     target,
     hintEl,
     note,
+    host,
     errorId: `${target.id}-error`,
     err: null,
     errText: null,
@@ -88,7 +117,7 @@ export function setFieldError(
 ): void {
   const state = fields.get(field);
   if (!state) throw new Error("setFieldError: not a field made by createField");
-  const { target, hintEl, note, errorId } = state;
+  const { target, hintEl, note, host, errorId } = state;
   // A message of only spaces is empty.
   const text = message?.trim() ?? "";
   if (text) {
@@ -115,7 +144,7 @@ export function setFieldError(
   else target.setAttribute("aria-invalid", state.ownInvalid);
   if (hintEl) {
     // The hint goes before the live region, outside it.
-    if (hintEl.parentNode !== field) field.insertBefore(hintEl, note);
+    if (hintEl.parentNode !== host) host.insertBefore(hintEl, note);
     target.setAttribute("aria-describedby", hintEl.id);
   } else if (state.ownDescribedBy === null) {
     target.removeAttribute("aria-describedby");
