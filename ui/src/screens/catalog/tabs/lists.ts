@@ -5,6 +5,7 @@ import "../../../ds/catalog/lists.css";
 import { Link } from "lucide";
 import { ref } from "../../../ds/catalog/types";
 import {
+  createFolderHeading,
   createKanbanBoard,
   createKanbanCard,
   createList,
@@ -725,6 +726,38 @@ export const renderLists: TabRenderer = (panel, ctx) => {
               wrap.classList.add("lst-settings-narrow");
               return wrap;
             }),
+          ),
+        ];
+      },
+      "folder heading": () => {
+        const make = (o: Parameters<typeof createFolderHeading>[1]) => {
+          const wrap = el(doc, "div", "lst-folder");
+          wrap.append(createFolderHeading(doc, o).element);
+          return wrap;
+        };
+        const sample = { name: "Đọc sau", count: 7 };
+        return [
+          state(
+            doc,
+            "collapsed (live)",
+            make({ name: "Kỹ thuật / Rust", count: 24 }),
+          ),
+          state(doc, "expanded", make({ ...sample, expanded: true })),
+          state(doc, "hover", make({ ...sample, forceState: "hover" })),
+          state(doc, "focus-visible", make({ ...sample, forceState: "focus" })),
+          state(doc, "active", make({ ...sample, forceState: "pressed" })),
+          state(
+            doc,
+            "overflow: 60-character name, count 500",
+            make({
+              name: "Thư mục có tên rất dài để thử việc xuống dòng của tiêu đề ok",
+              count: 500,
+            }),
+          ),
+          state(
+            doc,
+            "no toggle (all items show)",
+            make({ ...sample, canToggle: false }),
           ),
         ];
       },
