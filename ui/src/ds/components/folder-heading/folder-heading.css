@@ -1,0 +1,69 @@
+/* Folder heading: a name, its count and a Show all / Show less toggle. Tokens only. */
+.folder-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  max-width: 100%;
+  padding: var(--space-2) 0;
+  border-bottom: var(--border-1) solid var(--line);
+}
+
+.folder-heading[hidden] {
+  display: none;
+}
+
+.folder-heading-title {
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  /* A long name wraps; stacked Vietnamese marks get line room. */
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.folder-heading-count {
+  color: var(--muted);
+  font-size: var(--text-md);
+  font-weight: var(--weight-regular);
+}
+
+.folder-heading-toggle {
+  min-height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: var(--border-1) solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
+.folder-heading-toggle:hover,
+.folder-heading-toggle.is-hover {
+  background: var(--head);
+}
+
+.folder-heading-toggle:active,
+.folder-heading-toggle.is-pressed {
+  background: var(--line);
+  transform: translateY(var(--border-1));
+}
+
+.folder-heading-toggle:focus-visible,
+.folder-heading-toggle.is-focus {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--border-2);
+}
+
+[data-motion="off"] .folder-heading-toggle {
+  transition: none;
+}
