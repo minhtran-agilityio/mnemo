@@ -18,6 +18,7 @@
   font-weight: var(--weight-semibold);
   color: var(--ink);
   overflow: hidden;
+  padding-block: var(--border-2);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
