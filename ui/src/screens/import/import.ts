@@ -33,6 +33,7 @@ import {
   PAGE_CONTEXT,
   PAGE_TITLE,
   PICK_TEXT,
+  retryText,
   STEPS,
   type Step,
   stateText,
@@ -81,13 +82,20 @@ export function progressOptions(
 ): ImportProgressOptions {
   const total = s.done + s.waiting + s.failed;
   const state: ImportProgressOptions["state"] =
-    s.state === "paused" ? "paused" : s.waitReason ? "waiting" : "running";
+    s.state === "paused"
+      ? "paused"
+      : s.waitReason || s.retry
+        ? "waiting"
+        : "running";
+  // A wait after a fault is said as plainly as a wait for AI (rule 1, honest failure).
   const reason =
     s.state === "paused"
       ? stateText(s)
       : s.waitReason
         ? waitText(s.waitReason)
-        : undefined;
+        : s.retry
+          ? retryText(s.retry)
+          : undefined;
   return {
     fileName: s.fileName,
     done: s.done,

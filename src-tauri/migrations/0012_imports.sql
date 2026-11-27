@@ -42,3 +42,5 @@ CREATE TABLE import_item (
     UNIQUE (import_id, position)
 );
 CREATE INDEX idx_import_item_state ON import_item (import_id, state, position);
+-- Whether a bookmark came from an import ("Summarize later" keeps its title then).
+CREATE INDEX idx_import_item_bookmark ON import_item (bookmark_id);

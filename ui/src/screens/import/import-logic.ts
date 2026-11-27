@@ -2,7 +2,9 @@
 // screen keeps no rules of its own and each state is tested.
 import type {
   AiWaitReason,
+  ImportFault,
   ImportPreview,
+  ImportRetry,
   ImportStatus,
 } from "../../shared/api";
 
@@ -66,6 +68,17 @@ export function confirmAction(p: ImportPreview): {
   return { label: "Import", disabledWhy: why };
 }
 
+/** Why the import waits after a fault, and when it tries again (honest failure). */
+export function retryText(retry: ImportRetry): string {
+  const why: Record<ImportFault, string> = {
+    unavailable: "Claude Code could not be started.",
+    storage: "Mnemo could not save the import just now.",
+    other: "The last summary did not finish.",
+  };
+  const n = retry.seconds;
+  return `${why[retry.reason]} Mnemo tries again in about ${n} ${n === 1 ? "second" : "seconds"}.`;
+}
+
 /** Why AI may not run now, and that the import goes on by itself. */
 export function waitText(reason: AiWaitReason): string {
   const why: Record<AiWaitReason, string> = {
@@ -94,6 +107,7 @@ export function stateText(s: ImportStatus): string {
       : "Paused. Press Continue to go on.";
   }
   if (s.waitReason) return waitText(s.waitReason);
+  if (s.retry) return retryText(s.retry);
   return `Making summaries in the background, at most ${s.maxRuns} at a time.`;
 }
 

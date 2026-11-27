@@ -208,9 +208,10 @@ const INSERT_RUN_SQL: &str = "INSERT INTO import_run
           found, added, repeats_in_file, already_saved, not_links)
      VALUES (?1, ?2, ?2, ?3, ?4, NULL, ?5, ?6, ?7, ?8, ?9, ?10)";
 
+// ?6 'waiting' (with summaries) or 'stopped' (link only: no summary is made by the import).
 const INSERT_ITEM_SQL: &str = "INSERT INTO import_item
          (id, created_at, updated_at, import_id, bookmark_id, position, state)
-     VALUES (?1, ?2, ?2, ?3, ?4, ?5, 'waiting')";
+     VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6)";
 
 const SET_ADDED_SQL: &str = "UPDATE import_run SET added = ?2, already_saved = ?3 WHERE id = ?1";
 
@@ -230,6 +231,9 @@ macro_rules! select_runs {
         )
     };
 }
+
+const IMPORTED_SQL: &str =
+    "SELECT EXISTS (SELECT 1 FROM import_item WHERE bookmark_id = ?1 AND deleted_at IS NULL)";
 
 // The newest live import; idx_import_run_latest serves it. Times have whole seconds, so two
 // imports in one second are told apart by the order they were stored in (rowid), not by id.
@@ -527,6 +531,15 @@ fn view_on(conn: &Connection, id: &str) -> Result<ImportView, StorageError> {
 }
 
 impl Storage {
+    /// Whether the bookmark `id` came from a file import. Its title is then the file's (or the
+    /// owner's), and a later summary keeps it (owner decision 1).
+    pub fn is_imported_bookmark(&self, id: &str) -> Result<bool, StorageError> {
+        Ok(self
+            .conn
+            .prepare_cached(IMPORTED_SQL)?
+            .query_row([id], |r| r.get(0))?)
+    }
+
     /// What importing `file` would do now: the links it would add and the counts it would skip.
     /// Writes nothing.
     pub fn preview_import(&self, file: &ImportFile) -> Result<ImportPreview, StorageError> {
@@ -608,13 +621,18 @@ impl Storage {
                 link.key.as_deref(),
                 link.title.as_deref(),
             )?;
-            if with_summaries {
-                let item = RecordBase::new_at(now);
-                tx.execute(
-                    INSERT_ITEM_SQL,
-                    params![item.id, now, run.id, bookmark_id, added],
-                )?;
-            }
+            // Every link gets an item, so a bookmark is known as imported (its title is kept,
+            // owner decision 1); without summaries it is link only from the start.
+            let state = if with_summaries {
+                ItemState::Waiting
+            } else {
+                ItemState::Stopped
+            };
+            let item = RecordBase::new_at(now);
+            tx.execute(
+                INSERT_ITEM_SQL,
+                params![item.id, now, run.id, bookmark_id, added, state.as_str()],
+            )?;
             added += 1;
         }
         tx.execute(SET_ADDED_SQL, params![run.id, added, already_saved])?;
@@ -1055,6 +1073,43 @@ mod tests {
         assert_eq!(live_bookmarks(&s), 4);
         // Another import may start at once.
         s.start_import_at(T2, &file, false).unwrap();
+    }
+
+    #[test]
+    fn a_bookmark_is_known_as_imported_with_or_without_summaries_and_a_pasted_link_is_not() {
+        let (mut s, dir) = open_temp();
+        let pasted = s.save_link_at(T, "https://a.example/pasted").unwrap();
+        let with = write(&dir, "w.txt", "https://a.example/with\n");
+        let without = write(&dir, "o.txt", "https://a.example/without\n");
+        let a = s
+            .start_import_at(T, &read_import_file(&with, LIMITS).unwrap(), true)
+            .unwrap();
+        // Finish the first import so the second may start.
+        let item = s.waiting_import_items(&a.base.id, 1).unwrap().remove(0);
+        s.end_import_item(&item.id, ItemState::Done).unwrap();
+        s.finish_import_if_done(&a.base.id).unwrap();
+        s.start_import_at(T2, &read_import_file(&without, LIMITS).unwrap(), false)
+            .unwrap();
+        let id_of = |s: &Storage, url: &str| {
+            s.list_bookmark_cards(&crate::storage::PageRequest {
+                after: None,
+                limit: 10,
+            })
+            .unwrap()
+            .items
+            .into_iter()
+            .find(|b| b.url == url)
+            .unwrap()
+            .base
+            .id
+        };
+        assert!(s
+            .is_imported_bookmark(&id_of(&s, "https://a.example/with"))
+            .unwrap());
+        assert!(s
+            .is_imported_bookmark(&id_of(&s, "https://a.example/without"))
+            .unwrap());
+        assert!(!s.is_imported_bookmark(&pasted.base.id).unwrap());
     }
 
     #[test]

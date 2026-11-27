@@ -799,6 +799,7 @@ mod tests {
         assert!(table_exists(&c, "import_run"));
         assert!(table_exists(&c, "import_item"));
         assert!(index_exists(&c, "idx_import_item_state"));
+        assert!(index_exists(&c, "idx_import_item_bookmark"));
         assert!(index_exists(&c, "idx_import_run_latest"));
         let run_row = |state: &str, paused_by: Option<&str>| {
             c.execute(

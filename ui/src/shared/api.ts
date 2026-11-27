@@ -914,12 +914,22 @@ export interface ImportStatus {
   done: number;
   waiting: number;
   failed: number;
-  /** Set while the import runs with links waiting and AI may not run now. */
   /** Links the owner deleted during the import: not kept as link only. */
   removed: number;
   /** The most summaries the core makes at one time. */
   maxRuns: number;
+  /** Set while the import runs with links waiting and AI may not run now. */
   waitReason: AiWaitReason | null;
+  /** Set while AI may run but the last run ended with a fault: why, and when it tries again. */
+  retry: ImportRetry | null;
+}
+
+/** Why an import waits although AI may run. */
+export type ImportFault = "unavailable" | "storage" | "other";
+
+export interface ImportRetry {
+  reason: ImportFault;
+  seconds: number;
 }
 
 /** Asks the owner for a file of links (a browser bookmarks export or a text file). */

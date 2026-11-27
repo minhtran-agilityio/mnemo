@@ -47,6 +47,7 @@ function status(over: Partial<ImportStatus> = {}): ImportStatus {
     waitReason: null,
     removed: 0,
     maxRuns: 2,
+    retry: null,
     ...over,
   };
 }
@@ -215,6 +216,14 @@ describe("Done counts and the running text", () => {
     expect(doneText(s)).toBe(
       "Import finished: 45 saved with a summary, 2 saved as link only, 3 skipped, already saved or repeats, 2 not links, 3 deleted during the import.",
     );
+  });
+
+  it("says plainly why it waits after a fault and when it tries again", () => {
+    const s = status({ retry: { reason: "unavailable", seconds: 5 } });
+    expect(stateText(s)).toBe(
+      "Claude Code could not be started. Mnemo tries again in about 5 seconds.",
+    );
+    expect(stateText(s)).not.toMatch(/Making summaries/);
   });
 
   it("names the core's number of runs at a time", () => {

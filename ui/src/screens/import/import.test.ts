@@ -37,6 +37,7 @@ function status(over: Partial<ImportStatus> = {}): ImportStatus {
     waitReason: null,
     removed: 0,
     maxRuns: 2,
+    retry: null,
     ...over,
   };
 }
@@ -348,6 +349,12 @@ describe("Import page helpers", () => {
 
   it("maps an import to the progress line's state and reason", () => {
     expect(progressOptions(status(), false).state).toBe("running");
+    const retrying = progressOptions(
+      status({ retry: { reason: "storage", seconds: 10 } }),
+      false,
+    );
+    expect(retrying.state).toBe("waiting");
+    expect(retrying.reason).toMatch(/could not save the import/);
     const waiting = progressOptions(status({ waitReason: "off" }), false);
     expect(waiting.state).toBe("waiting");
     expect(waiting.reason).toMatch(/AI is off/);

@@ -271,6 +271,21 @@ impl SaveContext<'_> {
         }
     }
 
+    /// Whether the bookmark came from a file import. A storage failure keeps the title (the
+    /// safe side: the owner's data is not replaced) and is logged.
+    fn is_imported(&self, id: &str) -> bool {
+        let mut imported = true;
+        let read = self.store.with_storage(&mut |s| {
+            imported = s.is_imported_bookmark(id)?;
+            Ok(Held::Lost(None))
+        });
+        if let Err(e) = read {
+            log::error!("could not read whether bookmark {id} was imported: {e:?}");
+            imported = true;
+        }
+        imported
+    }
+
     /// The names of the owner's live folders for the prompt. A storage failure gives none (the
     /// answer then files in Unsorted) and is logged.
     fn folder_names(&self) -> Vec<String> {
@@ -359,7 +374,11 @@ pub fn summarize(
             ))
         }
         Some(text) => Source::Pasted(text.trim().to_string()),
-        None => Source::Page { keep_title: false },
+        // An imported link keeps the title of the file (owner decision 1), also on "Summarize
+        // later"; a link saved by pasting takes the page title as before.
+        None => Source::Page {
+            keep_title: ctx.is_imported(id),
+        },
     };
     // Refused when the bookmark is done or already being read: a done summary is never lost to
     // a failed second run, and two runs never race on one bookmark.
