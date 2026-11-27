@@ -1060,6 +1060,57 @@ mod tests {
     }
 
     #[test]
+    fn a_runner_whose_thread_dies_gives_stopped_not_cancelled_or_unavailable() {
+        let script = Arc::new(ScriptRunner::default());
+        script
+            .plans
+            .lock()
+            .unwrap()
+            .insert("broken".into(), Plan::Panic);
+        let (q, _events) = queue(script, TestLog::new());
+        let background = BackgroundRunner::new(q.clone(), CancelToken::default());
+        assert_eq!(
+            background.run_task(&task("broken"), &CancelToken::default()),
+            Err(AiError::Stopped)
+        );
+        assert_eq!(
+            QueuedRunner(q).run_task(&task("broken"), &CancelToken::default()),
+            Err(AiError::Stopped)
+        );
+    }
+
+    #[test]
+    fn a_run_the_log_cannot_record_gives_not_recorded_from_both_runners() {
+        struct BrokenLog;
+        impl RunLog for BrokenLog {
+            fn enqueue(&self, _: &str) -> Result<String, RunLogError> {
+                Err(RunLogError("disk I/O error".to_string()))
+            }
+            fn start(&self, _: &str) -> Result<(), RunLogError> {
+                Ok(())
+            }
+            fn finish(&self, _: &str, _: &RunEnd, _: Option<i64>) -> Result<(), RunLogError> {
+                Ok(())
+            }
+        }
+        let q = RunQueue::new(
+            Arc::new(ScriptRunner::default()),
+            Arc::new(BrokenLog),
+            Arc::new(|_: &RunEvent| {}),
+            crate::scheduler::ai_control::testing::open_control(),
+        );
+        let background = BackgroundRunner::new(q.clone(), CancelToken::default());
+        assert_eq!(
+            background.run_task(&task("any"), &CancelToken::default()),
+            Err(AiError::NotRecorded)
+        );
+        assert_eq!(
+            QueuedRunner(q).run_task(&task("any"), &CancelToken::default()),
+            Err(AiError::NotRecorded)
+        );
+    }
+
+    #[test]
     fn queue_submit_fails_and_starts_nothing_when_the_row_cannot_be_written() {
         struct BrokenLog;
         impl RunLog for BrokenLog {
