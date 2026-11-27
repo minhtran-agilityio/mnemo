@@ -450,6 +450,7 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
               counts: sample,
               onImport: noop,
               onChooseAnother: noop,
+              onCancel: noop,
               ...options,
             }),
             { grow: true },
@@ -461,7 +462,7 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
             state: "error",
             error: "The file could not be read. Nothing was stored.",
           }),
-          sum("partial: zero to add", {
+          sum("partial, disabled: zero to add", {
             counts: { toAdd: 0, repeats: 12, saved: 0, notLinks: 0 },
           }),
           sum("hover", { forced: "hover" }),

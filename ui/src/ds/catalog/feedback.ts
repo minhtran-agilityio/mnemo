@@ -166,7 +166,7 @@ export const FEEDBACK = [
     ],
     source: "ds",
     className: "import-summary",
-    notes: `What a chosen file holds, before anything is stored (${ref(208)}). Partial is zero to add: Import is disabled and a plain line says why. Error keeps only Choose another file. Empty and AI off do not apply.`,
+    notes: `What a chosen file holds, before anything is stored (${ref(208)}). Partial is zero to add: Import is disabled and a plain line says why. Error keeps Choose another file and Cancel; loading keeps only Cancel. Empty and AI off do not apply.`,
   },
   {
     name: "text",

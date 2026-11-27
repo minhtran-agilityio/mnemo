@@ -29,6 +29,8 @@ export interface ImportSummaryOptions {
   readonly slot?: Node;
   readonly onImport?: () => void;
   readonly onChooseAnother?: () => void;
+  /** Goes back with nothing imported. A quiet button, shown in every state. */
+  readonly onCancel?: () => void;
   /** A fixed look for a state the pointer cannot hold still (the catalog shows these). */
   readonly forced?: ButtonForcedState;
 }
@@ -53,7 +55,7 @@ export function createImportSummary(
 ): HTMLElement {
   const state = options.state ?? "ready";
   const root = doc.createElement("section");
-  root.className = `import-summary import-summary-${state}`;
+  root.className = `import-summary is-${state}`;
   root.setAttribute("aria-label", `Import summary: ${options.fileName}`);
 
   const name = doc.createElement("p");
@@ -62,14 +64,21 @@ export function createImportSummary(
   name.title = options.fileName;
   root.append(name);
 
+  const actions = doc.createElement("div");
+  actions.className = "import-summary-actions";
+  const cancel = createButton(doc, {
+    label: "Cancel",
+    variant: "ghost",
+    onClick: options.onCancel,
+  });
+
   if (state === "loading") {
     root.setAttribute("aria-busy", "true");
-    root.append(buildBusyLine("Reading the file…"));
+    actions.append(cancel);
+    root.append(buildBusyLine("Reading the file…"), actions);
     return root;
   }
 
-  const actions = doc.createElement("div");
-  actions.className = "import-summary-actions";
   const choose = createButton(doc, {
     label: "Choose another file",
     onClick: options.onChooseAnother,
@@ -77,20 +86,23 @@ export function createImportSummary(
 
   if (state === "error") {
     const line = doc.createElement("p");
-    line.className = "import-summary-error";
+    line.className = "import-summary-message";
     line.setAttribute("role", "alert");
     line.textContent =
       options.error ?? "The file could not be read. Nothing was stored.";
-    actions.append(choose);
+    actions.append(choose, cancel);
     root.append(line, actions);
     return root;
   }
 
-  const counts = options.counts ?? {
-    toAdd: 0,
-    repeats: 0,
-    saved: 0,
-    notLinks: 0,
+  const given = options.counts;
+  const clean = (n: number | undefined): number =>
+    typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  const counts: ImportCounts = {
+    toAdd: clean(given?.toAdd),
+    repeats: clean(given?.repeats),
+    saved: clean(given?.saved),
+    notLinks: clean(given?.notLinks),
   };
   const list = doc.createElement("dl");
   list.className = "import-summary-counts";
@@ -113,8 +125,10 @@ export function createImportSummary(
   if (none) {
     const why = doc.createElement("p");
     why.className = "import-summary-why";
-    why.textContent =
-      "Nothing to add: every entry is a repeat, already saved or not a link.";
+    const empty = counts.repeats + counts.saved + counts.notLinks === 0;
+    why.textContent = empty
+      ? "The file has no entries."
+      : "Nothing to add: every entry is a repeat, already saved or not a link.";
     root.append(why);
   }
   if (options.slot) {
@@ -132,6 +146,7 @@ export function createImportSummary(
       onClick: options.onImport,
     }),
     choose,
+    cancel,
   );
   root.append(actions);
   return root;

@@ -68,14 +68,14 @@ test("zero to add disables Import and says why", () => {
   );
 });
 
-test("loading shows a status line and no actions", () => {
+test("loading shows a status line and only Cancel", () => {
   const node = createImportSummary(document, {
     fileName: "a.html",
     state: "loading",
   });
   expect(node.getAttribute("aria-busy")).toBe("true");
   expect(node.querySelector("[role=status]")?.textContent).toContain("Reading");
-  expect(node.querySelector("button")).toBeNull();
+  expect(buttons(node).map((b) => b.textContent)).toEqual(["Cancel"]);
 });
 
 test("error is an alert with only Choose another file", () => {
@@ -88,6 +88,7 @@ test("error is an alert with only Choose another file", () => {
   );
   expect(buttons(node).map((b) => b.textContent)).toEqual([
     "Choose another file",
+    "Cancel",
   ]);
 });
 
@@ -121,7 +122,7 @@ test("a long file name is kept whole in the title and set as text", () => {
     fileName: name,
     counts: COUNTS,
   });
-  const h = node.querySelector(".import-summary-file");
+  const h = node.querySelector<HTMLElement>(".import-summary-file");
   expect(h?.title).toBe(name);
   expect(h?.textContent).toBe(name);
   expect(node.querySelector("img")).toBeNull();
@@ -134,4 +135,57 @@ test("a forced state reaches the import button", () => {
     forced: "hover",
   });
   expect(buttons(node)[0]?.className).toContain("is-hover");
+});
+
+test("only the inner message line has the error box, not the root", () => {
+  const node = createImportSummary(document, {
+    fileName: "a.html",
+    state: "error",
+  });
+  expect(node.classList.contains("is-error")).toBe(true);
+  expect(node.className).not.toContain("import-summary-message");
+  expect(node.querySelectorAll(".import-summary-message").length).toBe(1);
+});
+
+test("an empty file gives no made-up reason", () => {
+  const node = createImportSummary(document, {
+    fileName: "a.html",
+    counts: { toAdd: 0, repeats: 0, saved: 0, notLinks: 0 },
+  });
+  expect(node.querySelector(".import-summary-why")?.textContent).toBe(
+    "The file has no entries.",
+  );
+});
+
+test("bad counts are shown as 0", () => {
+  const node = createImportSummary(document, {
+    fileName: "a.html",
+    counts: { toAdd: Number.NaN, repeats: -4, saved: Infinity, notLinks: 2 },
+  });
+  expect([...node.querySelectorAll("dd")].map((d) => d.textContent)).toEqual([
+    "0",
+    "0",
+    "0",
+    "2",
+  ]);
+  expect(buttons(node)[0]?.disabled).toBe(true);
+});
+
+test("Cancel is a quiet third action that calls onCancel, also when Import is disabled", () => {
+  const onCancel = vi.fn();
+  const node = createImportSummary(document, {
+    fileName: "a.html",
+    counts: { toAdd: 0, repeats: 1, saved: 0, notLinks: 0 },
+    onCancel,
+  });
+  const all = buttons(node);
+  expect(all.map((b) => b.textContent)).toEqual([
+    "Import 0 links",
+    "Choose another file",
+    "Cancel",
+  ]);
+  expect(all[2]?.className).toContain("btn-ghost");
+  expect(all[2]?.disabled).toBe(false);
+  all[2]?.click();
+  expect(onCancel).toHaveBeenCalledOnce();
 });

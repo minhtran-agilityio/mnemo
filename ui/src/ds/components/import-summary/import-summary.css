@@ -57,13 +57,13 @@
 }
 
 .import-summary-why,
-.import-summary-error {
+.import-summary-message {
   margin: 0;
   font-size: var(--text-md);
   color: var(--muted);
 }
 
-.import-summary-error {
+.import-summary-message {
   padding: var(--space-3);
   border: var(--border-1) solid var(--bad);
   border-radius: var(--radius-md);
