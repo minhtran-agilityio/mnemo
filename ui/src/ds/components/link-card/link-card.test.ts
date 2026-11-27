@@ -1768,7 +1768,8 @@ test("keyboard focus on the open button still shows the full site (issue 172)", 
   const css = readFileSync(resolve(__dirname, "link-card.css"), "utf8");
   expect(css).toContain(".link-row:has(.link-open:focus-visible) .site");
   expect(css).toContain(".compact-row:has(.link-open:focus-visible) .dom");
-  expect(css).toContain(".compact-row:focus-within .dom");
+  expect(css).toContain(".compact-row:has(:focus-visible) .dom");
+  expect(css).not.toContain(".compact-row:focus-within .dom");
 });
 
 test("the hidden Compact actions take no pointer and show on hover and focus", () => {
@@ -1808,4 +1809,43 @@ test("a click with text selected in the box, or a prevented click, does not open
   card.click();
   expect(opened).toEqual([]);
   card.remove();
+});
+
+test("the Compact actions show always where there is no hover", () => {
+  const css = readFileSync(resolve(__dirname, "link-card.css"), "utf8");
+  const media = css.match(/@media \(hover: none\)[^{]*\{[\s\S]*?\n\}\n/)?.[0];
+  expect(media).toContain("(pointer: coarse)");
+  expect(media).toContain(".link-actions-box");
+  expect(media).toContain("pointer-events: auto");
+});
+
+test("a selection stops a click on the box, but not a click from the title button", () => {
+  const opened: LinkItem[] = [];
+  const card = createLinkCard(document, pho, { onOpen: (i) => opened.push(i) });
+  document.body.append(card);
+  const range = document.createRange();
+  range.selectNodeContents(card.querySelector(".sum") as Node);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+  card.querySelector<HTMLElement>(".link-open")?.click();
+  expect(opened).toEqual([pho]);
+  sel?.removeAllRanges();
+  card.remove();
+});
+
+test("a control of a wrapper around the box does not stop it from opening", () => {
+  for (const cls of ["link-actions", "lcard-action"]) {
+    const opened: LinkItem[] = [];
+    const wrap = document.createElement("a");
+    wrap.className = cls;
+    const card = createLinkCard(document, pho, {
+      onOpen: (i) => opened.push(i),
+    });
+    wrap.append(card);
+    document.body.append(wrap);
+    card.click();
+    expect(opened).toEqual([pho]);
+    wrap.remove();
+  }
 });

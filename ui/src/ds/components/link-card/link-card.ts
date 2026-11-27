@@ -181,16 +181,22 @@ function makeOpenable(
     title.append(button);
   }
   box.addEventListener("click", (event) => {
+    if (event.defaultPrevented) return;
     const target = event.target as Element | null;
-    if (event.defaultPrevented || target?.closest(OWN_CONTROL)) return;
-    // The owner selecting text in the box is not a request to open it.
-    const selection = box.ownerDocument.defaultView?.getSelection();
-    if (
-      selection &&
-      !selection.isCollapsed &&
-      box.contains(selection.anchorNode)
-    )
-      return;
+    // Another control only counts when it is inside this box, not a wrapper around it.
+    const own = target?.closest(OWN_CONTROL);
+    if (own && box.contains(own)) return;
+    // A click from the title button (Enter, Space or the pointer on it) always opens. On the rest of
+    // the box, the owner selecting text is not a request to open.
+    if (!target?.closest(".link-open")) {
+      const selection = box.ownerDocument.defaultView?.getSelection();
+      if (
+        selection &&
+        !selection.isCollapsed &&
+        box.contains(selection.anchorNode)
+      )
+        return;
+    }
     onOpen(item);
   });
 }
