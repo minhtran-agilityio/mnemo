@@ -177,12 +177,20 @@ function makeOpenable(
     const button = box.ownerDocument.createElement("button");
     button.type = "button";
     button.className = "link-open";
-    button.textContent = title.textContent;
-    title.replaceChildren(button);
+    button.append(...title.childNodes);
+    title.append(button);
   }
   box.addEventListener("click", (event) => {
     const target = event.target as Element | null;
-    if (target?.closest(OWN_CONTROL)) return;
+    if (event.defaultPrevented || target?.closest(OWN_CONTROL)) return;
+    // The owner selecting text in the box is not a request to open it.
+    const selection = box.ownerDocument.defaultView?.getSelection();
+    if (
+      selection &&
+      !selection.isCollapsed &&
+      box.contains(selection.anchorNode)
+    )
+      return;
     onOpen(item);
   });
 }

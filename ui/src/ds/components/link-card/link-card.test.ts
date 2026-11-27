@@ -1759,3 +1759,47 @@ test("forced states mark the card", () => {
       ),
     ).toBe(true);
 });
+
+test("keyboard focus on the open button still shows the full site (issue 172)", () => {
+  const css = readFileSync(resolve(__dirname, "link-card.css"), "utf8");
+  expect(css).toContain(".link-row:has(.link-open:focus-visible) .site");
+  expect(css).toContain(".compact-row:has(.link-open:focus-visible) .dom");
+  expect(css).toContain(".compact-row:focus-within .dom");
+});
+
+test("the hidden Compact actions take no pointer and show on hover and focus", () => {
+  const css = readFileSync(resolve(__dirname, "link-card.css"), "utf8");
+  const hidden = css.match(/\.compact-row > \.link-actions \{[^}]*\}/)?.[0];
+  expect(hidden).toContain("pointer-events: none");
+  expect(hidden).toContain("opacity: 0");
+  const shown = css.match(
+    /\.compact-row:focus-within > \.link-actions \{[^}]*\}/,
+  )?.[0];
+  expect(shown).toContain("pointer-events: auto");
+  expect(css).toContain("--row-surface: var(--head)");
+});
+
+test("the open button keeps the title's child nodes", () => {
+  const row = createCompactRow(document, pho, { onOpen: () => {} });
+  const button = row.querySelector(".link-open");
+  expect(button?.parentElement?.className).toBe("row-title");
+  expect(button?.textContent).toBe(pho.title);
+});
+
+test("a click with text selected in the box, or a prevented click, does not open", () => {
+  const opened: LinkItem[] = [];
+  const card = createLinkCard(document, pho, { onOpen: (i) => opened.push(i) });
+  document.body.append(card);
+  const range = document.createRange();
+  range.selectNodeContents(card.querySelector(".sum") as Node);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+  card.click();
+  expect(opened).toEqual([]);
+  sel?.removeAllRanges();
+  card.addEventListener("click", (e) => e.preventDefault(), { capture: true });
+  card.click();
+  expect(opened).toEqual([]);
+  card.remove();
+});

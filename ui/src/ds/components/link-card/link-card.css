@@ -285,8 +285,11 @@
    ellipsis, so the row grows taller while it has focus. The pointer gets the same full value in the
    tooltip. A screen reader reads the whole host from the text in any case. */
 .link-row:focus-visible .site,
+.link-row:has(.link-open:focus-visible) .site,
 .link-row.is-focus .site,
 .compact-row:focus-visible .dom,
+.compact-row:has(.link-open:focus-visible) .dom,
+.compact-row:focus-within .dom,
 .compact-row.is-focus .dom {
   overflow-wrap: anywhere;
   white-space: normal;
@@ -294,6 +297,8 @@
 
 /* A wrapped host takes its room for stacked marks inside the row, not over the row's edge. */
 .compact-row:focus-visible .dom,
+.compact-row:has(.link-open:focus-visible) .dom,
+.compact-row:focus-within .dom,
 .compact-row.is-focus .dom {
   margin-block: 0;
 }
@@ -595,13 +600,33 @@
   position: relative;
 }
 
+/* The overlay takes the surface of the row (--row-surface: idle, hover, pressed) and fades in from its
+   start edge, so the site and the date under it are covered only where the buttons are. While hidden
+   it takes no pointer: a tap on a touch screen reaches the row, not an invisible button. */
+.compact-row {
+  --row-surface: var(--card);
+}
+
+.compact-row:hover,
+.compact-row.is-hover,
+.compact-row:active,
+.compact-row.is-active {
+  --row-surface: var(--head);
+}
+
 .compact-row > .link-actions {
   position: absolute;
-  inset-block: 0;
-  inset-inline-end: 0;
-  padding-inline: var(--space-3) var(--space-2);
-  background: var(--head);
+  /* Inside the focus ring, so the ring stays whole. */
+  inset-block: var(--focus-ring);
+  inset-inline-end: var(--focus-ring);
+  padding-inline: var(--space-6) var(--space-2);
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--row-surface) var(--space-5)
+  );
   opacity: 0;
+  pointer-events: none;
 }
 
 .compact-row:hover > .link-actions,
@@ -609,4 +634,5 @@
 .compact-row.is-focus > .link-actions,
 .compact-row:focus-within > .link-actions {
   opacity: 1;
+  pointer-events: auto;
 }
