@@ -1,0 +1,83 @@
+/* Import progress: counts, state word, reason, bar and one text button. Tokens only. */
+.import-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  max-width: var(--size-field-max);
+  min-width: 0;
+}
+
+.ip-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.ip-title {
+  display: flex;
+  min-width: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.ip-lead {
+  flex: none;
+  padding-block: var(--border-2);
+  white-space: pre;
+}
+
+.ip-file {
+  min-width: 0;
+  padding-block: var(--border-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ip-state {
+  flex: none;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--muted);
+}
+
+.import-progress[data-state="waiting"] .ip-state {
+  color: var(--warn-ink);
+}
+
+.import-progress[data-state="finished"] .ip-state {
+  color: var(--good);
+}
+
+.ip-counts,
+.ip-reason {
+  margin: 0;
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.ip-reason {
+  color: var(--ink2);
+}
+
+.ip-bar {
+  max-width: none;
+}
+
+.import-progress[data-state="paused"] .ip-bar > span,
+.import-progress[data-state="waiting"] .ip-bar > span {
+  background: var(--muted);
+}
+
+.ip-actions {
+  display: flex;
+}
+
+.ip-actions[hidden],
+.ip-reason[hidden] {
+  display: none;
+}
