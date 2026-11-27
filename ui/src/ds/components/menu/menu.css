@@ -12,7 +12,9 @@
 
 .menu .menu-label {
   min-width: 0;
+  /* Room for descenders inside the clipped box, taken back so the item keeps its height. */
   padding-block: var(--space-1);
+  margin-block: calc(-1 * var(--space-1));
   line-height: var(--leading-body);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -24,6 +26,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
   min-height: var(--size-row-menu);
   padding: 0 var(--space-3);
   border: 0;
@@ -60,5 +63,6 @@
 }
 
 .menu kbd {
+  flex: none;
   margin-left: auto;
 }

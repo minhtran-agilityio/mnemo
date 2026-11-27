@@ -60,7 +60,8 @@ export function createMenuPanel(
     const text = doc.createElement("span");
     text.className = "menu-label";
     text.textContent = entry.label;
-    item.title = entry.label;
+    // A disabled item keeps its full label as the title: the label holds the reason.
+    if (entry.disabled) item.title = entry.label;
     item.append(text);
     if (entry.shortcut) item.append(createKbd(doc, entry.shortcut));
     item.addEventListener("click", () => {
@@ -70,6 +71,20 @@ export function createMenuPanel(
     });
     menu.append(item);
   }
+  // The full name is the title only when the label is cut (checked when the pointer or focus
+  // reaches the item, when the item has a width).
+  const titleIfCut = (event: Event) => {
+    const item = (event.target as Element).closest<HTMLElement>(
+      '[role="menuitem"]',
+    );
+    const text = item?.querySelector<HTMLElement>(".menu-label");
+    if (!item || !text || item.getAttribute("aria-disabled") === "true") return;
+    if (text.scrollWidth > text.clientWidth)
+      item.title = text.textContent ?? "";
+    else item.removeAttribute("title");
+  };
+  menu.addEventListener("pointerover", titleIfCut);
+  menu.addEventListener("focusin", titleIfCut);
   menu.addEventListener("keydown", (event) => {
     const items = enabled(menu);
     if (!items.length) return;
@@ -95,14 +110,19 @@ export interface MenuOptions {
   readonly size?: "md" | "sm";
   /** The trigger button's variant. Default "default". */
   readonly variant?: ButtonVariant;
-  /** Disables the trigger (while an action runs). An open menu closes. */
+  /** The trigger starts disabled. To change it later, call setDisabled on the menu. */
   readonly disabled?: boolean;
   /** When it aborts, an open menu closes and its document listener goes. */
   readonly signal?: AbortSignal;
 }
 
+export interface Menu extends Popover {
+  /** Disables or enables the trigger (for example while a move runs). Disabling closes an open menu. */
+  setDisabled(disabled: boolean): void;
+}
+
 /** A button that opens a menu. */
-export function createMenu(doc: Document, options: MenuOptions): Popover {
+export function createMenu(doc: Document, options: MenuOptions): Menu {
   const trigger = createButton(doc, {
     label: options.label,
     size: options.size,
@@ -126,5 +146,12 @@ export function createMenu(doc: Document, options: MenuOptions): Popover {
     signal: options.signal,
     firstFocus: () => enabled(panel)[0] ?? null,
   });
-  return pop;
+  const popover = pop;
+  return {
+    ...popover,
+    setDisabled(disabled: boolean) {
+      if (disabled) popover.close(false);
+      trigger.disabled = disabled;
+    },
+  };
 }

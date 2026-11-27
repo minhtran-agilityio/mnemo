@@ -589,6 +589,7 @@ export const renderControls: TabRenderer = (panel, ctx) => {
           "Cooking",
           "Dev tools",
           "Đọc sau – bài dài về cơ sở dữ liệu và WAL",
+          "Đọc sau – bài rất dài về cơ sở dữ liệu, WAL, checkpoint, sao lưu và khôi phục",
           ...Array.from({ length: 22 }, (_, i) => `Folder ${i + 4}`),
           "Unsorted",
         ].map((label) => ({ label }));

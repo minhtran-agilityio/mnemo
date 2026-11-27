@@ -153,7 +153,7 @@ export const CONTROLS = [
       "overflow",
     ],
     source: "ds",
-    notes: `Arrow keys, Home and End move. A disabled item says why. The trigger takes size ("md" default, "sm"), variant (the button variants) and disabled, passed to the button (${ref(217)}); disabled also stops the menu opening. A long list scrolls inside the panel; a long name is cut with an ellipsis and the full name is the item's title. Loading, empty and AI off do not apply.`,
+    notes: `Arrow keys, Home and End move. A disabled item says why. The trigger takes size ("md" default, "sm"), variant (the button variants) and disabled, passed to the button (${ref(217)}); disabled sets it at creation, and setDisabled(true or false) changes it later (a move running): disabling closes an open menu. A long list scrolls inside the panel; a long name is cut with an ellipsis and the full name is the item's title when it is cut. Loading, empty and AI off do not apply.`,
   },
   {
     name: "popover",
