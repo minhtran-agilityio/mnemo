@@ -285,8 +285,11 @@
    ellipsis, so the row grows taller while it has focus. The pointer gets the same full value in the
    tooltip. A screen reader reads the whole host from the text in any case. */
 .link-row:focus-visible .site,
+.link-row:has(.link-open:focus-visible) .site,
 .link-row.is-focus .site,
 .compact-row:focus-visible .dom,
+.compact-row:has(.link-open:focus-visible) .dom,
+.compact-row:has(:focus-visible) .dom,
 .compact-row.is-focus .dom {
   overflow-wrap: anywhere;
   white-space: normal;
@@ -294,6 +297,8 @@
 
 /* A wrapped host takes its room for stacked marks inside the row, not over the row's edge. */
 .compact-row:focus-visible .dom,
+.compact-row:has(.link-open:focus-visible) .dom,
+.compact-row:has(:focus-visible) .dom,
 .compact-row.is-focus .dom {
   margin-block: 0;
 }
@@ -502,4 +507,179 @@
 .lcard .lcard-folder-reason-text {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* Open a link (issue 205). An openable row or card (data-openable) has its title as a real button,
+   the main control; the box is clickable too. The button looks like the title text: it takes the
+   title's font, colour and cut-off, and shows no box of its own. */
+.link-open {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  overflow-wrap: inherit;
+  cursor: pointer;
+  /* Room above and below the line for stacked Vietnamese marks (the button cuts what overflows it),
+     taken back by the margin so the layout does not move. */
+  padding-block: var(--border-2);
+  margin-block: calc(-1 * var(--border-2));
+}
+
+/* Rows cut a long title with an ellipsis, full text in the tooltip of the title. */
+.link-row .link-open,
+.compact-row .link-open {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The card wraps a long title in two lines, as without the button. */
+.lcard .title > .link-open {
+  display: -webkit-box;
+  width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* The focus ring is drawn on the whole row or card, not on the title's box. */
+.link-open:focus-visible {
+  outline: none;
+}
+
+.lcard[data-openable]:has(.link-open:focus-visible),
+.lcard[data-openable].is-focus {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--border-2);
+}
+
+.link-row[data-openable]:has(.link-open:focus-visible),
+.compact-row[data-openable]:has(.link-open:focus-visible),
+.compact-row[data-openable].is-focus {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: calc(var(--focus-ring) * -1);
+}
+
+.lcard[data-openable],
+.link-row[data-openable],
+.compact-row[data-openable] {
+  cursor: pointer;
+}
+
+.lcard.is-hover {
+  border-color: var(--edge);
+  box-shadow: var(--sh1);
+}
+
+.lcard[data-openable]:active,
+.lcard.is-active {
+  background: var(--head);
+  border-color: var(--control-edge);
+}
+
+/* The actions of a row, after its text. A button keeps its own hover, focus, active and disabled
+   looks. The List row shows them always, whole, at the row's end. */
+.link-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* In the List row the actions are the last item of .link-main, after the body and the meta line, so
+   .link-main keeps filling the row. They share the line with the body when they fit, at its end; else
+   they wrap under it, each button whole (a long label wraps inside its button), so nothing spills out
+   of the row. */
+.link-main > .link-actions {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+  margin-inline-start: auto;
+}
+
+.link-actions > .btn,
+.link-actions-box > .btn {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* The Compact row stays one line: its actions sit over the row's end, on the row's surface, and show
+   on hover and on focus inside the row (they stay in the tab order while hidden, so focus shows
+   them). */
+.compact-row {
+  position: relative;
+}
+
+/* The overlay takes the surface of the row (--row-surface: idle, hover, pressed) and fades in from its
+   start edge, so the site and the date under it are covered only where the buttons are. While hidden
+   it takes no pointer: a tap on a touch screen reaches the row, not an invisible button. */
+.compact-row {
+  --row-surface: var(--card);
+}
+
+.compact-row:hover,
+.compact-row.is-hover,
+.compact-row:active,
+.compact-row.is-active {
+  --row-surface: var(--head);
+}
+
+/* The slot has no box of its own (display: contents), so it takes no room in the line. The buttons sit
+   in .link-actions-box, drawn over the row's end, inside the focus ring and never wider than the row;
+   in a row narrower than its buttons each label is cut with an ellipsis. The slot's opacity and
+   pointer-events (hidden: none) are set on the box too, as a box-less slot cannot carry them. */
+.compact-row > .link-actions {
+  display: contents;
+}
+
+.compact-row > .link-actions > .link-actions-box {
+  position: absolute;
+  inset-block: var(--focus-ring);
+  inset-inline-end: var(--focus-ring);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: calc(100% - 2 * var(--focus-ring));
+  padding-inline: var(--space-6) var(--space-2);
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--row-surface) var(--space-5)
+  );
+  opacity: 0;
+  pointer-events: none;
+}
+
+.compact-row > .link-actions > .link-actions-box > .btn {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-row:hover > .link-actions > .link-actions-box,
+.compact-row.is-hover > .link-actions > .link-actions-box,
+.compact-row.is-focus > .link-actions > .link-actions-box,
+.compact-row:focus-within > .link-actions > .link-actions-box {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* No hover (a touch screen): the Compact row's actions show always, in the same overlay, so Delete and
+   Move are usable. The row stays one line. */
+@media (hover: none), (pointer: coarse) {
+  .compact-row > .link-actions > .link-actions-box {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }

@@ -284,9 +284,148 @@ function linkCardRow(ctx: TabContext) {
   const notices = el(doc, "div", "rec-wrap");
   notices.append(...noticeFolderStates(doc));
   return {
-    nodes: [sw, out, states, notices, ...linkRowStates(doc, pasted)],
+    nodes: [
+      sw,
+      out,
+      states,
+      notices,
+      ...linkRowStates(doc, pasted),
+      openStates(ctx),
+    ],
     column: true,
   };
+}
+
+/**
+ * Open a link and per-item actions (issue 205): the three views with `onOpen` and `actions`, and
+ * the states of an openable row or card. A click, or Enter on the title button, shows a toast.
+ */
+function openStates(ctx: TabContext): HTMLElement {
+  const doc = ctx.doc;
+  const wiki: LinkItem = {
+    title: "Phở – Wikipedia tiếng Việt",
+    url: "https://vi.wikipedia.org/wiki/Ph%E1%BB%9F",
+    site: "vi.wikipedia.org",
+    saved: "27 Nov 2026",
+    status: "done",
+    summary: "Phở là một món ăn truyền thống của Việt Nam.",
+  };
+  const longUrl = `https://example.org/${"a".repeat(80)}?q=${"b".repeat(60)}&ref=${"c".repeat(30)}`;
+  const nullSummary: LinkItem = {
+    title: "Tauri 2 capabilities",
+    url: "v2.tauri.app/security/capabilities",
+    site: "v2.tauri.app",
+    saved: "27 Nov 2026",
+    status: "pending",
+  };
+  const long: LinkItem = {
+    ...wiki,
+    title:
+      "Hướng dẫn đầy đủ về quyền và khả năng trong Tauri 2 — Ở ĐÂU, KHI NÀO, VÌ SAO cần giới hạn lệnh?",
+    url: longUrl,
+    site: "example.org",
+  };
+  const act = (label: string, more: { disabled?: boolean } = {}) =>
+    createButton(doc, {
+      label,
+      size: "sm",
+      variant: "ghost",
+      ...more,
+      onClick: () => ctx.toast(`${label}: an example action`),
+    });
+  const onOpen = (item: LinkItem) => ctx.toast(`Open: ${item.title}`);
+  const actionsFor = (item: LinkItem) =>
+    item.status === "pending"
+      ? [act("Summarize later"), act("Paste the text")]
+      : [act("Delete"), act("Move")];
+  const view = (caption: string, v: LinkView, items: LinkItem[]) => {
+    const root = createLinkView(doc, v, items, {
+      onOpen,
+      actions: actionsFor,
+    });
+    // A second list on the page gets its own name, so each list is told apart.
+    if (v !== "cards") root.setAttribute("aria-label", `${caption}, ${v} view`);
+    return state(doc, caption, root, { grow: true });
+  };
+  const one = (
+    caption: string,
+    v: "list" | "compact",
+    item: LinkItem,
+    options: LinkRowOptions,
+    actions: readonly Node[] = actionsFor(item),
+  ) =>
+    state(
+      doc,
+      caption,
+      createList(doc, caption, [
+        v === "list"
+          ? createLinkRow(doc, item, { onOpen, actions, ...options })
+          : createCompactRow(doc, item, { onOpen, actions, ...options }),
+      ]),
+      { grow: true },
+    );
+  const card = (
+    caption: string,
+    item: LinkItem,
+    options: Parameters<typeof createLinkCard>[2] = {},
+  ) => {
+    const box = state(
+      doc,
+      caption,
+      createLinkCard(doc, item, {
+        onOpen,
+        actions: actionsFor(item),
+        ...options,
+      }),
+      { grow: true },
+    );
+    return box;
+  };
+  const items = [wiki, nullSummary, long];
+  const group = el(doc, "div", "rec-wrap rec-open");
+  group.append(
+    view("open + actions: List view", "list", items),
+    view("open + actions: Cards view", "cards", items),
+    view(
+      "open + actions: Compact view (actions on hover and focus)",
+      "compact",
+      items,
+    ),
+    card("card, partial: null summary keeps both actions", nullSummary),
+    card("card, AI off: open and actions still show", {
+      ...nullSummary,
+      status: "ai-off",
+    }),
+    card("card, action disabled while a run is going", nullSummary, {
+      actions: [
+        act("Summarize later", { disabled: true }),
+        act("Paste the text", { disabled: true }),
+      ],
+    }),
+    card("card, overflow: long title and 200-char URL", long),
+    card("card: hover", wiki, { forceState: "hover" }),
+    card("card: focus-visible", wiki, { forceState: "focus" }),
+    card("card: active", wiki, { forceState: "active" }),
+    one("List row: hover", "list", wiki, { forceState: "hover" }),
+    one("List row: focus-visible", "list", wiki, { forceState: "focus" }),
+    one("List row: active", "list", wiki, { forceState: "active" }),
+    one("List row: action disabled", "list", nullSummary, {}, [
+      act("Summarize later", { disabled: true }),
+      act("Paste the text", { disabled: true }),
+    ]),
+    one("List row: overflow, long title and URL", "list", long, {}),
+    one("Compact row: hover shows the actions", "compact", wiki, {
+      forceState: "hover",
+    }),
+    one("Compact row: focus-visible shows the actions", "compact", wiki, {
+      forceState: "focus",
+    }),
+    one("Compact row: active", "compact", wiki, { forceState: "active" }),
+    one("Compact row: overflow, one line", "compact", long, {
+      forceState: "hover",
+    }),
+  );
+  return group;
 }
 
 /**

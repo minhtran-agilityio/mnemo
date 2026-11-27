@@ -25,8 +25,10 @@ import {
   buildTrustLabel,
   buildUsageMeter,
   buildUsageWindows,
+  createCheckbox,
   createIcon,
   createImportProgress,
+  createImportSummary,
   createToastRegion,
   type PillTint,
 } from "../../../ds/index";
@@ -239,24 +241,40 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
             state: "running",
             onPause: noop,
             onContinue: noop,
+            onStop: noop,
             ...o,
           });
         const grow = { grow: true };
+        const limit =
+          "Waiting: Claude is at its usage limit. It continues when AI may run again.";
+        const forcedButton = (
+          caption: string,
+          cls: "is-hover" | "is-focus" | "is-pressed",
+          action: "pause" | "stop" = "pause",
+        ) => {
+          const block = mk({});
+          block
+            .querySelector(`button[data-action="${action}"]`)
+            ?.classList.add(cls);
+          return state(doc, caption, block, grow);
+        };
         return [
-          state(doc, "running", mk({}), grow),
+          state(doc, "default: running", mk({}), grow),
+          forcedButton("hover: Pause", "is-hover"),
+          forcedButton("focus-visible: Pause", "is-focus"),
+          forcedButton("active: Pause", "is-pressed"),
+          forcedButton("hover: Stop here", "is-hover", "stop"),
+          forcedButton("focus-visible: Stop here", "is-focus", "stop"),
+          forcedButton("active: Stop here", "is-pressed", "stop"),
           state(
             doc,
-            "waiting: usage limit",
-            mk({
-              state: "waiting",
-              reason:
-                "Waiting: Claude is at its usage limit. It continues when AI may run again.",
-            }),
+            "partial: waiting, usage limit",
+            mk({ state: "waiting", reason: limit }),
             grow,
           ),
           state(
             doc,
-            "waiting: AI off",
+            "AI off: waiting",
             mk({
               state: "waiting",
               reason: "Waiting: AI is off. It continues when you turn AI on.",
@@ -277,7 +295,7 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
           ),
           state(
             doc,
-            "request sent (button disabled)",
+            "disabled: request sent",
             mk({ state: "paused", reason: "Paused by you", pending: true }),
             grow,
           ),
@@ -285,6 +303,12 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
             doc,
             "finished",
             mk({ state: "finished", done: 50, waiting: 0, failed: 2 }),
+            grow,
+          ),
+          state(
+            doc,
+            "stopped",
+            mk({ state: "stopped", done: 20, waiting: 28, failed: 2 }),
             grow,
           ),
           state(
@@ -507,6 +531,52 @@ export const renderFeedback: TabRenderer = (panel, ctx) => {
           }),
         ),
       ],
+      "import summary": () => {
+        const sample = { toAdd: 50, repeats: 3, saved: 0, notLinks: 2 };
+        const box = () =>
+          createCheckbox(doc, { label: "Import without summaries" }).label;
+        const sum = (
+          caption: string,
+          options: Partial<Parameters<typeof createImportSummary>[1]>,
+        ) =>
+          state(
+            doc,
+            caption,
+            createImportSummary(doc, {
+              fileName: "bookmarks.html",
+              counts: sample,
+              onImport: noop,
+              onChooseAnother: noop,
+              onCancel: noop,
+              ...options,
+            }),
+            { grow: true },
+          );
+        return [
+          sum("success, with a checkbox slot", { slot: box() }),
+          sum("loading", { state: "loading" }),
+          sum("error", {
+            state: "error",
+            error: "The file could not be read. Nothing was stored.",
+          }),
+          sum("partial: zero to add (Import disabled)", {
+            counts: { toAdd: 0, repeats: 12, saved: 0, notLinks: 0 },
+          }),
+          sum("hover", { forced: "hover" }),
+          sum("focus", { forced: "focus" }),
+          sum("active", { forced: "pressed" }),
+          sum("long content", {
+            fileName:
+              "my-very-long-bookmarks-export-from-the-old-browser-2019-final-copy-v2.html",
+            counts: {
+              toAdd: 1234567,
+              repeats: 98765,
+              saved: 4321,
+              notLinks: 10,
+            },
+          }),
+        ];
+      },
       text: () => {
         const word = el(doc, "strong", undefined, "zebra");
         return [
