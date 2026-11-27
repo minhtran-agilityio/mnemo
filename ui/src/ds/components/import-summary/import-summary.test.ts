@@ -1,0 +1,135 @@
+// @vitest-environment happy-dom
+import { expect, test, vi } from "vitest";
+import { createCheckbox } from "../check/check";
+import { createImportSummary, importLabel } from "./import-summary";
+
+const COUNTS = { toAdd: 50, repeats: 3, saved: 0, notLinks: 2 };
+const buttons = (n: HTMLElement) => [...n.querySelectorAll("button")];
+
+test("success lists the counts with labels and two actions", () => {
+  const onImport = vi.fn();
+  const onChooseAnother = vi.fn();
+  const node = createImportSummary(document, {
+    fileName: "bookmarks.html",
+    counts: COUNTS,
+    onImport,
+    onChooseAnother,
+  });
+  expect(node.querySelector("h3")?.textContent).toBe("bookmarks.html");
+  expect([...node.querySelectorAll("dt")].map((t) => t.textContent)).toEqual([
+    "Links to add",
+    "Repeats in the file, skipped",
+    "Already saved, skipped",
+    "Not links, skipped",
+  ]);
+  expect([...node.querySelectorAll("dd")].map((d) => d.textContent)).toEqual([
+    "50",
+    "3",
+    "0",
+    "2",
+  ]);
+  const [imp, other] = buttons(node);
+  expect(imp?.textContent).toBe("Import 50 links");
+  expect(imp?.className).toContain("btn-primary");
+  expect(other?.textContent).toBe("Choose another file");
+  imp?.click();
+  other?.click();
+  expect(onImport).toHaveBeenCalledOnce();
+  expect(onChooseAnother).toHaveBeenCalledOnce();
+  expect(node.querySelector(".import-summary-why")).toBeNull();
+});
+
+test("one link reads singular and large counts are grouped", () => {
+  expect(importLabel(1)).toBe("Import 1 link");
+  const node = createImportSummary(document, {
+    fileName: "big.html",
+    counts: { toAdd: 1234567, repeats: 0, saved: 0, notLinks: 0 },
+  });
+  expect(node.querySelector("dd")?.textContent).toBe("1,234,567");
+  expect(buttons(node)[0]?.textContent).toBe("Import 1,234,567 links");
+});
+
+test("zero to add disables Import and says why", () => {
+  const onImport = vi.fn();
+  const node = createImportSummary(document, {
+    fileName: "a.html",
+    counts: { toAdd: 0, repeats: 9, saved: 0, notLinks: 0 },
+    onImport,
+  });
+  const [imp, other] = buttons(node);
+  expect(imp?.disabled).toBe(true);
+  imp?.click();
+  expect(onImport).not.toHaveBeenCalled();
+  expect(other?.disabled).toBe(false);
+  expect(node.querySelector(".import-summary-why")?.textContent).toContain(
+    "Nothing to add",
+  );
+});
+
+test("loading shows a status line and no actions", () => {
+  const node = createImportSummary(document, {
+    fileName: "a.html",
+    state: "loading",
+  });
+  expect(node.getAttribute("aria-busy")).toBe("true");
+  expect(node.querySelector("[role=status]")?.textContent).toContain("Reading");
+  expect(node.querySelector("button")).toBeNull();
+});
+
+test("error is an alert with only Choose another file", () => {
+  const node = createImportSummary(document, {
+    fileName: "a.html",
+    state: "error",
+  });
+  expect(node.querySelector("[role=alert]")?.textContent).toContain(
+    "Nothing was stored",
+  );
+  expect(buttons(node).map((b) => b.textContent)).toEqual([
+    "Choose another file",
+  ]);
+});
+
+test("the slot holds a checkbox that has a name and works", () => {
+  const box = createCheckbox(document, { label: "Import without summaries" });
+  const node = createImportSummary(document, {
+    fileName: "a.html",
+    counts: COUNTS,
+    slot: box.label,
+  });
+  const input = node.querySelector("input");
+  expect(input?.type).toBe("checkbox");
+  expect(node.querySelector("label")?.textContent).toBe(
+    "Import without summaries",
+  );
+  input?.click();
+  expect(input?.checked).toBe(true);
+});
+
+test("the region has an accessible name from the file", () => {
+  const node = createImportSummary(document, {
+    fileName: "a.html",
+    counts: COUNTS,
+  });
+  expect(node.getAttribute("aria-label")).toBe("Import summary: a.html");
+});
+
+test("a long file name is kept whole in the title and set as text", () => {
+  const name = `${"x".repeat(300)}<img src=x>.html`;
+  const node = createImportSummary(document, {
+    fileName: name,
+    counts: COUNTS,
+  });
+  const h = node.querySelector("h3");
+  expect(h?.title).toBe(name);
+  expect(h?.textContent).toBe(name);
+  expect(node.querySelector("img")).toBeNull();
+});
+
+test("a forced state reaches the import button", () => {
+  const node = createImportSummary(document, {
+    fileName: "a.html",
+    counts: COUNTS,
+    forced: "hover",
+  });
+  expect(buttons(node)[0]?.className).toContain("is-hover");
+});
