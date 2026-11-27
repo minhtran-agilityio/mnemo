@@ -37,8 +37,20 @@
   white-space: nowrap;
 }
 
+/* The live region: the state word, then the reason when there is one. */
+.ip-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.ip-status:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: 2px;
+}
+
 .ip-state {
-  flex: none;
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--muted);
@@ -64,20 +76,22 @@
   color: var(--ink2);
 }
 
-.ip-bar {
+.import-progress .ip-bar {
   max-width: none;
 }
 
 .import-progress[data-state="paused"] .ip-bar > span,
-.import-progress[data-state="waiting"] .ip-bar > span {
+.import-progress[data-state="waiting"] .ip-bar > span,
+.import-progress[data-state="stopped"] .ip-bar > span {
   background: var(--muted);
 }
 
 .ip-actions {
   display: flex;
+  gap: var(--space-1);
 }
 
 .ip-actions[hidden],
-.ip-reason[hidden] {
+.ip-reason:empty {
   display: none;
 }
