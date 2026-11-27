@@ -35,6 +35,8 @@ function status(over: Partial<ImportStatus> = {}): ImportStatus {
     waiting: 50,
     failed: 0,
     waitReason: null,
+    removed: 0,
+    maxRuns: 2,
     ...over,
   };
 }
@@ -274,6 +276,40 @@ describe("Import page", () => {
     await settle();
     expect(deps.stopImport).not.toHaveBeenCalled();
     expect(hasButton(container, "Pause")).toBe(true);
+  });
+
+  it("after Stop here and a new import, a late event of the stopped import never replaces it", async () => {
+    const { container, emit } = setup({
+      getImport: vi.fn(async () => status({ id: "imp-old" })),
+      stopImport: vi.fn(async () =>
+        status({ id: "imp-old", state: "stopped", done: 3, waiting: 0 }),
+      ),
+      startImport: vi.fn(async () =>
+        status({ id: "imp-new", done: 0, waiting: 50 }),
+      ),
+    });
+    await settle();
+    button(container, "Stop here").click();
+    const dialog = document.querySelector<HTMLElement>("dialog");
+    if (!dialog) throw new Error("no confirm dialog");
+    button(dialog, "Stop here").click();
+    await settle();
+    button(container, "Import another file").click();
+    button(container, "Choose a file").click();
+    await settle();
+    await settle();
+    button(container, "Import 50 links").click();
+    await settle();
+    expect(container.textContent).toContain(
+      "0 done, 50 waiting, 0 failed of 50",
+    );
+    // The stopped import's worker sends its last state late.
+    emit(status({ id: "imp-old", state: "stopped", done: 3, waiting: 0 }));
+    expect(currentStep(container)).toContain("Import");
+    expect(container.textContent).not.toContain("Import stopped:");
+    // Events of the shown import still come through.
+    emit(status({ id: "imp-new", done: 5, waiting: 45 }));
+    expect(container.textContent).toContain("5 done, 45 waiting");
   });
 
   it("shows a failed Pause as a line and keeps the progress", async () => {

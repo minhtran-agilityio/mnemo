@@ -404,8 +404,11 @@ export function renderImport(
   deps
     .onImportChanged((s) => {
       if (left) return;
-      // Only the import this page shows, or a new one it started.
-      if (view.kind === "import" || view.kind === "done") show(s);
+      // Only the import this page shows. A new import comes in through the reply to Import,
+      // so a late event of an import that ended (after Stop here) never replaces it.
+      if (view.kind !== "import" && view.kind !== "done") return;
+      if (status && s.id !== status.id) return;
+      show(s);
     })
     .then((stop) => {
       if (left) stop();

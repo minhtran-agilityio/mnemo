@@ -45,6 +45,8 @@ function status(over: Partial<ImportStatus> = {}): ImportStatus {
     waiting: 36,
     failed: 2,
     waitReason: null,
+    removed: 0,
+    maxRuns: 2,
     ...over,
   };
 }
@@ -198,6 +200,27 @@ describe("import done step", () => {
       "Import",
     );
     expect(STEPS[stepOf(status({ state: "finished" }))]).toBe("Done");
+  });
+});
+
+describe("Done counts and the running text", () => {
+  it("counts links the owner deleted during the import apart, never as link only", () => {
+    const s = status({
+      state: "finished",
+      done: 45,
+      waiting: 0,
+      failed: 2,
+      removed: 3,
+    });
+    expect(doneText(s)).toBe(
+      "Import finished: 45 saved with a summary, 2 saved as link only, 3 skipped, already saved or repeats, 2 not links, 3 deleted during the import.",
+    );
+  });
+
+  it("names the core's number of runs at a time", () => {
+    expect(stateText(status({ maxRuns: 3 }))).toBe(
+      "Making summaries in the background, at most 3 at a time.",
+    );
   });
 });
 

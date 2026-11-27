@@ -915,6 +915,10 @@ export interface ImportStatus {
   waiting: number;
   failed: number;
   /** Set while the import runs with links waiting and AI may not run now. */
+  /** Links the owner deleted during the import: not kept as link only. */
+  removed: number;
+  /** The most summaries the core makes at one time. */
+  maxRuns: number;
   waitReason: AiWaitReason | null;
 }
 

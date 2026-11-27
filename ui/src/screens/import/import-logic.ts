@@ -94,7 +94,7 @@ export function stateText(s: ImportStatus): string {
       : "Paused. Press Continue to go on.";
   }
   if (s.waitReason) return waitText(s.waitReason);
-  return "Making summaries in the background, at most 2 at a time.";
+  return `Making summaries in the background, at most ${s.maxRuns} at a time.`;
 }
 
 /** "12 done, 36 waiting, 2 failed of 50". */
@@ -110,7 +110,8 @@ export function countsText(s: ImportStatus): string {
 export function doneText(s: ImportStatus): string {
   const n = (x: number) => x.toLocaleString("en-US");
   const withSummary = s.withSummaries ? s.done : 0;
-  const linkOnly = s.added - withSummary;
+  // A link the owner deleted during the import is neither summarized nor kept.
+  const linkOnly = Math.max(0, s.added - withSummary - s.removed);
   const skipped = s.alreadySaved + s.repeatsInFile;
   const parts = [
     `${n(withSummary)} saved with a summary`,
@@ -118,6 +119,7 @@ export function doneText(s: ImportStatus): string {
     `${n(skipped)} skipped, already saved or repeats`,
   ];
   if (s.notLinks > 0) parts.push(`${n(s.notLinks)} not links`);
+  if (s.removed > 0) parts.push(`${n(s.removed)} deleted during the import`);
   return `${s.state === "stopped" ? "Import stopped" : "Import finished"}: ${parts.join(", ")}.`;
 }
 

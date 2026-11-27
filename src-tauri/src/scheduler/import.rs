@@ -24,6 +24,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -32,9 +33,11 @@ use super::queue::{BackgroundRunner, Priority, RunQueue, MAX_CONCURRENT_RUNS};
 use crate::ai::bookmark_save::{self, BookmarkStore, SaveContext, SaveError, SaveResult};
 use crate::ai::cancel::CancelToken;
 use crate::ai::fetch::PageReader;
+use crate::ai::limits;
 use crate::storage::bookmarks::{Held, SavedBookmark, SummaryStatus};
 use crate::storage::imports::{
-    read_import_file, ImportFile, ImportItem, ImportPreview, ImportState, ImportView, ItemState,
+    read_import_file, ImportFile, ImportItem, ImportLimits, ImportPreview, ImportState, ImportView,
+    ItemState,
 };
 use crate::storage::{Storage, StorageError};
 
@@ -46,6 +49,24 @@ pub struct ImportStatus {
     #[serde(flatten)]
     pub import: ImportView,
     pub wait_reason: Option<DenyReason>,
+    /// The most summaries made at one time (`MAX_CONCURRENT_RUNS`), for the screen's text.
+    pub max_runs: usize,
+}
+
+/// The limits of reading an import file, from the config module.
+pub const IMPORT_LIMITS: ImportLimits = ImportLimits {
+    max_file_bytes: limits::IMPORT_MAX_FILE_BYTES,
+    max_entries: limits::IMPORT_MAX_ENTRIES,
+    max_title_chars: limits::IMPORT_MAX_TITLE_CHARS,
+};
+
+/// How long a worker waits after `faults` faults in a row: `IMPORT_RETRY_FIRST`, doubled after
+/// each further fault, at most `IMPORT_RETRY_MOST`.
+fn retry_delay(faults: u32) -> Duration {
+    let doublings = faults.saturating_sub(1).min(16);
+    limits::IMPORT_RETRY_FIRST
+        .saturating_mul(1 << doublings)
+        .min(limits::IMPORT_RETRY_MOST)
 }
 
 /// Gets the import after every change. The app sends it to the UI as `import-changed`.
@@ -72,6 +93,12 @@ struct Workers {
     taken: HashSet<String>,
     /// Items whose bookmark the owner's own summary is reading: left until that ends.
     owner_reading: HashSet<String>,
+    /// How many owner summaries have ended (and other clears of `owner_reading`). A worker
+    /// notes it before it looks at a bookmark, and holds the item for the owner only when no
+    /// owner run ended in between, so an item is never held after its owner run ended.
+    owner_ended: u64,
+    /// Faults in a row (see `fault`); an ended link sets it back to 0.
+    faults: u32,
 }
 
 struct Inner {
@@ -162,6 +189,7 @@ impl ImportWorker {
         ImportStatus {
             import,
             wait_reason,
+            max_runs: MAX_CONCURRENT_RUNS,
         }
     }
 
@@ -192,13 +220,13 @@ impl ImportWorker {
 
     /// Reads the file at `path` and says what importing it would do. Writes nothing.
     pub fn preview_file(&self, path: &Path) -> Result<ImportPreview, SaveError> {
-        let file = read_import_file(path)?;
+        let file = read_import_file(path, IMPORT_LIMITS)?;
         self.preview(&file)
     }
 
     /// Reads the file at `path` again and imports it (`start`).
     pub fn start_file(&self, path: &Path, with_summaries: bool) -> Result<ImportStatus, SaveError> {
-        let file = read_import_file(path)?;
+        let file = read_import_file(path, IMPORT_LIMITS)?;
         self.start(&file, with_summaries)
     }
 
@@ -218,19 +246,54 @@ impl ImportWorker {
             view.already_saved,
             view.not_links
         );
-        self.workers().owner_reading.clear();
+        self.release_owner_holds();
         self.kick();
         Ok(status)
+    }
+
+    /// Lets every item held for an owner run go (see `Workers::owner_ended`).
+    fn release_owner_holds(&self) {
+        let mut w = self.workers();
+        w.owner_reading.clear();
+        w.owner_ended += 1;
+    }
+
+    /// Holds `item` for the owner's own run, unless an owner run ended since the worker noted
+    /// `seen` (then the item is free again). Says whether it holds it.
+    fn hold_for_owner(&self, item: &str, seen: u64) -> bool {
+        let mut w = self.workers();
+        if w.owner_ended != seen {
+            return false;
+        }
+        w.owner_reading.insert(item.to_string());
+        true
+    }
+
+    /// Whether `id` names the newest import: only it can have runs, so only it may cancel them.
+    fn is_latest(&self, id: &str) -> Result<bool, SaveError> {
+        let latest = on_storage(self.store(), |s| s.latest_import())?;
+        Ok(latest.is_some_and(|v| v.base.id == id))
+    }
+
+    /// Cancels the runs of this import and gives later workers a fresh token.
+    fn cancel_runs(&self, clear_owner_holds: bool) {
+        let mut w = self.workers();
+        w.stop.cancel();
+        w.stop = CancelToken::default();
+        if clear_owner_holds {
+            w.owner_reading.clear();
+            w.owner_ended += 1;
+        }
     }
 
     /// The owner's Pause: this import stops taking links and its runs are cancelled (their links
     /// stay waiting). Other AI work goes on.
     pub fn pause(&self, id: &str) -> Result<ImportStatus, SaveError> {
+        let current = self.is_latest(id)?;
         let status = self.publish(|s| s.pause_import(id))?;
-        {
-            let mut w = self.workers();
-            w.stop.cancel();
-            w.stop = CancelToken::default();
+        // An older import has no runs: its id never cancels the runs of the newest one.
+        if current {
+            self.cancel_runs(false);
         }
         log::info!("import {id} paused by the owner");
         Ok(status)
@@ -239,12 +302,10 @@ impl ImportWorker {
     /// The owner's "Stop here": the import ends now. Its runs are cancelled and its links with no
     /// summary yet stay link only ("Summarize later" on each card); another file may be imported.
     pub fn stop(&self, id: &str) -> Result<ImportStatus, SaveError> {
+        let current = self.is_latest(id)?;
         let status = self.publish(|s| s.stop_import(id))?;
-        {
-            let mut w = self.workers();
-            w.stop.cancel();
-            w.stop = CancelToken::default();
-            w.owner_reading.clear();
+        if current {
+            self.cancel_runs(true);
         }
         log::info!("import {id} stopped by the owner");
         Ok(status)
@@ -254,7 +315,7 @@ impl ImportWorker {
     /// work it keeps waiting and the status says why; it goes on by itself when AI may run.
     pub fn resume(&self, id: &str) -> Result<ImportStatus, SaveError> {
         let status = self.publish(|s| s.continue_import(id))?;
-        self.workers().owner_reading.clear();
+        self.release_owner_holds();
         log::info!("import {id} continued by the owner");
         self.kick();
         Ok(status)
@@ -262,7 +323,7 @@ impl ImportWorker {
 
     /// The owner's own summary of a bookmark ended: a link of the import it held may go on.
     pub fn owner_summary_ended(&self) {
-        self.workers().owner_reading.clear();
+        self.release_owner_holds();
         self.kick();
     }
 
@@ -314,9 +375,11 @@ impl ImportWorker {
 
     /// One worker: takes links until none is free, the import stops running, or a run says AI
     /// may not run now. On its way out it kicks, so a Pause and Continue during its last run
-    /// does not leave the import without workers.
+    /// does not leave the import without workers. After a fault it first waits (`retry_delay`),
+    /// so a storage that keeps failing never makes workers start again and again.
     fn work(&self, id: &str, stop: &CancelToken) {
         while let Some(item) = self.take(id, stop) {
+            let seen = self.workers().owner_ended;
             let outcome = self.make(&item, stop);
             // The end is saved before the item leaves `taken`, so the other worker cannot take
             // a link whose end is not written yet.
@@ -330,14 +393,18 @@ impl ImportWorker {
                 }
                 _ => Ok(()),
             };
+            if matches!(outcome, Outcome::OwnerReading) {
+                self.hold_for_owner(&item.id, seen);
+            }
             {
                 let mut w = self.workers();
                 w.taken.remove(&item.id);
-                if matches!(outcome, Outcome::OwnerReading) {
-                    w.owner_reading.insert(item.id.clone());
+                if matches!(outcome, Outcome::End(_)) && saved.is_ok() {
+                    w.faults = 0;
                 }
             }
             if saved.is_err() {
+                self.wait_after_fault(stop);
                 break;
             }
             match self.publish(|s| s.finish_import_if_done(id)) {
@@ -354,11 +421,36 @@ impl ImportWorker {
                 Err(e) => log::error!("import {id} could not be read: {e:?}"),
             }
             if matches!(outcome, Outcome::Stop) {
+                // A stop with no reason (not paused, and AI may run) is a fault: a storage
+                // error, a run cancelled by no one, or Claude Code that would not start.
+                if !stop.is_cancelled() && self.held_by().is_none() {
+                    self.wait_after_fault(stop);
+                }
                 break;
             }
         }
         self.workers().count -= 1;
         self.kick();
+    }
+
+    /// Waits `retry_delay` for this fault in a row, or until the import is paused or stopped.
+    /// The worker still counts as live meanwhile, so no other worker starts in its place.
+    fn wait_after_fault(&self, stop: &CancelToken) {
+        let faults = {
+            let mut w = self.workers();
+            w.faults = w.faults.saturating_add(1);
+            w.faults
+        };
+        let delay = retry_delay(faults);
+        log::warn!("an import link stopped with a fault ({faults} in a row), waiting {delay:?}");
+        let end = Instant::now() + delay;
+        while !stop.is_cancelled() {
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            std::thread::sleep(left.min(Duration::from_millis(50)));
+        }
     }
 
     /// The next waiting link no one holds, in file order, while the import runs and AI may run.
@@ -431,8 +523,16 @@ impl ImportWorker {
             queue: deps.queue.clone(),
             stop: stop.clone(),
         };
-        // A Pause is not "AI off": its stopped runs leave the card at "no summary yet".
-        let ai_on = || self.held_by().is_none();
+        // The card says "AI off" only when the owner's own AI is off or at its limit. A Pause,
+        // or the gate holding only background work (the pause line), leaves it at "no summary
+        // yet": the owner may still summarize it.
+        let control = deps.queue.control();
+        let ai_on = || {
+            matches!(
+                control.may_run(Priority::Owner, control.now()),
+                Decision::Allow
+            )
+        };
         let emit = |b: &SavedBookmark| (deps.bookmark_changed)(b);
         let ctx = SaveContext {
             store: deps.store.as_ref(),
@@ -467,8 +567,9 @@ fn outcome_of(result: &SaveResult) -> Outcome {
     }
     if let Some(problem) = &result.ai_error {
         return match problem.code {
-            // AI may not run now, or this import was paused: try again later.
-            "usage_limit" | "cancelled" | "ai_off" => Outcome::Stop,
+            // AI may not run now, this import was paused, or Claude Code could not be started
+            // (the card says AI off): the link stays waiting and is tried again later.
+            "usage_limit" | "cancelled" | "ai_off" | "unavailable" => Outcome::Stop,
             // The run failed, or the site was not reached.
             _ => Outcome::End(ItemState::Failed),
         };
@@ -512,7 +613,7 @@ mod tests {
                 return Err(FetchError::NotText);
             }
             Ok(PageText {
-                title: None,
+                title: url.contains("titled").then(|| "Page title".to_string()),
                 text: PAGE.to_string(),
                 cut: false,
             })
@@ -552,9 +653,17 @@ mod tests {
         now: AtomicUsize,
         most: AtomicUsize,
         hold: Mutex<bool>,
+        /// When set, every run gives this error (a run no one cancelled, Claude Code missing).
+        fail: Mutex<Option<AiError>>,
+        /// Every run that started.
+        runs: AtomicUsize,
     }
     impl AiRunner for Gauge {
         fn run_task(&self, task: &AiTask, cancel: &CancelToken) -> Result<AiOutput, AiError> {
+            self.runs.fetch_add(1, Ordering::SeqCst);
+            if let Some(e) = self.fail.lock().unwrap().clone() {
+                return Err(e);
+            }
             let n = self.now.fetch_add(1, Ordering::SeqCst) + 1;
             self.most.fetch_max(n, Ordering::SeqCst);
             while *self.hold.lock().unwrap() && !cancel.is_cancelled() {
@@ -603,6 +712,8 @@ mod tests {
             now: AtomicUsize::new(0),
             most: AtomicUsize::new(0),
             hold: Mutex::new(false),
+            fail: Mutex::new(None),
+            runs: AtomicUsize::new(0),
         });
         let control = open_control();
         let log = Arc::new(Log::default());
@@ -636,7 +747,7 @@ mod tests {
         fn file(&self, name: &str, lines: &[String]) -> ImportFile {
             let p = self.dir.path().join(name);
             std::fs::write(&p, lines.join("\n")).unwrap();
-            read_import_file(&p).unwrap()
+            read_import_file(&p, IMPORT_LIMITS).unwrap()
         }
 
         fn links(&self, n: usize) -> ImportFile {
@@ -698,6 +809,7 @@ mod tests {
         let file = read_import_file(
             &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../tests/acceptance/fixtures/lib-03-bookmarks-export.html"),
+            IMPORT_LIMITS,
         )
         .unwrap();
         let first = w.worker.start(&file, true).unwrap();
@@ -1055,7 +1167,154 @@ mod tests {
         w.control.resume().unwrap();
         let end = w.until("the end", |s| s.import.state == ImportState::Finished);
         assert_eq!(World::counts(&end), (2, 0, 0));
+        // The deleted link is counted apart: it is not "saved as link only".
+        assert_eq!(end.import.removed, 1);
         assert_eq!(w.fake.starts(), 2);
+    }
+
+    #[test]
+    fn an_owner_run_that_ends_before_the_worker_holds_the_link_never_leaves_it_held() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        // The worker noted the count, saw the bookmark reading, and the owner's run ended
+        // before it could hold the link: the link stays free, so the import can finish.
+        let seen = w.worker.workers().owner_ended;
+        w.worker.owner_summary_ended();
+        assert!(!w.worker.hold_for_owner("item-1", seen));
+        assert!(w.worker.workers().owner_reading.is_empty());
+        // With no owner run ended in between, the link is held for the owner's run.
+        let seen = w.worker.workers().owner_ended;
+        assert!(w.worker.hold_for_owner("item-1", seen));
+        assert!(w.worker.workers().owner_reading.contains("item-1"));
+    }
+
+    #[test]
+    fn a_fault_makes_the_import_wait_before_it_goes_on_and_never_restarts_workers_in_a_loop() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        // Every run ends cancelled while AI may run: no one paused it, so it is a fault.
+        *w.gauge.fail.lock().unwrap() = Some(AiError::Cancelled);
+        let id = w.worker.start(&w.links(3), true).unwrap().import.base.id;
+        std::thread::sleep(Duration::from_millis(600));
+        let runs = w.gauge.runs.load(Ordering::SeqCst);
+        assert!(runs <= MAX_CONCURRENT_RUNS, "{runs} runs in 600 ms");
+        assert_eq!(World::counts(&w.now()), (0, 3, 0));
+        // A Pause ends the wait at once.
+        w.worker.pause(&id).unwrap();
+        w.settled();
+    }
+
+    #[test]
+    fn the_wait_after_faults_doubles_up_to_the_most() {
+        assert_eq!(retry_delay(1), limits::IMPORT_RETRY_FIRST);
+        assert_eq!(retry_delay(2), limits::IMPORT_RETRY_FIRST * 2);
+        assert_eq!(retry_delay(40), limits::IMPORT_RETRY_MOST);
+    }
+
+    #[test]
+    fn claude_code_that_cannot_start_keeps_the_link_waiting_as_its_card_says_ai_off() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        *w.gauge.fail.lock().unwrap() = Some(AiError::Unavailable);
+        let id = w.worker.start(&w.links(1), true).unwrap().import.base.id;
+        let end = Instant::now() + WAIT;
+        while w.gauge.runs.load(Ordering::SeqCst) == 0 {
+            assert!(Instant::now() < end, "no run started");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        w.worker.pause(&id).unwrap();
+        w.settled();
+        assert_eq!(World::counts(&w.now()), (0, 1, 0));
+        assert_eq!(w.statuses("/import/"), vec![SummaryStatus::AiOff]);
+    }
+
+    #[test]
+    fn a_run_held_only_by_the_background_gate_leaves_the_card_at_no_summary_yet_not_ai_off() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        // The pause line holds background work; the owner's own AI is still on.
+        w.control.pause().unwrap();
+        let id = w.worker.start(&w.links(1), true).unwrap().import.base.id;
+        let item = w
+            .store
+            .lock()
+            .unwrap()
+            .waiting_import_items(&id, 1)
+            .unwrap()
+            .remove(0);
+        assert!(matches!(
+            w.worker.make(&item, &CancelToken::default()),
+            Outcome::Stop
+        ));
+        assert_eq!(w.statuses("/import/"), vec![SummaryStatus::Pending]);
+    }
+
+    #[test]
+    fn pause_or_stop_with_the_id_of_an_older_import_never_cancels_the_running_import() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        let old = w
+            .worker
+            .start(
+                &w.file("old.txt", &["https://example.org/old".to_string()]),
+                false,
+            )
+            .unwrap()
+            .import
+            .base
+            .id;
+        *w.gauge.hold.lock().unwrap() = true;
+        w.worker.start(&w.links(2), true).unwrap();
+        let end = Instant::now() + WAIT;
+        while w.gauge.now.load(Ordering::SeqCst) < 2 {
+            assert!(Instant::now() < end, "the runs did not start");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let _ = w.worker.pause(&old);
+        let _ = w.worker.stop(&old);
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(w.gauge.now.load(Ordering::SeqCst), 2, "a run was cancelled");
+        *w.gauge.hold.lock().unwrap() = false;
+        let end = w.until("the end", |s| s.import.state == ImportState::Finished);
+        assert_eq!(World::counts(&end), (2, 0, 0));
+        assert_eq!(w.gauge.runs.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn an_imported_title_survives_the_summary_and_a_link_with_none_gets_the_page_title() {
+        let w = world(FakeResult::Valid(GOOD.into()));
+        let p = w.dir.path().join("titles.html");
+        std::fs::write(
+            &p,
+            "<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<DL><p>\n\
+             <DT><A HREF=\"https://example.org/import/titled-1\">File title</A>\n\
+             <DT><A HREF=\"https://example.org/import/titled-2\"></A>\n</DL>\n",
+        )
+        .unwrap();
+        let file = read_import_file(&p, IMPORT_LIMITS).unwrap();
+        w.worker.start(&file, true).unwrap();
+        w.until("the end", |s| s.import.state == ImportState::Finished);
+        w.settled();
+        let s = w.store.lock().unwrap();
+        let mut titles: Vec<(String, Option<String>)> = s
+            .list_bookmark_cards(&crate::storage::PageRequest {
+                after: None,
+                limit: 10,
+            })
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|b| (b.url, b.title))
+            .collect();
+        titles.sort();
+        assert_eq!(
+            titles,
+            vec![
+                (
+                    "https://example.org/import/titled-1".to_string(),
+                    Some("File title".to_string())
+                ),
+                (
+                    "https://example.org/import/titled-2".to_string(),
+                    Some("Page title".to_string())
+                ),
+            ]
+        );
     }
 
     #[test]
