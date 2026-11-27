@@ -121,6 +121,12 @@ describe("Import page", () => {
     expect(deps.startImport).not.toHaveBeenCalled();
     expect(currentStep(container)).toContain("Check");
     expect(container.textContent).toContain("bookmarks.html");
+    // The count found comes first, as the ticket and the prototype ask.
+    expect(container.textContent).toContain("55 links found in bookmarks.html");
+    const text = container.textContent ?? "";
+    expect(text.indexOf("55 links found")).toBeLessThan(
+      text.indexOf("Links to add"),
+    );
     expect(hasButton(container, "Import 50 links")).toBe(true);
   });
 

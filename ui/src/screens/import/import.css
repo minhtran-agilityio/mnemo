@@ -28,3 +28,8 @@
   flex-wrap: wrap;
   gap: var(--space-3);
 }
+
+.import-check {
+  display: grid;
+  gap: var(--space-3);
+}

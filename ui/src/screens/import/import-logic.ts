@@ -36,6 +36,11 @@ export function links(n: number): string {
   return `${n.toLocaleString("en-US")} ${n === 1 ? "link" : "links"}`;
 }
 
+/** The Check step's first line, as in the prototype: "55 links found in bookmarks.html". */
+export function foundLine(p: ImportPreview): string {
+  return `${links(p.found)} found in ${p.fileName}`;
+}
+
 /** One count line of the confirm step. */
 export interface CountLine {
   label: string;

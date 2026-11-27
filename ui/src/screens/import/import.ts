@@ -29,6 +29,7 @@ import {
 import {
   doneText,
   ended,
+  foundLine,
   newer,
   PAGE_CONTEXT,
   PAGE_TITLE,
@@ -239,20 +240,27 @@ export function renderImport(
       });
     }
     const p = v.preview;
-    return createImportSummary(doc, {
-      fileName: p.fileName,
-      state: "ready",
-      counts: {
-        toAdd: p.toAdd,
-        repeats: p.repeatsInFile,
-        saved: p.alreadySaved,
-        notLinks: p.notLinks,
-      },
-      slot: check.label,
-      onImport: () => begin(v.path),
-      onChooseAnother: () => choose_file(),
-      onCancel: cancel,
-    });
+    // The count found comes first, as in the prototype; the summary part holds the rest.
+    const box = doc.createElement("div");
+    box.className = "import-check";
+    box.append(buildText(doc, { content: foundLine(p) }));
+    box.append(
+      createImportSummary(doc, {
+        fileName: p.fileName,
+        state: "ready",
+        counts: {
+          toAdd: p.toAdd,
+          repeats: p.repeatsInFile,
+          saved: p.alreadySaved,
+          notLinks: p.notLinks,
+        },
+        slot: check.label,
+        onImport: () => begin(v.path),
+        onChooseAnother: () => choose_file(),
+        onCancel: cancel,
+      }),
+    );
+    return box;
   }
 
   function renderProgress(): void {

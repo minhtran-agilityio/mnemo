@@ -4,6 +4,7 @@ import {
   confirmAction,
   countsText,
   doneText,
+  foundLine,
   foundText,
   importAction,
   links,
@@ -201,6 +202,23 @@ describe("import done step", () => {
       "Import",
     );
     expect(STEPS[stepOf(status({ state: "finished" }))]).toBe("Done");
+  });
+});
+
+describe("Check step", () => {
+  it("starts with the count found in the file", () => {
+    const p: ImportPreview = {
+      fileName: "links.txt",
+      found: 1,
+      toAdd: 1,
+      repeatsInFile: 0,
+      alreadySaved: 0,
+      notLinks: 0,
+    };
+    expect(foundLine(p)).toBe("1 link found in links.txt");
+    expect(foundLine({ ...p, found: 1200 })).toBe(
+      "1,200 links found in links.txt",
+    );
   });
 });
 
