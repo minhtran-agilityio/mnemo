@@ -79,10 +79,16 @@ export const FEEDBACK = [
     name: "step indicator",
     tab: "Feedback",
     variants: ["default"],
-    states: ["success", "overflow"],
+    states: [
+      "step 1 current",
+      "step 2 current (1 done)",
+      "step 3 current (sample)",
+      "step 4 current (all done)",
+      "overflow: long labels wrap",
+    ],
     source: "ds",
     className: "steps",
-    notes: `The steps of a flow in order: done, current (aria-current="step") and to come. Number, label and a hidden state word, so colour is not the only signal. Not clickable: no hover, focus-visible, active or disabled. Empty, loading and AI off do not apply. No animation, so reduced motion needs nothing. On a narrow window the steps wrap onto new lines and a long label wraps inside its step, so nothing scrolls sideways (${ref(212)}).`,
+    notes: `The steps of a flow in order: done, current (aria-current="step") and to come. Number, label and hidden words ("step 3 of 4, current step"), so colour is not the only signal. Not clickable: no hover, focus-visible, active or disabled. Empty, loading and AI off do not apply. No animation, so reduced motion needs nothing. On a narrow window the steps wrap onto new lines and a long label wraps inside its step, so nothing scrolls sideways (${ref(212)}).`,
   },
   {
     name: "spinner",
