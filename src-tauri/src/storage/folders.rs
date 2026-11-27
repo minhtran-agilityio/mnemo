@@ -15,7 +15,7 @@ use serde::Serialize;
 
 use super::bookmarks::{SavedBookmark, MAX_REASON_CHARS};
 use super::error::StorageError;
-use super::items::invalid;
+use super::items::{exists_sql, invalid, ItemKind};
 use super::record::{now_iso, RecordBase};
 use super::Storage;
 
@@ -138,6 +138,8 @@ const HIDE_LINK_SQL: &str = "UPDATE item_link SET deleted_at = ?2, updated_at = 
 // Only a link this delete removed (same id, same time) comes back.
 const RESTORE_LINK_SQL: &str = "UPDATE item_link SET deleted_at = NULL, updated_at = ?3
      WHERE id = ?1 AND deleted_at = ?2";
+
+const LINK_ENDS_SQL: &str = "SELECT a_kind, a_id, b_kind, b_id FROM item_link WHERE id = ?1";
 
 // A live bookmark of the same link (compare key) as the bookmark ?1, other than itself.
 const SAME_LINK_LIVE_SQL: &str = "SELECT count(*) FROM bookmark b
@@ -406,10 +408,21 @@ impl Storage {
     pub(crate) fn undo_last_at(&mut self, now: &str) -> Result<SavedBookmark, StorageError> {
         let step = self
             .undo
-            .take()
+            .clone()
             .ok_or_else(|| invalid(NOTHING_TO_UNDO.to_string()))?;
+        let result = self.undo_step(now, &step);
+        // The step is used up when it worked, and when its bookmark is gone (it could never
+        // work). A refusal or a storage error (a busy database, a stale link) keeps it, so the
+        // owner can try again.
+        if matches!(result, Ok(_) | Err(StorageError::NotFound { .. })) {
+            self.undo = None;
+        }
+        result
+    }
+
+    fn undo_step(&mut self, now: &str, step: &Undo) -> Result<SavedBookmark, StorageError> {
         let tx = self.immediate()?;
-        let id = match &step {
+        let id = match step {
             Undo::Move {
                 id,
                 folder_id,
@@ -432,8 +445,6 @@ impl Storage {
                 // leave it twice. Nothing changes, and the step is kept.
                 let again: i64 = tx.query_row(SAME_LINK_LIVE_SQL, [id], |r| r.get(0))?;
                 if again > 0 {
-                    drop(tx);
-                    self.undo = Some(step.clone());
                     return Err(invalid(
                         "This link was saved again after you deleted it, so the old one cannot come back."
                             .to_string(),
@@ -443,7 +454,7 @@ impl Storage {
                     return Err(StorageError::NotFound { kind: "bookmark" });
                 }
                 for link in links {
-                    tx.execute(RESTORE_LINK_SQL, params![link, at, now])?;
+                    restore_link(&tx, link, id, at, now)?;
                 }
                 id
             }
@@ -452,6 +463,38 @@ impl Storage {
         tx.commit()?;
         Ok(b)
     }
+}
+
+/// Brings back one item link that the delete of bookmark `id` removed, unless the item at its
+/// other end was deleted since: a link never points to a deleted item.
+fn restore_link(
+    tx: &Transaction<'_>,
+    link: &str,
+    id: &str,
+    at: &str,
+    now: &str,
+) -> Result<(), StorageError> {
+    let ends: Option<(String, String, String, String)> = tx
+        .query_row(LINK_ENDS_SQL, [link], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .optional()?;
+    let Some((a_kind, a_id, b_kind, b_id)) = ends else {
+        return Ok(());
+    };
+    let (kind, other) = if a_kind == "bookmark" && a_id == id {
+        (b_kind, b_id)
+    } else {
+        (a_kind, a_id)
+    };
+    let Some(kind) = ItemKind::ALL.into_iter().find(|k| k.as_str() == kind) else {
+        return Ok(());
+    };
+    let live: i64 = tx.query_row(exists_sql(kind), [&other], |r| r.get(0))?;
+    if live > 0 {
+        tx.execute(RESTORE_LINK_SQL, params![link, at, now])?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -466,6 +509,16 @@ mod tests {
 
     fn saved(s: &mut Storage, url: &str) -> SavedBookmark {
         s.save_link_at(T1, url).unwrap()
+    }
+
+    /// A live bookmark row with a known id, the far end of a test link.
+    fn far_end(s: &Storage, id: &str) {
+        s.conn
+            .execute(
+                "INSERT INTO bookmark (id, created_at, updated_at, url) VALUES (?1, ?2, ?2, 'https://far.example/')",
+                [id, T1],
+            )
+            .unwrap();
     }
 
     fn folder_of(s: &Storage, id: &str) -> (String, Option<String>, bool) {
@@ -696,6 +749,7 @@ mod tests {
         let (mut s, _d) = open_temp();
         let bm = saved(&mut s, "https://a.example/");
         let id = bm.base.id.clone();
+        far_end(&s, "other");
         s.conn
             .execute(
                 "INSERT INTO item_link (id, a_kind, a_id, b_kind, b_id, created_at, updated_at)
@@ -705,7 +759,8 @@ mod tests {
             .unwrap();
         s.delete_saved_bookmark_at(T2, &id).unwrap();
         assert!(s.get_saved_bookmark(&id).is_err());
-        assert_eq!(s.list_folders().unwrap()[0].count, 0);
+        // Only the far end bookmark is left in Unsorted.
+        assert_eq!(s.list_folders().unwrap()[0].count, 1);
         let live_links = |s: &Storage| -> i64 {
             s.conn
                 .query_row(
@@ -720,7 +775,7 @@ mod tests {
         assert_eq!(back.base.id, id);
         assert_eq!(back.base.deleted_at, None);
         assert_eq!(live_links(&s), 1);
-        assert_eq!(s.list_folders().unwrap()[0].count, 1);
+        assert_eq!(s.list_folders().unwrap()[0].count, 2);
         // The step is used up.
         assert!(s.undo_last_at(T3).is_err());
     }
@@ -840,6 +895,8 @@ mod tests {
         let (mut s, _d) = open_temp();
         let bm = saved(&mut s, "https://a.example/");
         let id = bm.base.id.clone();
+        far_end(&s, "x1");
+        far_end(&s, "x2");
         for (l, other) in [("l-old", "x1"), ("l-live", "x2")] {
             s.conn
                 .execute(
@@ -890,5 +947,68 @@ mod tests {
             )
             .unwrap();
         assert_eq!(s.undo_last_at(T3).unwrap().base.id, old.base.id);
+    }
+
+    #[test]
+    fn folder_undo_of_a_delete_leaves_a_link_hidden_when_the_item_at_its_other_end_was_deleted_since(
+    ) {
+        let (mut s, _d) = open_temp();
+        let bm = saved(&mut s, "https://a.example/");
+        let other = saved(&mut s, "https://b.example/");
+        for (l, end) in [("l-gone", other.base.id.as_str()), ("l-live", "x-live")] {
+            s.conn
+                .execute(
+                    "INSERT INTO item_link (id, a_kind, a_id, b_kind, b_id, created_at, updated_at)
+                     VALUES (?1, 'bookmark', ?2, 'bookmark', ?3, ?4, ?4)",
+                    [l, &bm.base.id, end, T1],
+                )
+                .unwrap();
+        }
+        s.conn
+            .execute(
+                "INSERT INTO bookmark (id, created_at, updated_at, url) VALUES ('x-live', ?1, ?1, 'https://c.example/')",
+                [T1],
+            )
+            .unwrap();
+        s.delete_saved_bookmark_at(T2, &bm.base.id).unwrap();
+        // The item at the far end of one link is deleted after the bookmark.
+        s.delete_saved_bookmark_at(T2, &other.base.id).unwrap();
+        // That delete is the last step; take the first one back from a fresh step.
+        s.undo = Some(Undo::Delete {
+            id: bm.base.id.clone(),
+            at: T2.to_string(),
+            links: vec!["l-gone".into(), "l-live".into()],
+        });
+        s.undo_last_at(T3).unwrap();
+        let live: Vec<String> = {
+            let mut st = s
+                .conn
+                .prepare("SELECT id FROM item_link WHERE deleted_at IS NULL ORDER BY id")
+                .unwrap();
+            st.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(live, vec!["l-live".to_string()]);
+    }
+
+    #[test]
+    fn folder_a_failed_undo_keeps_the_step_so_the_owner_can_try_again() {
+        let (mut s, _d) = open_temp();
+        let bm = saved(&mut s, "https://a.example/");
+        s.delete_saved_bookmark_at(T2, &bm.base.id).unwrap();
+        // A storage error during the undo (here a trigger that refuses the write).
+        s.conn
+            .execute_batch(
+                "CREATE TRIGGER refuse BEFORE UPDATE ON bookmark BEGIN SELECT RAISE(ABORT, 'busy'); END;",
+            )
+            .unwrap();
+        assert!(matches!(s.undo_last_at(T3), Err(StorageError::Database(_))));
+        assert!(s.get_saved_bookmark(&bm.base.id).is_err(), "still deleted");
+        s.conn.execute_batch("DROP TRIGGER refuse").unwrap();
+        assert_eq!(s.undo_last_at(T3).unwrap().base.id, bm.base.id);
+        // Used up now.
+        assert!(s.undo_last_at(T3).is_err());
     }
 }

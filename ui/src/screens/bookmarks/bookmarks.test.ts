@@ -870,3 +870,68 @@ test("restore puts a deleted link back by its date, and replaces one that is the
   expect(restore([b, c], a).map((x) => x.id)).toEqual(["a", "b", "c"]);
   expect(restore([a, b], { ...b, folder: "X" })[1]?.folder).toBe("X");
 });
+
+test("only one move, delete or Undo runs at a time, so a toast always names the step the core holds", async () => {
+  let release: () => void = () => {};
+  const { d } = withFolders(
+    [DEV, UNSORTED],
+    [bm({ id: "a" }), bm({ id: "b" })],
+    {
+      deleteSavedBookmark: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      ),
+    },
+  );
+  const { box } = mount(d);
+  await flush();
+  const [first, second] = [...box.querySelectorAll("article")] as HTMLElement[];
+  button(first, "Delete")?.click();
+  // A second step while the first is going is ignored, from a Delete and from a Move.
+  button(second, "Delete")?.click();
+  button(second, "Move to folder")?.click();
+  menuItem(second, "Dev tools")?.click();
+  expect(d.deleteSavedBookmark).toHaveBeenCalledTimes(1);
+  expect(d.moveBookmark).not.toHaveBeenCalled();
+  release();
+  await flush();
+  expect(document.querySelectorAll(".toast-action")).toHaveLength(1);
+  // The first step is over: the next one runs.
+  button(
+    box.querySelector("article") as HTMLElement,
+    "Move to folder",
+  )?.click();
+  menuItem(box, "Dev tools").click();
+  await flush();
+  expect(d.moveBookmark).toHaveBeenCalledTimes(1);
+});
+
+test("a bookmark-changed event never wipes the folder name the owner is typing", async () => {
+  let counts = 0;
+  const { d, emit } = withFolders([UNSORTED], [bm({ id: "a" })], {
+    listFolders: vi.fn(async () => [{ ...UNSORTED, count: counts }]),
+  });
+  const { box } = mount(d);
+  await flush();
+  button(box, "New folder")?.click();
+  const input = box.querySelector(".tedit input") as HTMLInputElement;
+  input.value = "Wor";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  // The counts change while the owner types.
+  counts = 5;
+  emit(bm({ id: "b", createdAt: "2026-11-26T10:00:00Z" }));
+  await flush();
+  const still = box.querySelector(".tedit input") as HTMLInputElement;
+  expect(still).toBe(input);
+  expect(still.value).toBe("Wor");
+  // The owner cancels; the next refresh draws the tree with the new counts.
+  input.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+  );
+  emit(bm({ id: "c", createdAt: "2026-11-27T10:00:00Z" }));
+  await flush();
+  expect(box.querySelector(".tedit")).toBeNull();
+  expect(treeNode(box, "Unsorted").textContent).toContain("5");
+});

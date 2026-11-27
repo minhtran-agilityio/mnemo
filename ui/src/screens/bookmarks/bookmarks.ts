@@ -94,8 +94,13 @@ export function renderBookmarks(
   let alreadySavedId: string | null = null;
   /** Bookmarks with a summary call going, so their action is not sent twice. */
   const busy = new Set<string>();
-  /** Bookmarks with a move or a delete going. */
-  const changing = new Set<string>();
+  /**
+   * A move, a delete or an Undo is going. The core keeps one Undo step, so only one of them runs
+   * at a time: the toast of a step then always names the step the core holds.
+   */
+  let stepRunning = false;
+  /** The folder tree was not redrawn because a name field was open; redraw when it closes. */
+  let treeStale = false;
   /** The folders, Unsorted last; the core counts their live links. */
   let folders: Folder[] = [];
   /** Closes the toast of the last move or delete, so its Undo never takes back a later step. */
@@ -289,6 +294,11 @@ export function renderBookmarks(
     );
   }
 
+  /** True while the owner types a folder name (a new folder or a rename) in the tree. */
+  function nameFieldOpen(): boolean {
+    return side.querySelector(".tedit") !== null;
+  }
+
   /** Reads the folders again, then fits the cards to them (a renamed folder, new counts). */
   async function refreshFolders(): Promise<void> {
     let next: Folder[];
@@ -313,9 +323,26 @@ export function renderBookmarks(
         ? { ...b, folder: name }
         : b;
     });
-    if (!same) drawFolders();
+    // A name field that is open is never replaced: the tree is redrawn when it closes.
+    if (!same || treeStale) {
+      if (nameFieldOpen()) treeStale = true;
+      else {
+        treeStale = false;
+        drawFolders();
+      }
+    }
     if (items.some((b, i) => b !== before[i]) || !same) draw();
   }
+
+  // When the name field closes after a refresh was held back, the tree catches up.
+  side.addEventListener("focusout", () => {
+    setTimeout(() => {
+      if (!left && treeStale && !nameFieldOpen()) {
+        treeStale = false;
+        drawFolders();
+      }
+    }, 0);
+  });
 
   /** The owner's folder work: runs `work`, says why it failed, and reads the folders again. */
   async function folderWork(
@@ -399,9 +426,13 @@ export function renderBookmarks(
   /** Takes back the last move or delete, then puts the link where it belongs in the list. */
   function undo(): void {
     dismissUndo = null;
+    if (stepRunning) return;
+    stepRunning = true;
+    draw();
     deps
       .undoLast()
       .then((b) => {
+        stepRunning = false;
         if (left) return;
         items = restore(items, b);
         draw();
@@ -409,38 +440,44 @@ export function renderBookmarks(
         toasts.show("Undone.");
       })
       .catch((error: unknown) => {
-        if (!left) toasts.show(`Mnemo could not undo. ${errorMessage(error)}`);
+        stepRunning = false;
+        if (left) return;
+        draw();
+        toasts.show(`Mnemo could not undo. ${errorMessage(error)}`);
       });
   }
 
   /** Moves a link to `folder` (the owner's choice from the card's menu). */
   function move(b: SavedBookmark, folder: Folder): void {
-    if (changing.has(b.id)) return;
-    changing.add(b.id);
+    if (stepRunning) return;
+    stepRunning = true;
+    draw();
     deps
       .moveBookmark(b.id, folder.id)
       .then((moved) => {
-        changing.delete(b.id);
+        stepRunning = false;
         if (left) return;
         put(moved);
         void refreshFolders();
         offerUndo(`Moved to ${folder.name}.`);
       })
       .catch((error: unknown) => {
-        changing.delete(b.id);
+        stepRunning = false;
         if (left) return;
+        draw();
         toasts.show(`Mnemo could not move the link. ${errorMessage(error)}`);
       });
   }
 
   /** Deletes a link with no confirm dialog: the toast offers Undo. */
   function remove(b: SavedBookmark): void {
-    if (changing.has(b.id)) return;
-    changing.add(b.id);
+    if (stepRunning) return;
+    stepRunning = true;
+    draw();
     deps
       .deleteSavedBookmark(b.id)
       .then(() => {
-        changing.delete(b.id);
+        stepRunning = false;
         if (left) return;
         items = items.filter((x) => x.id !== b.id);
         draw();
@@ -448,8 +485,9 @@ export function renderBookmarks(
         offerUndo("Link deleted.");
       })
       .catch((error: unknown) => {
-        changing.delete(b.id);
+        stepRunning = false;
         if (left) return;
+        draw();
         toasts.show(`Mnemo could not delete the link. ${errorMessage(error)}`);
       });
   }
@@ -477,7 +515,7 @@ export function renderBookmarks(
       label: "Delete",
       size: "sm",
       variant: "ghost",
-      busy: changing.has(b.id),
+      busy: stepRunning,
       onClick: () => remove(b),
     });
     del.setAttribute("aria-label", `Delete: ${name}`);

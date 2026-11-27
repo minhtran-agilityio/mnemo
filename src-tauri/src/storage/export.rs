@@ -35,6 +35,7 @@ pub struct ExportCounts {
     pub runs: u64,
     pub memories: u64,
     pub labels: u64,
+    pub folders: u64,
     pub links: u64,
     pub files: u64,
 }
@@ -315,6 +316,14 @@ impl Storage {
                 next: None,
             })
         })?;
+        // The folders of the bookmarks (#26), Unsorted included. A bookmark names its folder.
+        let folders = self.list_folders()?;
+        c.folders = write_array(&json("folders"), |_| {
+            Ok(Page {
+                items: folders.clone(),
+                next: None,
+            })
+        })?;
         c.links = write_array(&json("links"), |a| self.page_links(&page_of(a)))?;
         c.files = write_array(&json("files"), |a| self.page_files(&page_of(a)))?;
         let (copies, missing) = self.plan_file_copies(&dir.join(FILES_DIR))?;
@@ -537,6 +546,7 @@ pub(crate) mod tests {
                 .add_idea(&IdeaInput::titled(&format!("Idea {i}")))
                 .unwrap();
             let label = s.create_label(None, &format!("Label {i}")).unwrap();
+            s.create_folder(&format!("Folder {i}")).unwrap();
             let f = s
                 .save_file(&format!("f{i}.txt"), format!("blob {i}").as_bytes())
                 .unwrap();
@@ -661,6 +671,7 @@ pub(crate) mod tests {
             ("runs", "run", sum.counts.runs),
             ("memories", "memory", sum.counts.memories),
             ("labels", "label", sum.counts.labels),
+            ("folders", "folder", sum.counts.folders),
             ("links", "item_link", sum.counts.links),
             ("files", "file", sum.counts.files),
         ];
